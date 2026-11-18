@@ -32,12 +32,12 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
 export function Login() {
   const { go } = useRouter();
   const [show, setShow] = useState(false);
-  const [email, setEmail] = useState('gerencia@terravivasas.com');
+  const [email, setEmail] = useState('TERRAVIVA');
   const [pass, setPass] = useState('demo2026');
   const [err, setErr] = useState('');
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!email.includes('@')) return setErr('Escriba su correo empresarial completo, por ejemplo nombre@terravivasas.com.');
+    if (email.trim().length < 3) return setErr('Escriba su usuario empresarial.');
     if (pass.length < 6) return setErr('La contraseña debe tener al menos 6 caracteres.');
     go('inicio');
   };
@@ -45,9 +45,9 @@ export function Login() {
     <AuthLayout>
       <Logo className="h-12" />
       <h2 className="mt-8 text-2xl font-bold text-brand-strong">Ingresar</h2>
-      <p className="mt-1 text-muted">Use su usuario empresarial. Los conductores entran a la vista de campo.</p>
+      <p className="mt-1 text-muted">Use su usuario empresarial. Los conductores entran desde la app de campo.</p>
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
-        <Field label="Correo empresarial" id="login-email"><Input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="Usuario empresarial" id="login-email"><Input id="login-email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="Contraseña" id="login-pass">
           <div className="relative">
             <Input id="login-pass" type={show ? 'text' : 'password'} autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} className="pr-11" />

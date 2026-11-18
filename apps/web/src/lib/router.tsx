@@ -2,18 +2,18 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 // Enrutamiento por hash plano (#inicio, #solicitudes…). Funciona en hosting estático
 // y dentro del prototipo publicado. En producción puede migrarse a React Router sin tocar páginas.
-export type RouteName =
-  | 'login' | 'recuperar' | 'inicio'
-  | 'decl-residuos' | 'decl-servicios' | 'precios'
-  | 'solicitudes' | 'rutas'
-  | 'preoperacionales' | 'manifiestos' | 'actas'
-  | 'informes'
-  | 'config-clientes' | 'config-vehiculos' | 'config-usuarios' | 'config-catalogos' | 'config-permisos'
-  | 'campo' | 'campo-preop' | 'campo-parada';
-
-const VALID = new Set<string>(['login', 'recuperar', 'inicio', 'decl-residuos', 'decl-servicios', 'precios', 'solicitudes', 'rutas',
-  'preoperacionales', 'manifiestos', 'actas', 'informes', 'config-clientes', 'config-vehiculos', 'config-usuarios',
-  'config-catalogos', 'config-permisos', 'campo', 'campo-preop', 'campo-parada']);
+export const ROUTES = [
+  'login', 'recuperar', 'inicio',
+  'declaraciones', 'precios', 'cargues', 'exportable',
+  'solicitudes', 'pre-solicitudes',
+  'rutas', 'rastreo', 'informe-rutas', 'estados-recorrido',
+  'chequeo', 'manifiestos', 'conciliaciones', 'actas', 'inventario',
+  'informes', 'indicadores',
+  'configuracion', 'config-clientes', 'config-vehiculos', 'config-usuarios', 'config-catalogos', 'config-permisos', 'config-datos',
+  'campo', 'campo-preop', 'campo-parada',
+] as const;
+export type RouteName = (typeof ROUTES)[number];
+const VALID = new Set<string>(ROUTES);
 
 const read = (): RouteName => { const h = location.hash.replace('#', ''); return (VALID.has(h) ? h : 'login') as RouteName; };
 

@@ -32,7 +32,7 @@ La plataforma vive completa detrás de un inicio de sesión, así que no necesit
 
 ## 3. Base de datos
 
-- `packages/db/prisma/schema.prisma`: 31 tablas y 14 enums. Validado con `prisma validate` y aplicado
+- `packages/db/prisma/schema.prisma`: 32 tablas y 14 enums. Validado con `prisma validate` y aplicado
   sobre PostgreSQL 16 sin errores.
 - `packages/db/prisma/schema.sql`: DDL generado.
 - `packages/db/prisma/reglas_negocio.sql`: reglas que la base de datos hace cumplir:
@@ -72,7 +72,18 @@ pages/
   Campo.tsx        PWA del conductor: mi ruta, preoperacional con firma, atención de parada
 ```
 
-## 5. Estrategia mobile-first
+## 5. Cargues masivos (Excel)
+
+- `apps/web/src/cargues/definiciones.ts`: **fuente única** de las 8 plantillas (columnas, listas, reglas). La usan el
+  navegador, el script que genera los `.xlsx` y, en fase 1, el API para revalidar en servidor.
+- `apps/web/src/cargues/excel.ts`: genera la plantilla (hoja Plantilla con desplegables, hoja Instrucciones, hoja Listas
+  oculta) y lee el archivo diligenciado (ExcelJS, carga diferida).
+- Validación: obligatorios, tipos, listas, NIT + dígito de verificación DIAN, corrientes Y/A, placas, duplicados en el
+  archivo, cruce con clientes/sucursales/declaraciones existentes y advertencia si el manejo no está cubierto por un permiso.
+- Tabla `cargues_masivos` guarda cada cargue (archivo, filas OK/error, errores, usuario) para auditoría.
+- Plantillas listas en `docs/plantillas/` (`npm run plantillas` las regenera).
+
+## 6. Estrategia mobile-first
 
 1. Cada columna declara `priority`. En < 768 px la tabla se vuelve tarjetas con título, estado y solo
    columnas de prioridad 1–2; el resto aparece en la hoja de detalle.
@@ -83,7 +94,7 @@ pages/
 5. Sin conexión (siguiente fase): Service Worker + IndexedDB; la ruta del día se descarga al iniciar turno
    y los registros se sincronizan al recuperar señal (el indicador «Sin señal · 2 en cola» ya está maquetado).
 
-## 6. Fases
+## 7. Fases
 
 | Fase | Alcance | Resultado de negocio |
 |---|---|---|

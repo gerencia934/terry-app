@@ -724,3 +724,23 @@ model Auditoria {
   @@index([entidad, entidadId])
   @@map("auditoria")
 }
+
+// ---------------------------------------------------------------------
+// CARGUES MASIVOS (plantillas de Excel)
+// ---------------------------------------------------------------------
+model CargueMasivo {
+  id          String   @id @default(uuid()) @db.Uuid
+  empresaId   String   @map("empresa_id") @db.Uuid
+  plantilla   String   @db.VarChar(40)   // clientes | sucursales | decl-residuos | decl-servicios | precios | vehiculos | usuarios | solicitudes
+  archivo     String   @db.VarChar(200)
+  archivoUrl  String?  @map("archivo_url")  // copia del Excel original (S3) para auditoría
+  filasLeidas Int      @map("filas_leidas")
+  filasOk     Int      @map("filas_ok")
+  filasError  Int      @map("filas_error")
+  errores     Json     @default("[]")     // [{fila, mensajes[]}]
+  usuarioId   String   @map("usuario_id") @db.Uuid
+  creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  @@index([empresaId, creadoEn])
+  @@map("cargues_masivos")
+}

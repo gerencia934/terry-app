@@ -8,7 +8,7 @@ export default {
         bg: t('bg'), surface: t('surface'), 'surface-2': t('surface-2'), line: t('line'),
         fg: t('fg'), muted: t('muted'), subtle: t('subtle'),
         brand: { DEFAULT: t('brand'), strong: t('brand-strong'), soft: t('brand-soft'), ink: t('brand-ink'), lime: t('brand-lime') },
-        ok: t('ok'), warn: t('warn'), bad: t('bad'), info: t('info'),
+        nav: t('nav'), accent: t('accent'), ok: t('ok'), warn: t('warn'), bad: t('bad'), info: t('info'),
       },
       fontFamily: {
         display: ['Poppins', 'ui-sans-serif', 'system-ui', 'sans-serif'],

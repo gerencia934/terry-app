@@ -1,16 +1,79 @@
 import { useState } from 'react';
-import { Plus, ShieldCheck, FileText, CalendarClock, Check, Minus } from 'lucide-react';
+import {
+  Plus, ShieldCheck, FileText, CalendarClock, Check, Minus, Search, Settings, Users, Building, UserCog, Car, Shield, Store, Scale, AlertTriangle,
+  Package, Archive, FileCog, ListChecks, Truck, MapPin, Cog, Briefcase, Flag, FileSignature, Network, Warehouse, Recycle, Upload, Tags, Save,
+} from 'lucide-react';
 import { ResponsiveTable, type Column } from '../components/data';
 import { Badge, Button, Card, ColorBadge, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
+import { useRouter, type RouteName } from '../lib/router';
 import { CATALOGO, CLIENTES, ELEMENTOS_CHEQUEO, EMPRESA, HOY, LINEAS, MANEJOS, PERMISOS, PERSONAS, VEHICULOS, ZONAS, zona, type Cliente, type Persona, type Vehiculo } from '../data/mock';
 import { cx, diasEntre, fmtFecha } from '../lib/format';
 import { negLabel } from './Declaraciones';
+
+let catalogoInicial = 'residuos';
+let cargueInicial = 'clientes';
+export const abrirCargue = (id: string) => { cargueInicial = id; };
+export const tomarCargueInicial = () => cargueInicial;
 
 const Vence = ({ f }: { f?: string }) => {
   if (!f) return <span className="text-subtle">—</span>;
   const d = diasEntre(HOY, f);
   return <span className="flex flex-col"><span className="num whitespace-nowrap">{fmtFecha(f)}</span>{d <= 45 && <span className={cx('text-[11px] font-medium', d <= 15 ? 'text-bad' : 'text-warn')}>vence en {d} días</span>}</span>;
 };
+
+// ---------------- Índice «Configuraciones del sistema» ----------------
+type Opcion = [string, typeof Settings, RouteName, string?];
+const OPCIONES: Opcion[] = [
+  ['Mis datos / Configuraciones', Settings, 'config-datos'], ['Mis clientes', Users, 'config-clientes'], ['Mis proveedores / destinos', Building, 'config-catalogos', 'proveedores'],
+  ['Mis usuarios', UserCog, 'config-usuarios'], ['Mis vehículos', Car, 'config-vehiculos'], ['Roles / Permisos', Shield, 'config-usuarios'], ['Sucursales', Store, 'config-clientes'],
+  ['Permisos ambientales', ShieldCheck, 'config-permisos'], ['Métricas', Scale, 'config-catalogos', 'metricas'], ['Riesgos', AlertTriangle, 'config-catalogos', 'riesgos'],
+  ['Disposición / Manejo', Package, 'config-catalogos', 'manejos'], ['Tipo de embalajes', Archive, 'config-catalogos', 'embalajes'], ['Especificaciones adicionales', FileCog, 'config-catalogos', 'especificaciones'],
+  ['Elementos de chequeo', ListChecks, 'config-catalogos', 'chequeo'], ['Tipo de vehículos', Truck, 'config-catalogos', 'tipoVehiculos'], ['Zonas', MapPin, 'config-catalogos', 'zonas'],
+  ['Líneas de servicio', Cog, 'config-catalogos', 'lineas'], ['Unidades de negocio', Briefcase, 'config-catalogos', 'unidades'], ['Estados del recorrido', Flag, 'estados-recorrido'],
+  ['Mis formatos de actas', FileSignature, 'config-catalogos', 'formatos'], ['Grupos / subgrupos', Network, 'config-catalogos', 'grupos'], ['Bodegas', Warehouse, 'config-catalogos', 'bodegas'],
+  ['Catálogo de residuos inventariables', Recycle, 'config-catalogos', 'residuos'], ['Causales de cancelación', Tags, 'config-catalogos', 'causales'], ['Clasificación interna', Tags, 'config-catalogos', 'clasificacion'],
+  ['Campos personalizados', FileCog, 'config-catalogos', 'campos'], ['Cargues masivos de gestores', Upload, 'cargues', 'cargue:clientes'], ['Cargues masivos de clientes directos', Upload, 'cargues', 'cargue:clientes'],
+];
+export function ConfigIndex() {
+  const { go } = useRouter();
+  const [q, setQ] = useState('');
+  const rows = OPCIONES.filter(([l]) => l.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <>
+      <PageHeader eyebrow="Configuración" title="Configuraciones del sistema" subtitle="Entidades base y catálogos operativos." />
+      <div className="relative mb-3"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" /><Input id="cfg-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar…" className="pl-9" /></div>
+      <ul className="grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-2 xl:grid-cols-3">
+        {rows.map(([l, I, r, sub]) => (
+          <li key={l} className="bg-surface"><button onClick={() => { if (sub?.startsWith('cargue:')) cargueInicial = sub.slice(7); else if (sub) catalogoInicial = sub; go(r); }} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[14px] hover:bg-brand-soft/50"><I size={17} className="text-brand" />{l}</button></li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+export function MisDatos() {
+  const toast = useToast();
+  return (
+    <>
+      <PageHeader eyebrow="Configuración" title="Mis datos" subtitle="Información de la empresa que aparece en manifiestos, actas, certificados y correos." />
+      <Card>
+        <form className="grid gap-4 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); toast('Datos de la empresa guardados.'); }}>
+          <Field label="Razón social" id="md-rs"><Input id="md-rs" defaultValue="TERRA VIVA S.A.S. E.S.P." /></Field>
+          <Field label="NIT" id="md-nit"><Input id="md-nit" defaultValue="901089780-8" /></Field>
+          <Field label="Dirección planta" id="md-dir"><Input id="md-dir" defaultValue="Parque de Saneamiento Ambiental Los Pinos – Vereda Villa de Leyva, Sabana de Torres" /></Field>
+          <Field label="Oficina principal" id="md-of"><Input id="md-of" defaultValue={EMPRESA.oficina} /></Field>
+          <Field label="Teléfonos" id="md-tel"><Input id="md-tel" defaultValue={EMPRESA.telefonos.join(' - ')} /></Field>
+          <Field label="Email logística" id="md-el"><Input id="md-el" type="email" defaultValue="operaciones@terravivasas.com" /></Field>
+          <Field label="Email técnico" id="md-et"><Input id="md-et" type="email" defaultValue="contacto@terravivasas.com" /></Field>
+          <Field label="Email comercial" id="md-ec"><Input id="md-ec" type="email" defaultValue="gerenciaregional@terravivasas.com" /></Field>
+          <Field label="Métrica principal de indicadores" id="md-met"><Select id="md-met" defaultValue="t"><option value="t">Toneladas</option><option value="kg">Kilogramos</option><option value="m3">Metros cúbicos</option></Select></Field>
+          <Field label="Tolerancia de conciliación (%)" id="md-tol" hint="Diferencia origen/báscula a partir de la cual se exige justificación."><Input id="md-tol" inputMode="decimal" defaultValue="2" /></Field>
+          <div className="md:col-span-2 flex justify-end"><Button variant="primary" type="submit"><Save size={16} /> Guardar</Button></div>
+        </form>
+      </Card>
+    </>
+  );
+}
 
 export function Permisos() {
   const toast = useToast();
@@ -24,17 +87,15 @@ export function Permisos() {
           return (
             <Card key={p.id}>
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <span className="rounded-xl bg-brand-soft p-2.5 text-brand-ink"><ShieldCheck size={20} /></span>
-                  <div><p className="font-display text-[16px] font-semibold">{p.acto}</p><p className="text-[13px] text-muted">Corporación Autónoma de Santander ({p.autoridad})</p></div>
-                </div>
+                <div className="flex items-start gap-3"><span className="rounded-xl bg-brand-soft p-2.5 text-brand-ink"><ShieldCheck size={20} /></span>
+                  <div><p className="font-display text-[16px] font-semibold">{p.acto}</p><p className="text-[13px] text-muted">Corporación Autónoma de Santander ({p.autoridad})</p></div></div>
                 <Badge tone="ok" dot>Vigente</Badge>
               </div>
               <p className="mt-3 text-[14px]">{p.alcance}</p>
               <div className="mt-3 flex flex-wrap gap-1.5">{p.manejos.map((m) => <Badge key={m} tone="brand">{MANEJOS.find((x) => x.codigo === m)?.nombre ?? 'Transporte RESPEL'}</Badge>)}</div>
               <div className={cx('mt-4 flex items-start gap-3 rounded-lg p-3 text-[13px]', d <= 15 ? 'bg-bad/10' : d <= 30 ? 'bg-warn/10' : 'bg-surface-2')}>
                 <CalendarClock size={17} className={cx('mt-px shrink-0', d <= 15 ? 'text-bad' : d <= 30 ? 'text-warn' : 'text-muted')} />
-                <div className="min-w-0 flex-1"><p className="font-medium">{p.proximaObligacion.descripcion}</p><p className="text-muted">{fmtFecha(p.proximaObligacion.fecha)} · faltan {d} días</p></div>
+                <div className="min-w-0 flex-1"><p className="font-medium">{p.proximaObligacion.descripcion}</p><p className="text-muted">{fmtFecha(p.proximaObligacion.fecha)} · faltan {d} días <span className="text-subtle">(fecha de ejemplo)</span></p></div>
               </div>
               <div className="mt-3 flex gap-2"><Button size="sm" onClick={() => toast(`Abriendo ${p.acto} (PDF).`, 'info')}><FileText size={14} /> Ver acto</Button><Button size="sm" variant="ghost" onClick={() => toast('Obligación marcada como cumplida; se programó la siguiente fecha.')}><Check size={14} /> Marcar cumplida</Button></div>
             </Card>
@@ -50,6 +111,7 @@ export function Permisos() {
 }
 
 export function Clientes() {
+  const { go } = useRouter();
   const [sel, setSel] = useState<Cliente | null>(null);
   const cols: Column<Cliente>[] = [
     { key: 'nit', header: 'NIT', render: (c) => <span className="num whitespace-nowrap">{c.nit}</span>, priority: 2 },
@@ -62,7 +124,8 @@ export function Clientes() {
   ];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Clientes y sucursales" subtitle="Generadores atendidos, sus sucursales georreferenciadas y condiciones comerciales." actions={<Button variant="primary"><Plus size={16} /> Nuevo cliente</Button>} />
+      <PageHeader eyebrow="Configuración" title="Mis clientes y sucursales" subtitle="Generadores atendidos, sus sucursales y condiciones comerciales."
+        actions={<><Button onClick={() => { cargueInicial = 'clientes'; go('cargues'); }}><Upload size={16} /> Cargue masivo</Button><Button variant="primary"><Plus size={16} /> Nuevo cliente</Button></>} />
       <ResponsiveTable rows={CLIENTES} columns={cols} rowKey={(c) => c.id} onRowClick={setSel} cardTitle={(c) => c.razonSocial} cardBadge={(c) => <Badge>{c.sucursales.length} suc.</Badge>} />
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel?.razonSocial ?? ''}>
         {sel && <div className="flex flex-col gap-3">{sel.sucursales.map((s) => (
@@ -73,8 +136,10 @@ export function Clientes() {
 }
 
 export function Vehiculos() {
+  const { go } = useRouter();
   const cols: Column<Vehiculo>[] = [
-    { key: 'placa', header: 'Placa', render: (v) => <span className="num rounded-md bg-surface-2 px-2 py-0.5 font-semibold">{v.placa}</span>, priority: 3 },
+    { key: 'placa', header: 'Placa', render: (v) => <ColorBadge color={v.color}>{v.placa}</ColorBadge>, priority: 3 },
+    { key: 'marca', header: 'Marca', render: (v) => v.marca, priority: 2 },
     { key: 'tipo', header: 'Tipo', render: (v) => v.tipo, priority: 3 },
     { key: 'cap', header: 'Capacidad', render: (v) => v.capacidad, priority: 2 },
     { key: 'soat', header: 'SOAT', render: (v) => <Vence f={v.soat} />, priority: 1 },
@@ -83,18 +148,21 @@ export function Vehiculos() {
   ];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Vehículos" subtitle="Flota especializada con control de vencimientos. El sistema avisa 30 días antes y bloquea la programación si un documento vence." actions={<Button variant="primary"><Plus size={16} /> Nuevo vehículo</Button>} />
-      <ResponsiveTable rows={VEHICULOS} columns={cols} rowKey={(v) => v.id} cardTitle={(v) => <span className="num">{v.placa}</span>} cardMeta={(v) => v.tipo} />
+      <PageHeader eyebrow="Configuración" title="Mis vehículos" subtitle="Flota con su color en el calendario de rutas y control de vencimientos. El sistema avisa 30 días antes."
+        actions={<><Button onClick={() => { cargueInicial = 'vehiculos'; go('cargues'); }}><Upload size={16} /> Cargue masivo</Button><Button variant="primary"><Plus size={16} /> Nuevo vehículo</Button></>} />
+      <ResponsiveTable rows={VEHICULOS} columns={cols} rowKey={(v) => v.id} cardTitle={(v) => <span className="num">{v.placa} · {v.marca}</span>} cardMeta={(v) => v.tipo} />
+      <p className="mt-3 text-[12px] text-muted">Placas y marcas de su flota según las capturas de Grinclic. Tipo, capacidad y fechas de vencimiento son de demostración.</p>
     </>
   );
 }
 
-const PERMISOS_MATRIZ = [
-  ['Declaraciones: autorizar', [0, 1, 0, 0, 1]], ['Precios: asignar', [0, 0, 0, 1, 1]], ['Rutas: programar', [1, 0, 0, 0, 1]],
-  ['Preoperacional: diligenciar', [0, 0, 1, 0, 0]], ['Manifiestos: emitir', [1, 1, 1, 0, 1]], ['Conciliación: justificar', [0, 1, 0, 0, 1]],
-  ['Informes: ver facturación', [0, 0, 0, 1, 1]], ['Configuración: editar', [0, 1, 0, 0, 1]],
+const MATRIZ = [
+  ['Declaraciones: autorizar', [0, 1, 0, 0, 1]], ['Precios: asignar', [0, 0, 0, 1, 1]], ['Cargues masivos', [1, 0, 0, 0, 1]], ['Rutas: programar', [1, 0, 0, 0, 1]],
+  ['Chequeo: diligenciar', [0, 0, 1, 0, 0]], ['Manifiestos: emitir', [1, 1, 1, 0, 1]], ['Conciliación: justificar', [0, 1, 0, 0, 1]],
+  ['Reportes: ver facturación', [0, 0, 0, 1, 1]], ['Configuración: editar', [0, 1, 0, 0, 1]],
 ] as const;
 export function Usuarios() {
+  const { go } = useRouter();
   const cols: Column<Persona>[] = [
     { key: 'n', header: 'Nombre', render: (p) => <span className="font-medium">{p.nombre}</span>, priority: 3 },
     { key: 'r', header: 'Rol', render: (p) => <Badge tone={p.rol === 'Conductor' ? 'info' : p.rol === 'Gerencia' ? 'brand' : 'neutral'}>{p.rol}</Badge>, priority: 3 },
@@ -104,17 +172,14 @@ export function Usuarios() {
   ];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Usuarios y roles" subtitle="Personal con acceso a la plataforma, documentos del conductor y permisos por rol." actions={<Button variant="primary"><Plus size={16} /> Invitar usuario</Button>} />
+      <PageHeader eyebrow="Configuración" title="Usuarios y roles" subtitle="Personal con acceso, documentos del conductor y permisos por rol."
+        actions={<><Button onClick={() => { cargueInicial = 'usuarios'; go('cargues'); }}><Upload size={16} /> Cargue masivo</Button><Button variant="primary"><Plus size={16} /> Invitar usuario</Button></>} />
       <ResponsiveTable rows={PERSONAS} columns={cols} rowKey={(p) => p.id} cardTitle={(p) => p.nombre} cardBadge={(p) => <Badge>{p.rol}</Badge>} />
       <Card title="Matriz de permisos por rol" className="mt-5" pad={false}>
-        <div className="scroll-x">
-          <table className="w-full min-w-[640px] text-[13px]">
-            <thead className="bg-surface-2 text-left text-[12px] uppercase tracking-[0.04em] text-muted"><tr><th className="px-4 py-2.5">Permiso</th>{['Logística', 'HSEQ', 'Conductor', 'Facturación', 'Gerencia'].map((r) => <th key={r} className="px-3 py-2.5 text-center">{r}</th>)}</tr></thead>
-            <tbody>{PERMISOS_MATRIZ.map(([p, v]) => (
-              <tr key={p} className="border-t border-line"><td className="px-4 py-2.5">{p}</td>{v.map((x, i) => <td key={i} className="px-3 py-2.5 text-center">{x ? <Check size={16} className="inline text-ok" aria-label="Sí" /> : <Minus size={16} className="inline text-subtle" aria-label="No" />}</td>)}</tr>))}
-            </tbody>
-          </table>
-        </div>
+        <div className="scroll-x"><table className="w-full min-w-[640px] text-[13px]">
+          <thead className="bg-surface-2 text-left text-[12px] uppercase tracking-[0.04em] text-muted"><tr><th className="px-4 py-2.5">Permiso</th>{['Logística', 'HSEQ', 'Conductor', 'Facturación', 'Gerencia'].map((r) => <th key={r} className="px-3 py-2.5 text-center">{r}</th>)}</tr></thead>
+          <tbody>{MATRIZ.map(([p, v]) => (<tr key={p} className="border-t border-line"><td className="px-4 py-2.5">{p}</td>{v.map((x, i) => <td key={i} className="px-3 py-2.5 text-center">{x ? <Check size={16} className="inline text-ok" aria-label="Sí" /> : <Minus size={16} className="inline text-subtle" aria-label="No" />}</td>)}</tr>))}</tbody>
+        </table></div>
       </Card>
     </>
   );
@@ -122,29 +187,39 @@ export function Usuarios() {
 
 // ------------- Catálogos operativos: un solo componente para todos -------------
 type Row = { codigo: string; nombre: string; detalle: string; color?: string };
+const simple = (titulo: string, nombres: string[], pref: string, detalle = ''): { titulo: string; filas: Row[] } => ({ titulo, filas: nombres.map((n, i) => ({ codigo: `${pref}-${i + 1}`, nombre: n, detalle })) });
 const CATALOGOS: Record<string, { titulo: string; filas: Row[] }> = {
   residuos: { titulo: 'Catálogo de residuos y servicios', filas: CATALOGO.map((c) => ({ codigo: c.codigo, nombre: c.nombre, detalle: `${c.tipo === 'RESIDUO' ? 'Residuo' : 'Servicio'} · ${c.linea}${c.corriente ? ' · ' + c.corriente : ''}` })) },
-  manejos: { titulo: 'Tipos de disposición / manejo', filas: MANEJOS.map((m) => ({ codigo: m.codigo, nombre: m.nombre, detalle: m.propio ? 'PSA Los Pinos (propio)' : 'Gestor aliado' })) },
+  proveedores: { titulo: 'Proveedores / destinos', filas: [{ codigo: 'D-1', nombre: 'TERRA VIVA SAS ESP · PSA Los Pinos', detalle: 'Destino propio · Res. 0632-2023 y 0235-2024' }, { codigo: 'D-2', nombre: 'Gestor aliado · incineración', detalle: 'Exigir licencia vigente' }, { codigo: 'D-3', nombre: 'Gestor aliado · RAEE y celda de seguridad', detalle: 'Exigir licencia vigente' }] },
+  manejos: { titulo: 'Disposición / manejo', filas: MANEJOS.map((m) => ({ codigo: m.codigo, nombre: m.nombre, detalle: m.propio ? 'PSA Los Pinos (propio)' : 'Gestor aliado' })) },
   lineas: { titulo: 'Líneas de servicio', filas: LINEAS.map((l, i) => ({ codigo: `LS-${String(i + 1).padStart(2, '0')}`, nombre: l, detalle: 'Portafolio 2026' })) },
+  unidades: simple('Unidades de negocio', ['Gestión de residuos', 'Tratamiento de aguas', 'Servicios ambientales', 'Saneamiento básico'], 'UN'),
   zonas: { titulo: 'Zonas', filas: ZONAS.map((z) => ({ codigo: z.id.toUpperCase(), nombre: z.nombre, detalle: 'Polígono PostGIS', color: z.color })) },
-  embalajes: { titulo: 'Tipos de embalaje', filas: ['Caneca 55 gal', 'Big bag 1 m³', 'Bolsa roja calibre 2', 'Guardián rígido', 'Bidón 20 L', 'Estiba plastificada', 'Carrotanque', 'Volqueta carpada'].map((n, i) => ({ codigo: `EM-${i + 1}`, nombre: n, detalle: '' })) },
-  chequeo: { titulo: 'Elementos de chequeo preoperacional', filas: ELEMENTOS_CHEQUEO.flatMap((g) => g.items.map(([n, c], i) => ({ codigo: `${g.grupo.slice(0, 3).toUpperCase()}-${i + 1}`, nombre: n, detalle: `${g.grupo}${c ? ' · crítico' : ''}` }))) },
-  causales: { titulo: 'Causales de cancelación y rechazo', filas: ['Cliente no disponible en sitio', 'Vehículo no apto (preoperacional)', 'Residuo sin embalar o sin rotular', 'Clima o vía cerrada', 'Ficha de seguridad incompleta', 'Cliente cambió de operador'].map((n, i) => ({ codigo: `CA-${i + 1}`, nombre: n, detalle: '' })) },
+  embalajes: simple('Tipos de embalaje', ['Caneca 55 gal', 'Big bag 1 m³', 'Bolsa roja calibre 2', 'Guardián rígido', 'Bidón 20 L', 'Estiba plastificada', 'Carrotanque', 'Volqueta carpada'], 'EM'),
+  chequeo: { titulo: 'Elementos de chequeo', filas: ELEMENTOS_CHEQUEO.flatMap((g) => g.items.map(([n, c], i) => ({ codigo: `${g.grupo.slice(0, 3).toUpperCase()}-${i + 1}`, nombre: n, detalle: `${g.grupo}${c ? ' · crítico' : ''}` }))) },
+  tipoVehiculos: simple('Tipo de vehículos', ['Furgón', 'Furgón RESPEL', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta'], 'TV'),
+  causales: simple('Causales de cancelación', ['Cliente no disponible en sitio', 'No alcanzó la ruta', 'Vehículo no apto (preoperacional)', 'Residuo sin embalar o sin rotular', 'Clima o vía cerrada', 'Ficha de seguridad incompleta'], 'CA'),
   riesgos: { titulo: 'Riesgos (CRETIB)', filas: [['C', 'Corrosivo'], ['R', 'Reactivo'], ['E', 'Explosivo'], ['T', 'Tóxico'], ['I', 'Inflamable'], ['B', 'Biológico-infeccioso']].map(([c, n]) => ({ codigo: c, nombre: n, detalle: 'Decreto 1076 de 2015' })) },
+  metricas: simple('Métricas', ['Toneladas', 'Kilogramos', 'Metros cúbicos', 'Galones', 'Unidades'], 'MT'),
+  especificaciones: simple('Especificaciones adicionales', ['Requiere certificado de destrucción', 'Requiere cadena de custodia', 'Requiere toma de muestra'], 'EA'),
+  formatos: simple('Mis formatos de actas', ['Acta de disposición final', 'Certificado de aprovechamiento', 'Acta de conciliación', 'Certificado de tratamiento de aguas'], 'FA'),
+  grupos: simple('Grupos / subgrupos', ['Hidrocarburos', 'Agroindustria', 'Salud', 'Construcción', 'Comercio y servicios'], 'GR'),
+  bodegas: simple('Bodegas', ['PSA Los Pinos · Celda temporal RESPEL', 'PSA Los Pinos · Acopio aprovechables', 'PSA Los Pinos · Tanque ACU', 'Bodega Bucaramanga · RAEE'], 'BO'),
+  clasificacion: simple('Clasificación interna', ['A · Estratégico', 'B · Recurrente', 'C · Eventual'], 'CL'),
   campos: { titulo: 'Campos personalizados', filas: [{ codigo: 'CP-1', nombre: 'Orden de compra del cliente', detalle: 'Solicitud · texto' }, { codigo: 'CP-2', nombre: 'Centro de costos', detalle: 'Cliente · lista' }] },
 };
 export function Catalogos() {
   const toast = useToast();
-  const [cat, setCat] = useState('residuos');
+  const [cat, setCat] = useState(() => (CATALOGOS[catalogoInicial] ? catalogoInicial : 'residuos'));
   const [nuevo, setNuevo] = useState(false);
   const c = CATALOGOS[cat];
   return (
     <>
       <PageHeader eyebrow="Configuración" title="Catálogos operativos" subtitle="Un único componente administra todos los catálogos: se agregan sin programar pantallas nuevas." actions={<Button variant="primary" onClick={() => setNuevo(true)}><Plus size={16} /> Agregar</Button>} />
-      <div className="grid gap-5 lg:grid-cols-[240px_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[250px_1fr]">
         <div className="lg:hidden"><Field label="Catálogo" id="cat-sel"><Select id="cat-sel" value={cat} onChange={(e) => setCat(e.target.value)}>{Object.entries(CATALOGOS).map(([k, v]) => <option key={k} value={k}>{v.titulo}</option>)}</Select></Field></div>
         <nav className="hidden flex-col gap-1 lg:flex">{Object.entries(CATALOGOS).map(([k, v]) => (
-          <button key={k} onClick={() => setCat(k)} className={cx('flex h-10 items-center justify-between rounded-lg px-3 text-left text-[13px]', cat === k ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-muted hover:bg-surface-2')}>
+          <button key={k} onClick={() => setCat(k)} className={cx('flex h-9 items-center justify-between rounded-lg px-3 text-left text-[13px]', cat === k ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-muted hover:bg-surface-2')}>
             <span className="truncate">{v.titulo}</span><span className="num text-[12px]">{v.filas.length}</span></button>))}
         </nav>
         <div className="min-w-0">
@@ -154,7 +229,7 @@ export function Catalogos() {
               { key: 'c', header: 'Código', render: (r) => <span className="num font-medium">{r.codigo}</span>, priority: 2 },
               { key: 'n', header: 'Nombre', render: (r) => r.color ? <ColorBadge color={r.color}>{r.nombre}</ColorBadge> : r.nombre, priority: 3 },
               { key: 'd', header: 'Detalle', render: (r) => <span className="text-muted">{r.detalle || '—'}</span>, priority: 3 },
-              { key: 'a', header: 'Activo', render: () => <Badge tone="ok">Activo</Badge>, priority: 3 },
+              { key: 'a', header: 'Estado', render: () => <Badge tone="ok">Activo</Badge>, priority: 3 },
             ]} />
         </div>
       </div>

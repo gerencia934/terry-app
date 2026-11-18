@@ -177,15 +177,18 @@ export const DECLARACIONES: Declaracion[] = [
 ];
 
 // ---------------- Flota y personal ----------------
-export interface Vehiculo { id: string; placa: string; tipo: string; capacidad: string; soat: string; rtm: string; polizaRc: string }
+export interface Vehiculo { id: string; placa: string; marca: string; tipo: string; capacidad: string; color: string; soat: string; rtm: string; polizaRc: string }
+// Placas y marcas de la flota real (capturas de Grinclic). Tipos, capacidades y vencimientos son de demostración.
 export const VEHICULOS: Vehiculo[] = [
-  { id: 'v1', placa: 'TVL214', tipo: 'Furgón RESPEL 3,5 t', capacidad: '3.500 kg', soat: '2027-03-02', rtm: '2027-02-11', polizaRc: '2027-01-20' },
-  { id: 'v2', placa: 'TVL238', tipo: 'Furgón hospitalario 2 t', capacidad: '2.000 kg', soat: '2026-11-29', rtm: '2027-05-18', polizaRc: '2027-01-20' },
-  { id: 'v3', placa: 'TVQ905', tipo: 'Carrotanque vactor 12 m³', capacidad: '12 m³', soat: '2027-06-30', rtm: '2026-12-08', polizaRc: '2027-01-20' },
-  { id: 'v4', placa: 'SXR512', tipo: 'Volqueta 14 m³ (RCD)', capacidad: '14 m³', soat: '2027-04-14', rtm: '2027-04-14', polizaRc: '2027-01-20' },
-  { id: 'v5', placa: 'WGN731', tipo: 'Camión estacas USP', capacidad: '5.000 kg', soat: '2027-08-09', rtm: '2027-07-21', polizaRc: '2027-01-20' },
+  { id: 'v1', placa: 'USD855', marca: 'Chevrolet', tipo: 'Furgón RESPEL', capacidad: '3.500 kg', color: '#D92D20', soat: '2027-03-02', rtm: '2027-02-11', polizaRc: '2027-01-20' },
+  { id: 'v2', placa: 'LPM482', marca: 'JMC', tipo: 'Furgón', capacidad: '2.000 kg', color: '#1E9BD7', soat: '2026-11-29', rtm: '2027-05-18', polizaRc: '2027-01-20' },
+  { id: 'v3', placa: 'MDF180', marca: 'Chevrolet', tipo: 'Carrotanque / vactor', capacidad: '12 m³', color: '#F2790F', soat: '2027-06-30', rtm: '2026-12-08', polizaRc: '2027-01-20' },
+  { id: 'v4', placa: 'DXY545', marca: 'Chevrolet', tipo: 'Volqueta', capacidad: '14 m³', color: '#1F8A3B', soat: '2027-04-14', rtm: '2027-04-14', polizaRc: '2027-01-20' },
+  { id: 'v5', placa: 'UPS485', marca: 'Chevrolet', tipo: 'Camión estacas', capacidad: '5.000 kg', color: '#7A3FD1', soat: '2027-08-09', rtm: '2027-07-21', polizaRc: '2027-01-20' },
+  { id: 'v6', placa: 'LPM490', marca: 'JMC', tipo: 'Furgón', capacidad: '2.000 kg', color: '#2F49C9', soat: '2027-05-11', rtm: '2027-05-11', polizaRc: '2027-01-20' },
 ];
 export const vehiculo = (id: string) => VEHICULOS.find((v) => v.id === id)!;
+export const vehLabel = (id: string) => { const v = vehiculo(id); return `${v.placa} ${v.marca.toUpperCase()}`; };
 
 export interface Persona { id: string; nombre: string; rol: 'Conductor' | 'Auxiliar' | 'Coordinador logístico' | 'Director HSEQ' | 'Facturación' | 'Gerencia'; licenciaVence?: string; cursoMp?: string; email: string }
 export const PERSONAS: Persona[] = [
@@ -204,11 +207,11 @@ export const persona = (id?: string) => PERSONAS.find((p) => p.id === id);
 
 // ---------------- Estados de recorrido (configurables) ----------------
 export const ESTADOS_RUTA = [
-  { id: 'e1', nombre: 'Programada', color: '#6B7A72', orden: 1 },
-  { id: 'e2', nombre: 'En tránsito', color: '#2A78D6', orden: 2 },
-  { id: 'e3', nombre: 'En planta', color: '#B06A00', orden: 3 },
-  { id: 'e4', nombre: 'Finalizado', color: '#15803D', orden: 4 },
-  { id: 'e5', nombre: 'Cancelada', color: '#BE2828', orden: 5 },
+  { id: 'e1', nombre: 'Programada', color: '#6B7A72', orden: 0, descripcion: 'Ruta creada, aún no inicia', rastreo: false },
+  { id: 'e2', nombre: 'En camino', color: '#E5B800', orden: 1, descripcion: 'Reporta ubicación geográfica continuamente durante el recorrido', rastreo: true },
+  { id: 'e3', nombre: 'En campo', color: '#1E9BD7', orden: 2, descripcion: 'Tripulación atendiendo al generador', rastreo: true },
+  { id: 'e4', nombre: 'Finalizado', color: '#1F8A3B', orden: 3, descripcion: 'Descargado en planta', rastreo: true },
+  { id: 'e5', nombre: 'Cancelado', color: '#D92D20', orden: 4, descripcion: 'Cancelado', rastreo: true },
 ];
 export const estadoRuta = (id: string) => ESTADOS_RUTA.find((e) => e.id === id)!;
 
@@ -348,4 +351,67 @@ export const DIST_MANEJO = [
 export const CAUSALES_CANCELACION = [
   { nombre: 'Cliente no disponible', valor: 9 }, { nombre: 'Vehículo no apto (preop.)', valor: 4 },
   { nombre: 'Residuo sin embalar', valor: 6 }, { nombre: 'Clima / vía cerrada', valor: 3 },
+];
+
+// ---------------- Extensiones modelo Grinclic ----------------
+/** Tipo de solicitud (Grinclic): carga directa, carga automática (por frecuencia) o descargue. */
+export type TipoSolicitud = 'Carga directa' | 'Carga automática' | 'Descargue';
+export const tipoSolicitud = (s: Solicitud): TipoSolicitud => {
+  const it = item(decl(s.items[0].declId).itemId);
+  if (it.linea === 'RCD' && s.numero % 2 === 0) return 'Descargue';
+  return s.numero % 3 === 0 ? 'Carga automática' : 'Carga directa';
+};
+export const jornada = (s: Solicitud) => (s.franja.startsWith('13') || s.franja.startsWith('14') ? 'PM' : 'AM');
+export const ordenCompra = (s: Solicitud) => (s.numero % 4 === 0 ? `OC-${4400 + (s.numero % 97)}` : '');
+export const estadoGrinclic = (s: Solicitud) =>
+  s.estado === 'CANCELADA' ? 'Descartada' : s.estado === 'PENDIENTE' ? (s.clase === 'PRE' ? 'No aprobado' : 'Pendiente') : 'Gestionado';
+
+/** Rutas adicionales del mes para el calendario (demostración, determinísticas). */
+const rnd = (seed: number) => { const x = Math.sin(seed * 9301 + 49297) * 233280; return x - Math.floor(x); };
+const HORAS = ['6a', '7a', '7:30a', '8a', '9a', '10a', '1p', '2p', '3p'];
+export const RUTAS_MES: Ruta[] = [...RUTAS];
+for (let d = 1; d <= 30; d++) {
+  const fecha = `2026-11-${String(d).padStart(2, '0')}`;
+  const n = 1 + Math.floor(rnd(d) * 4);
+  for (let k = 0; k < n; k++) {
+    const v = VEHICULOS[Math.floor(rnd(d * 7 + k) * VEHICULOS.length)];
+    if (RUTAS_MES.some((r) => r.fecha === fecha && r.vehiculoId === v.id)) continue;
+    const sol = SOLICITUDES[Math.floor(rnd(d * 13 + k) * SOLICITUDES.length)];
+    RUTAS_MES.push({
+      id: `g${d}-${k}`, codigo: `R-11${String(d).padStart(2, '0')}-${String.fromCharCode(68 + k)}`, fecha,
+      zona: ZONAS[Math.floor(rnd(d + k) * ZONAS.length)].id, vehiculoId: v.id,
+      conductorId: ['u1', 'u2', 'u3', 'u4'][Math.floor(rnd(d * 3 + k) * 4)], auxiliarId: ['u5', 'u6', 'u7'][Math.floor(rnd(d * 5 + k) * 3)],
+      estadoId: fecha < HOY ? (rnd(d + k * 11) > 0.93 ? 'e5' : 'e4') : fecha === HOY ? 'e2' : 'e1',
+      solicitudes: [sol.id], salida: HORAS[Math.floor(rnd(d * 17 + k) * HORAS.length)],
+    });
+  }
+}
+export const horaRuta = (r: Ruta) => r.salida ?? HORAS[Number(r.id.replace(/\D/g, '')) % HORAS.length];
+
+/** Datos del generador que pide Grinclic en la declaración (derivados del catálogo). */
+export const extraDecl = (d: Declaracion) => {
+  const it = item(d.itemId);
+  const pel = it.peligrosidad.length > 0;
+  return {
+    activo: d.estado !== 'INACTIVA',
+    estadoFisico: it.unidad === 'M3' || it.unidad === 'GAL' ? 'Líquido' : it.linea === 'Lodos' ? 'Semisólido / lodo' : 'Sólido',
+    categoria: it.linea === 'Hospitalarios y biomédicos' ? 'Hospitalario / biosanitario' : pel ? 'Peligroso (RESPEL)' : it.linea === 'Aprovechables' ? 'Aprovechable' : ['RCD', 'RAEE'].includes(it.linea) ? 'Especial (RCD, RAEE, ACU)' : 'No peligroso',
+    tipoResiduo: it.linea === 'Hospitalarios y biomédicos' ? 'Biológico' : it.linea === 'Aprovechables' ? 'Reciclable' : 'Industrial',
+    unidadNegocio: ['ARD', 'ARnD'].includes(it.linea) ? 'Tratamiento de aguas' : it.tipo === 'SERVICIO' ? 'Servicios ambientales' : 'Gestión de residuos',
+    peligroso: pel, inflamable: it.peligrosidad.includes('I'),
+    corrienteY: it.corriente?.startsWith('Y') ? it.corriente : '', corrienteA: it.corriente?.startsWith('A') ? it.corriente : '',
+    ficha: d.numero % 3 !== 0, observacion: d.causal ?? '',
+    progAuto: d.frecuencia !== 'Eventual',
+  };
+};
+
+export const INVENTARIO = [
+  { bodega: 'PSA Los Pinos · Celda temporal RESPEL', itemId: 'r2', entradas: 4820, salidas: 3900, ingresoMasAntiguo: '2026-09-02' },
+  { bodega: 'PSA Los Pinos · Celda temporal RESPEL', itemId: 'r4', entradas: 310, salidas: 0, ingresoMasAntiguo: '2026-03-14' },
+  { bodega: 'PSA Los Pinos · Celda temporal RESPEL', itemId: 'r5', entradas: 2600, salidas: 2100, ingresoMasAntiguo: '2026-10-21' },
+  { bodega: 'PSA Los Pinos · Acopio aprovechables', itemId: 'r9', entradas: 18200, salidas: 15400, ingresoMasAntiguo: '2026-11-03' },
+  { bodega: 'PSA Los Pinos · Acopio aprovechables', itemId: 'r10', entradas: 7600, salidas: 6900, ingresoMasAntiguo: '2026-10-28' },
+  { bodega: 'PSA Los Pinos · Acopio aprovechables', itemId: 'r11', entradas: 9100, salidas: 4000, ingresoMasAntiguo: '2026-08-19' },
+  { bodega: 'PSA Los Pinos · Tanque ACU', itemId: 'r12', entradas: 640, salidas: 480, ingresoMasAntiguo: '2026-10-05' },
+  { bodega: 'Bodega Bucaramanga · RAEE', itemId: 'r8', entradas: 1250, salidas: 900, ingresoMasAntiguo: '2026-06-30' },
 ];

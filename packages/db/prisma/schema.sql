@@ -489,6 +489,23 @@ CREATE TABLE "auditoria" (
     CONSTRAINT "auditoria_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "cargues_masivos" (
+    "id" UUID NOT NULL,
+    "empresa_id" UUID NOT NULL,
+    "plantilla" VARCHAR(40) NOT NULL,
+    "archivo" VARCHAR(200) NOT NULL,
+    "archivo_url" TEXT,
+    "filas_leidas" INTEGER NOT NULL,
+    "filas_ok" INTEGER NOT NULL,
+    "filas_error" INTEGER NOT NULL,
+    "errores" JSONB NOT NULL DEFAULT '[]',
+    "usuario_id" UUID NOT NULL,
+    "creado_en" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "cargues_masivos_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "empresas_nit_key" ON "empresas"("nit");
 
@@ -545,6 +562,9 @@ CREATE UNIQUE INDEX "actas_empresa_id_numero_key" ON "actas"("empresa_id", "nume
 
 -- CreateIndex
 CREATE INDEX "auditoria_entidad_entidad_id_idx" ON "auditoria"("entidad", "entidad_id");
+
+-- CreateIndex
+CREATE INDEX "cargues_masivos_empresa_id_creado_en_idx" ON "cargues_masivos"("empresa_id", "creado_en");
 
 -- AddForeignKey
 ALTER TABLE "roles" ADD CONSTRAINT "roles_empresa_id_fkey" FOREIGN KEY ("empresa_id") REFERENCES "empresas"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

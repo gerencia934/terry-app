@@ -30,12 +30,12 @@ export function alertas(): Alerta[] {
   out.push({ id: 'rutas-hoy', tone: 'info', categoria: 'Operación', route: 'rutas', titulo: `${hoy.length} recorridos programados hoy`,
     detalle: hoy.map((r) => `${r.codigo} (${vehiculo(r.vehiculoId).placa})`).join(' · ') });
   PREOPS.filter((p) => p.programada.startsWith(HOY) && p.aprobado === undefined).forEach((p) =>
-    out.push({ id: `preop-${p.id}`, tone: 'warn', categoria: 'Operación', route: 'preoperacionales', titulo: `Preoperacional pendiente · ${vehiculo(p.vehiculoId).placa}`,
+    out.push({ id: `preop-${p.id}`, tone: 'warn', categoria: 'Operación', route: 'chequeo', titulo: `Preoperacional pendiente · ${vehiculo(p.vehiculoId).placa}`,
       detalle: 'La ruta no puede salir hasta que el chequeo quede aprobado' }));
   const pend = DECLARACIONES.filter((d) => d.estado === 'PENDIENTE').length;
-  if (pend) out.push({ id: 'decl-pend', tone: 'info', categoria: 'Comercial', route: 'decl-residuos', titulo: `${pend} declaraciones por autorizar`, detalle: 'Revisar ficha de seguridad y caracterización' });
+  if (pend) out.push({ id: 'decl-pend', tone: 'info', categoria: 'Comercial', route: 'declaraciones', titulo: `${pend} declaraciones por autorizar`, detalle: 'Revisar ficha de seguridad y caracterización' });
   const dif = CONCILIACION.filter((c) => Math.abs((c.destino - c.origen) / c.origen) > 0.02 && !c.justificacion).length;
-  if (dif) out.push({ id: 'conc', tone: 'bad', categoria: 'Cumplimiento', route: 'actas', titulo: `${dif} diferencia de conciliación sin justificar`, detalle: 'Origen vs. báscula de planta supera ±2 %' });
+  if (dif) out.push({ id: 'conc', tone: 'bad', categoria: 'Cumplimiento', route: 'conciliaciones', titulo: `${dif} diferencia de conciliación sin justificar`, detalle: 'Origen vs. báscula de planta supera ±2 %' });
   const rank = { bad: 0, warn: 1, info: 2 } as const;
   return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
 }

@@ -6,10 +6,11 @@ import { Login, Recuperar } from './pages/Auth';
 import Inicio from './pages/Inicio';
 import Declaraciones from './pages/Declaraciones';
 import Precios from './pages/Precios';
-import { Rutas, Solicitudes } from './pages/Logistica';
-import { Actas, Manifiestos, Preoperacionales } from './pages/Operacion';
-import Informes from './pages/Informes';
-import { Catalogos, Clientes, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
+import Cargues from './pages/Cargues';
+import { EstadosRecorrido, InformeRutas, PreSolicitudes, Rastreo, Rutas, Solicitudes } from './pages/Logistica';
+import { Actas, Chequeo, Conciliaciones, Inventario, Manifiestos } from './pages/Operacion';
+import Indicadores, { Exportable, Informes } from './pages/Informes';
+import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
 
 function Screen() {
@@ -24,15 +25,25 @@ function Screen() {
   const page = (() => {
     switch (route) {
       case 'inicio': return <Inicio />;
-      case 'decl-residuos': return <Declaraciones key="r" tipo="RESIDUO" />;
-      case 'decl-servicios': return <Declaraciones key="s" tipo="SERVICIO" />;
+      case 'declaraciones': return <Declaraciones />;
       case 'precios': return <Precios />;
+      case 'cargues': return <Cargues />;
+      case 'exportable': return <Exportable />;
       case 'solicitudes': return <Solicitudes />;
+      case 'pre-solicitudes': return <PreSolicitudes />;
       case 'rutas': return <Rutas />;
-      case 'preoperacionales': return <Preoperacionales />;
+      case 'rastreo': return <Rastreo />;
+      case 'informe-rutas': return <InformeRutas />;
+      case 'estados-recorrido': return <EstadosRecorrido />;
+      case 'chequeo': return <Chequeo />;
       case 'manifiestos': return <Manifiestos />;
+      case 'conciliaciones': return <Conciliaciones />;
       case 'actas': return <Actas />;
+      case 'inventario': return <Inventario />;
       case 'informes': return <Informes />;
+      case 'indicadores': return <Indicadores />;
+      case 'configuracion': return <ConfigIndex />;
+      case 'config-datos': return <MisDatos />;
       case 'config-permisos': return <Permisos />;
       case 'config-clientes': return <Clientes />;
       case 'config-vehiculos': return <Vehiculos />;
