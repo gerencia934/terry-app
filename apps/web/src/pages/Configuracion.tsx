@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Plus, ShieldCheck, FileText, CalendarClock, Check, Minus, Search, Settings, Users, Building, UserCog, Car, Shield, Store, Scale, AlertTriangle,
+  Plus, ShieldCheck, FileText, CalendarClock, Check, Minus, Search, Settings, Users, Building, UserCog, Car, Scale, AlertTriangle,
   Package, Archive, FileCog, ListChecks, Truck, MapPin, Cog, Briefcase, Flag, FileSignature, Network, Warehouse, Recycle, Upload, Tags, Save,
 } from 'lucide-react';
 import { ResponsiveTable, type Column } from '../components/data';
@@ -11,9 +11,6 @@ import { cx, diasEntre, fmtFecha } from '../lib/format';
 import { negLabel } from './Declaraciones';
 
 let catalogoInicial = 'residuos';
-let cargueInicial = 'clientes';
-export const abrirCargue = (id: string) => { cargueInicial = id; };
-export const tomarCargueInicial = () => cargueInicial;
 
 const Vence = ({ f }: { f?: string }) => {
   if (!f) return <span className="text-subtle">—</span>;
@@ -21,32 +18,52 @@ const Vence = ({ f }: { f?: string }) => {
   return <span className="flex flex-col"><span className="num whitespace-nowrap">{fmtFecha(f)}</span>{d <= 45 && <span className={cx('text-[11px] font-medium', d <= 15 ? 'text-bad' : 'text-warn')}>vence en {d} días</span>}</span>;
 };
 
-// ---------------- Índice «Configuraciones del sistema» ----------------
-type Opcion = [string, typeof Settings, RouteName, string?];
-const OPCIONES: Opcion[] = [
-  ['Mis datos / Configuraciones', Settings, 'config-datos'], ['Mis clientes', Users, 'config-clientes'], ['Mis proveedores / destinos', Building, 'config-catalogos', 'proveedores'],
-  ['Mis usuarios', UserCog, 'config-usuarios'], ['Mis vehículos', Car, 'config-vehiculos'], ['Roles / Permisos', Shield, 'config-usuarios'], ['Sucursales', Store, 'config-clientes'],
-  ['Permisos ambientales', ShieldCheck, 'config-permisos'], ['Métricas', Scale, 'config-catalogos', 'metricas'], ['Riesgos', AlertTriangle, 'config-catalogos', 'riesgos'],
-  ['Disposición / Manejo', Package, 'config-catalogos', 'manejos'], ['Tipo de embalajes', Archive, 'config-catalogos', 'embalajes'], ['Especificaciones adicionales', FileCog, 'config-catalogos', 'especificaciones'],
-  ['Elementos de chequeo', ListChecks, 'config-catalogos', 'chequeo'], ['Tipo de vehículos', Truck, 'config-catalogos', 'tipoVehiculos'], ['Zonas', MapPin, 'config-catalogos', 'zonas'],
-  ['Líneas de servicio', Cog, 'config-catalogos', 'lineas'], ['Unidades de negocio', Briefcase, 'config-catalogos', 'unidades'], ['Estados del recorrido', Flag, 'estados-recorrido'],
-  ['Mis formatos de actas', FileSignature, 'config-catalogos', 'formatos'], ['Grupos / subgrupos', Network, 'config-catalogos', 'grupos'], ['Bodegas', Warehouse, 'config-catalogos', 'bodegas'],
-  ['Catálogo de residuos inventariables', Recycle, 'config-catalogos', 'residuos'], ['Causales de cancelación', Tags, 'config-catalogos', 'causales'], ['Clasificación interna', Tags, 'config-catalogos', 'clasificacion'],
-  ['Campos personalizados', FileCog, 'config-catalogos', 'campos'], ['Cargues masivos de gestores', Upload, 'cargues', 'cargue:clientes'], ['Cargues masivos de clientes directos', Upload, 'cargues', 'cargue:clientes'],
+// ---------------- Ajustes: agrupados por tema ----------------
+type Opcion = [string, string, typeof Settings, RouteName, string?];
+const SECCIONES: { titulo: string; opciones: Opcion[] }[] = [
+  { titulo: 'Empresa y acceso', opciones: [
+    ['Datos de la empresa', 'NIT, planta, correos y tolerancias', Building2Icon(), 'empresa'], ['Usuarios y roles', 'Quién entra y qué puede hacer', UserCog, 'usuarios']] },
+  { titulo: 'Clientes y comercial', opciones: [
+    ['Clientes y sedes', 'Generadores, sedes y condiciones', Users, 'clientes'], ['Tratamientos', 'Cómo se gestiona cada residuo', Package, 'catalogos', 'manejos'],
+    ['Líneas de servicio', 'Portafolio de Terra Viva', Cog, 'catalogos', 'lineas'], ['Unidades de negocio', 'Para agrupar ingresos', Briefcase, 'catalogos', 'unidades'],
+    ['Destinos y gestores', 'Planta propia y aliados licenciados', Building, 'catalogos', 'proveedores'], ['Segmentos de cliente', 'A, B, C…', Tags, 'catalogos', 'clasificacion']] },
+  { titulo: 'Residuos', opciones: [
+    ['Catálogo de residuos', 'Códigos, corrientes Y/A y peligrosidad', Recycle, 'catalogos', 'residuos'], ['Embalajes', 'Canecas, big bags, guardianes…', Archive, 'catalogos', 'embalajes'],
+    ['Riesgos CRETIB', 'Clasificación de peligrosidad', AlertTriangle, 'catalogos', 'riesgos'], ['Unidades de medida', 'Toneladas, m³, galones…', Scale, 'catalogos', 'metricas'],
+    ['Requisitos especiales', 'Cadena de custodia, destrucción…', FileCog, 'catalogos', 'especificaciones']] },
+  { titulo: 'Operación', opciones: [
+    ['Flota', 'Vehículos, colores y vencimientos', Car, 'vehiculos'], ['Etapas del recorrido', 'Lo que marca el conductor', Flag, 'etapas'],
+    ['Zonas', 'Áreas de cobertura', MapPin, 'catalogos', 'zonas'], ['Elementos de inspección', 'Lista de la inspección vehicular', ListChecks, 'catalogos', 'chequeo'],
+    ['Tipos de vehículo', 'Furgón, volqueta, vactor…', Truck, 'catalogos', 'tipoVehiculos'], ['Bodegas', 'Almacenamiento en planta', Warehouse, 'catalogos', 'bodegas'],
+    ['Motivos de cancelación', 'Por qué no se atendió', Tags, 'catalogos', 'causales']] },
+  { titulo: 'Cumplimiento y documentos', opciones: [
+    ['Permisos ambientales', 'Actos administrativos y obligaciones', ShieldCheck, 'permisos'], ['Formatos de certificados', 'Plantillas de los PDF', FileSignature, 'catalogos', 'formatos'],
+    ['Sectores', 'Para informes por industria', Network, 'catalogos', 'grupos']] },
+  { titulo: 'Datos', opciones: [
+    ['Importar datos', 'Plantillas de Excel', Upload, 'importar'], ['Campos adicionales', 'Datos propios en solicitudes y clientes', FileCog, 'catalogos', 'campos']] },
 ];
+function Building2Icon() { return Building; }
 export function ConfigIndex() {
   const { go } = useRouter();
   const [q, setQ] = useState('');
-  const rows = OPCIONES.filter(([l]) => l.toLowerCase().includes(q.toLowerCase()));
+  const filtra = (o: Opcion) => `${o[0]} ${o[1]}`.toLowerCase().includes(q.toLowerCase());
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Configuraciones del sistema" subtitle="Entidades base y catálogos operativos." />
-      <div className="relative mb-3"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" /><Input id="cfg-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar…" className="pl-9" /></div>
-      <ul className="grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-2 xl:grid-cols-3">
-        {rows.map(([l, I, r, sub]) => (
-          <li key={l} className="bg-surface"><button onClick={() => { if (sub?.startsWith('cargue:')) cargueInicial = sub.slice(7); else if (sub) catalogoInicial = sub; go(r); }} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[14px] hover:bg-brand-soft/50"><I size={17} className="text-brand" />{l}</button></li>
-        ))}
-      </ul>
+      <PageHeader eyebrow="Ajustes" title="Configuración" subtitle="Catálogos y parámetros que usa toda la plataforma." />
+      <div className="relative mb-5 max-w-md"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" /><Input id="cfg-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar un ajuste…" className="pl-9" /></div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        {SECCIONES.map((sec) => { const ops = sec.opciones.filter(filtra); if (!ops.length) return null; return (
+          <Card key={sec.titulo} title={sec.titulo} pad={false}>
+            <ul className="divide-y divide-line">
+              {ops.map(([l, d, I, r, sub]) => (
+                <li key={l}><button onClick={() => { if (sub) catalogoInicial = sub; go(r); }} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2">
+                  <span className="rounded-lg bg-brand-soft p-2 text-brand-ink"><I size={16} /></span>
+                  <span className="min-w-0"><span className="block text-[14px] font-medium">{l}</span><span className="block text-[12px] text-muted">{d}</span></span>
+                </button></li>
+              ))}
+            </ul>
+          </Card>); })}
+      </div>
     </>
   );
 }
@@ -55,7 +72,7 @@ export function MisDatos() {
   const toast = useToast();
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Mis datos" subtitle="Información de la empresa que aparece en manifiestos, actas, certificados y correos." />
+      <PageHeader eyebrow="Ajustes" title="Datos de la empresa" subtitle="Información que aparece en manifiestos, certificados y correos." />
       <Card>
         <form className="grid gap-4 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); toast('Datos de la empresa guardados.'); }}>
           <Field label="Razón social" id="md-rs"><Input id="md-rs" defaultValue="TERRA VIVA S.A.S. E.S.P." /></Field>
@@ -67,7 +84,7 @@ export function MisDatos() {
           <Field label="Email técnico" id="md-et"><Input id="md-et" type="email" defaultValue="contacto@terravivasas.com" /></Field>
           <Field label="Email comercial" id="md-ec"><Input id="md-ec" type="email" defaultValue="gerenciaregional@terravivasas.com" /></Field>
           <Field label="Métrica principal de indicadores" id="md-met"><Select id="md-met" defaultValue="t"><option value="t">Toneladas</option><option value="kg">Kilogramos</option><option value="m3">Metros cúbicos</option></Select></Field>
-          <Field label="Tolerancia de conciliación (%)" id="md-tol" hint="Diferencia origen/báscula a partir de la cual se exige justificación."><Input id="md-tol" inputMode="decimal" defaultValue="2" /></Field>
+          <Field label="Tolerancia en báscula (%)" id="md-tol" hint="Diferencia entre la sede y la báscula a partir de la cual se exige explicación."><Input id="md-tol" inputMode="decimal" defaultValue="2" /></Field>
           <div className="md:col-span-2 flex justify-end"><Button variant="primary" type="submit"><Save size={16} /> Guardar</Button></div>
         </form>
       </Card>
@@ -79,7 +96,7 @@ export function Permisos() {
   const toast = useToast();
   return (
     <>
-      <PageHeader eyebrow="Configuración · Cumplimiento" title="Permisos ambientales" subtitle="Actos administrativos vigentes, su alcance y las obligaciones con fecha. Cada declaración se valida contra estos permisos antes de autorizarse."
+      <PageHeader eyebrow="Cumplimiento" title="Permisos ambientales" subtitle="Actos administrativos vigentes, su alcance y las obligaciones con fecha. Cada declaración se valida contra estos permisos antes de autorizarse."
         actions={<Button variant="primary" onClick={() => toast('Registrar permiso: acto, autoridad, alcance, tipos de manejo cubiertos y obligaciones.', 'info')}><Plus size={16} /> Registrar permiso</Button>} />
       <div className="grid gap-4 lg:grid-cols-2">
         {PERMISOS.map((p) => {
@@ -119,14 +136,14 @@ export function Clientes() {
     { key: 'sec', header: 'Sector', render: (c) => c.sector, priority: 2 },
     { key: 'neg', header: 'Negociación', render: (c) => negLabel(c.negociacion), priority: 3 },
     { key: 'pago', header: 'Forma de pago', render: (c) => c.formaPago.replace('CREDITO_', 'Crédito ').replace('CONTADO', 'Contado') + (c.formaPago.startsWith('CRED') ? ' d' : ''), priority: 3 },
-    { key: 'suc', header: 'Sucursales', align: 'center', render: (c) => c.sucursales.length, priority: 3 },
+    { key: 'suc', header: 'Sedes', align: 'center', render: (c) => c.sucursales.length, priority: 3 },
     { key: 'zona', header: 'Zonas', render: (c) => <span className="flex flex-wrap gap-1">{[...new Set(c.sucursales.map((s) => s.zona))].map((z) => <ColorBadge key={z} color={zona(z).color}>{zona(z).nombre}</ColorBadge>)}</span>, priority: 3 },
   ];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Mis clientes y sucursales" subtitle="Generadores atendidos, sus sucursales y condiciones comerciales."
-        actions={<><Button onClick={() => { cargueInicial = 'clientes'; go('cargues'); }}><Upload size={16} /> Cargue masivo</Button><Button variant="primary"><Plus size={16} /> Nuevo cliente</Button></>} />
-      <ResponsiveTable rows={CLIENTES} columns={cols} rowKey={(c) => c.id} onRowClick={setSel} cardTitle={(c) => c.razonSocial} cardBadge={(c) => <Badge>{c.sucursales.length} suc.</Badge>} />
+      <PageHeader eyebrow="Comercial" title="Clientes y sedes" subtitle="Generadores atendidos, sus sedes y las condiciones comerciales pactadas."
+        actions={<><Button onClick={() => { go('importar'); }}><Upload size={16} /> Importar</Button><Button variant="primary"><Plus size={16} /> Nuevo cliente</Button></>} />
+      <ResponsiveTable rows={CLIENTES} columns={cols} rowKey={(c) => c.id} onRowClick={setSel} cardTitle={(c) => c.razonSocial} cardBadge={(c) => <Badge>{c.sucursales.length} sedes</Badge>} />
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel?.razonSocial ?? ''}>
         {sel && <div className="flex flex-col gap-3">{sel.sucursales.map((s) => (
           <div key={s.id} className="rounded-xl border border-line p-3 text-[13px]"><p className="font-medium">{s.nombre}</p><p className="text-muted">{s.municipio} · {zona(s.zona).nombre}</p><p className="mt-1">{s.contacto} · <span className="num">{s.telefono}</span></p></div>))}</div>}
@@ -148,17 +165,17 @@ export function Vehiculos() {
   ];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Mis vehículos" subtitle="Flota con su color en el calendario de rutas y control de vencimientos. El sistema avisa 30 días antes."
-        actions={<><Button onClick={() => { cargueInicial = 'vehiculos'; go('cargues'); }}><Upload size={16} /> Cargue masivo</Button><Button variant="primary"><Plus size={16} /> Nuevo vehículo</Button></>} />
+      <PageHeader eyebrow="Ajustes" title="Flota" subtitle="Vehículos con su color en la programación y control de vencimientos. El sistema avisa 30 días antes."
+        actions={<><Button onClick={() => { go('importar'); }}><Upload size={16} /> Importar</Button><Button variant="primary"><Plus size={16} /> Nuevo vehículo</Button></>} />
       <ResponsiveTable rows={VEHICULOS} columns={cols} rowKey={(v) => v.id} cardTitle={(v) => <span className="num">{v.placa} · {v.marca}</span>} cardMeta={(v) => v.tipo} />
-      <p className="mt-3 text-[12px] text-muted">Placas y marcas de su flota según las capturas de Grinclic. Tipo, capacidad y fechas de vencimiento son de demostración.</p>
+      <p className="mt-3 text-[12px] text-muted">Placas y marcas de la flota de Terra Viva. Tipo, capacidad y fechas de vencimiento son de demostración.</p>
     </>
   );
 }
 
 const MATRIZ = [
-  ['Declaraciones: autorizar', [0, 1, 0, 0, 1]], ['Precios: asignar', [0, 0, 0, 1, 1]], ['Cargues masivos', [1, 0, 0, 0, 1]], ['Rutas: programar', [1, 0, 0, 0, 1]],
-  ['Chequeo: diligenciar', [0, 0, 1, 0, 0]], ['Manifiestos: emitir', [1, 1, 1, 0, 1]], ['Conciliación: justificar', [0, 1, 0, 0, 1]],
+  ['Declaraciones: autorizar', [0, 1, 0, 0, 1]], ['Precios: asignar', [0, 0, 0, 1, 1]], ['Importar datos', [1, 0, 0, 0, 1]], ['Rutas: programar', [1, 0, 0, 0, 1]],
+  ['Inspección vehicular: diligenciar', [0, 0, 1, 0, 0]], ['Manifiestos: emitir', [1, 1, 1, 0, 1]], ['Recepción: explicar diferencias', [0, 1, 0, 0, 1]],
   ['Reportes: ver facturación', [0, 0, 0, 1, 1]], ['Configuración: editar', [0, 1, 0, 0, 1]],
 ] as const;
 export function Usuarios() {
@@ -172,8 +189,8 @@ export function Usuarios() {
   ];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Usuarios y roles" subtitle="Personal con acceso, documentos del conductor y permisos por rol."
-        actions={<><Button onClick={() => { cargueInicial = 'usuarios'; go('cargues'); }}><Upload size={16} /> Cargue masivo</Button><Button variant="primary"><Plus size={16} /> Invitar usuario</Button></>} />
+      <PageHeader eyebrow="Ajustes" title="Usuarios y roles" subtitle="Personal con acceso, documentos del conductor y permisos por rol."
+        actions={<><Button onClick={() => { go('importar'); }}><Upload size={16} /> Importar</Button><Button variant="primary"><Plus size={16} /> Invitar usuario</Button></>} />
       <ResponsiveTable rows={PERSONAS} columns={cols} rowKey={(p) => p.id} cardTitle={(p) => p.nombre} cardBadge={(p) => <Badge>{p.rol}</Badge>} />
       <Card title="Matriz de permisos por rol" className="mt-5" pad={false}>
         <div className="scroll-x"><table className="w-full min-w-[640px] text-[13px]">
@@ -190,23 +207,23 @@ type Row = { codigo: string; nombre: string; detalle: string; color?: string };
 const simple = (titulo: string, nombres: string[], pref: string, detalle = ''): { titulo: string; filas: Row[] } => ({ titulo, filas: nombres.map((n, i) => ({ codigo: `${pref}-${i + 1}`, nombre: n, detalle })) });
 const CATALOGOS: Record<string, { titulo: string; filas: Row[] }> = {
   residuos: { titulo: 'Catálogo de residuos y servicios', filas: CATALOGO.map((c) => ({ codigo: c.codigo, nombre: c.nombre, detalle: `${c.tipo === 'RESIDUO' ? 'Residuo' : 'Servicio'} · ${c.linea}${c.corriente ? ' · ' + c.corriente : ''}` })) },
-  proveedores: { titulo: 'Proveedores / destinos', filas: [{ codigo: 'D-1', nombre: 'TERRA VIVA SAS ESP · PSA Los Pinos', detalle: 'Destino propio · Res. 0632-2023 y 0235-2024' }, { codigo: 'D-2', nombre: 'Gestor aliado · incineración', detalle: 'Exigir licencia vigente' }, { codigo: 'D-3', nombre: 'Gestor aliado · RAEE y celda de seguridad', detalle: 'Exigir licencia vigente' }] },
-  manejos: { titulo: 'Disposición / manejo', filas: MANEJOS.map((m) => ({ codigo: m.codigo, nombre: m.nombre, detalle: m.propio ? 'PSA Los Pinos (propio)' : 'Gestor aliado' })) },
+  proveedores: { titulo: 'Destinos y gestores', filas: [{ codigo: 'D-1', nombre: 'TERRA VIVA SAS ESP · PSA Los Pinos', detalle: 'Destino propio · Res. 0632-2023 y 0235-2024' }, { codigo: 'D-2', nombre: 'Gestor aliado · incineración', detalle: 'Exigir licencia vigente' }, { codigo: 'D-3', nombre: 'Gestor aliado · RAEE y celda de seguridad', detalle: 'Exigir licencia vigente' }] },
+  manejos: { titulo: 'Tratamientos', filas: MANEJOS.map((m) => ({ codigo: m.codigo, nombre: m.nombre, detalle: m.propio ? 'PSA Los Pinos (propio)' : 'Gestor aliado' })) },
   lineas: { titulo: 'Líneas de servicio', filas: LINEAS.map((l, i) => ({ codigo: `LS-${String(i + 1).padStart(2, '0')}`, nombre: l, detalle: 'Portafolio 2026' })) },
   unidades: simple('Unidades de negocio', ['Gestión de residuos', 'Tratamiento de aguas', 'Servicios ambientales', 'Saneamiento básico'], 'UN'),
   zonas: { titulo: 'Zonas', filas: ZONAS.map((z) => ({ codigo: z.id.toUpperCase(), nombre: z.nombre, detalle: 'Polígono PostGIS', color: z.color })) },
   embalajes: simple('Tipos de embalaje', ['Caneca 55 gal', 'Big bag 1 m³', 'Bolsa roja calibre 2', 'Guardián rígido', 'Bidón 20 L', 'Estiba plastificada', 'Carrotanque', 'Volqueta carpada'], 'EM'),
-  chequeo: { titulo: 'Elementos de chequeo', filas: ELEMENTOS_CHEQUEO.flatMap((g) => g.items.map(([n, c], i) => ({ codigo: `${g.grupo.slice(0, 3).toUpperCase()}-${i + 1}`, nombre: n, detalle: `${g.grupo}${c ? ' · crítico' : ''}` }))) },
-  tipoVehiculos: simple('Tipo de vehículos', ['Furgón', 'Furgón RESPEL', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta'], 'TV'),
-  causales: simple('Causales de cancelación', ['Cliente no disponible en sitio', 'No alcanzó la ruta', 'Vehículo no apto (preoperacional)', 'Residuo sin embalar o sin rotular', 'Clima o vía cerrada', 'Ficha de seguridad incompleta'], 'CA'),
+  chequeo: { titulo: 'Elementos de inspección', filas: ELEMENTOS_CHEQUEO.flatMap((g) => g.items.map(([n, c], i) => ({ codigo: `${g.grupo.slice(0, 3).toUpperCase()}-${i + 1}`, nombre: n, detalle: `${g.grupo}${c ? ' · crítico' : ''}` }))) },
+  tipoVehiculos: simple('Tipos de vehículo', ['Furgón', 'Furgón RESPEL', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta'], 'TV'),
+  causales: simple('Motivos de cancelación', ['Cliente no disponible en sitio', 'No alcanzó la ruta', 'Vehículo no apto (preoperacional)', 'Residuo sin embalar o sin rotular', 'Clima o vía cerrada', 'Ficha de seguridad incompleta'], 'CA'),
   riesgos: { titulo: 'Riesgos (CRETIB)', filas: [['C', 'Corrosivo'], ['R', 'Reactivo'], ['E', 'Explosivo'], ['T', 'Tóxico'], ['I', 'Inflamable'], ['B', 'Biológico-infeccioso']].map(([c, n]) => ({ codigo: c, nombre: n, detalle: 'Decreto 1076 de 2015' })) },
-  metricas: simple('Métricas', ['Toneladas', 'Kilogramos', 'Metros cúbicos', 'Galones', 'Unidades'], 'MT'),
-  especificaciones: simple('Especificaciones adicionales', ['Requiere certificado de destrucción', 'Requiere cadena de custodia', 'Requiere toma de muestra'], 'EA'),
-  formatos: simple('Mis formatos de actas', ['Acta de disposición final', 'Certificado de aprovechamiento', 'Acta de conciliación', 'Certificado de tratamiento de aguas'], 'FA'),
-  grupos: simple('Grupos / subgrupos', ['Hidrocarburos', 'Agroindustria', 'Salud', 'Construcción', 'Comercio y servicios'], 'GR'),
+  metricas: simple('Unidades de medida', ['Toneladas', 'Kilogramos', 'Metros cúbicos', 'Galones', 'Unidades'], 'MT'),
+  especificaciones: simple('Requisitos especiales', ['Requiere certificado de destrucción', 'Requiere cadena de custodia', 'Requiere toma de muestra'], 'EA'),
+  formatos: simple('Formatos de certificados', ['Certificado de tratamiento y disposición final', 'Certificado de aprovechamiento', 'Constancia de recepción en planta', 'Certificado de tratamiento de aguas'], 'FC'),
+  grupos: simple('Sectores', ['Hidrocarburos', 'Agroindustria', 'Salud', 'Construcción', 'Comercio y servicios'], 'GR'),
   bodegas: simple('Bodegas', ['PSA Los Pinos · Celda temporal RESPEL', 'PSA Los Pinos · Acopio aprovechables', 'PSA Los Pinos · Tanque ACU', 'Bodega Bucaramanga · RAEE'], 'BO'),
-  clasificacion: simple('Clasificación interna', ['A · Estratégico', 'B · Recurrente', 'C · Eventual'], 'CL'),
-  campos: { titulo: 'Campos personalizados', filas: [{ codigo: 'CP-1', nombre: 'Orden de compra del cliente', detalle: 'Solicitud · texto' }, { codigo: 'CP-2', nombre: 'Centro de costos', detalle: 'Cliente · lista' }] },
+  clasificacion: simple('Segmentos de cliente', ['A · Estratégico', 'B · Recurrente', 'C · Eventual'], 'CL'),
+  campos: { titulo: 'Campos adicionales', filas: [{ codigo: 'CP-1', nombre: 'Orden de compra del cliente', detalle: 'Solicitud · texto' }, { codigo: 'CP-2', nombre: 'Centro de costos', detalle: 'Cliente · lista' }] },
 };
 export function Catalogos() {
   const toast = useToast();
@@ -215,7 +232,7 @@ export function Catalogos() {
   const c = CATALOGOS[cat];
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Catálogos operativos" subtitle="Un único componente administra todos los catálogos: se agregan sin programar pantallas nuevas." actions={<Button variant="primary" onClick={() => setNuevo(true)}><Plus size={16} /> Agregar</Button>} />
+      <PageHeader eyebrow="Ajustes" title="Catálogos" subtitle="Listas que usa la plataforma. Un mismo editor sirve para todas." actions={<Button variant="primary" onClick={() => setNuevo(true)}><Plus size={16} /> Agregar</Button>} />
       <div className="grid gap-5 lg:grid-cols-[250px_1fr]">
         <div className="lg:hidden"><Field label="Catálogo" id="cat-sel"><Select id="cat-sel" value={cat} onChange={(e) => setCat(e.target.value)}>{Object.entries(CATALOGOS).map(([k, v]) => <option key={k} value={k}>{v.titulo}</option>)}</Select></Field></div>
         <nav className="hidden flex-col gap-1 lg:flex">{Object.entries(CATALOGOS).map(([k, v]) => (

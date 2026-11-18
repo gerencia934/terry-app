@@ -38,7 +38,7 @@ CREATE TYPE "TipoActa" AS ENUM ('DISPOSICION', 'CONCILIACION', 'APROVECHAMIENTO'
 CREATE TYPE "EstadoPermiso" AS ENUM ('VIGENTE', 'POR_VENCER', 'VENCIDO', 'EN_TRAMITE');
 
 -- CreateEnum
-CREATE TYPE "UnidadMedida" AS ENUM ('KG', 'TON', 'M3', 'GAL', 'UND', 'SERVICIO');
+CREATE TYPE "UnidadMedida" AS ENUM ('KG', 'TON', 'M3', 'GAL', 'L', 'UND', 'SERVICIO');
 
 -- CreateTable
 CREATE TABLE "empresas" (
@@ -95,8 +95,24 @@ CREATE TABLE "usuarios" (
     "activo" BOOLEAN NOT NULL DEFAULT true,
     "ultimo_login" TIMESTAMPTZ,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "intentos_fallidos" INTEGER NOT NULL DEFAULT 0,
+    "bloqueado_hasta" TIMESTAMPTZ,
 
     CONSTRAINT "usuarios_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "sesiones" (
+    "id" UUID NOT NULL,
+    "usuario_id" UUID NOT NULL,
+    "token_hash" TEXT NOT NULL,
+    "user_agent" VARCHAR(300),
+    "ip" VARCHAR(64),
+    "creada_en" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expira_en" TIMESTAMPTZ NOT NULL,
+    "revocada_en" TIMESTAMPTZ,
+
+    CONSTRAINT "sesiones_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -184,6 +200,8 @@ CREATE TABLE "vehiculos" (
     "empresa_id" UUID NOT NULL,
     "bodega_id" UUID,
     "placa" VARCHAR(7) NOT NULL,
+    "marca" VARCHAR(40),
+    "color" VARCHAR(7) NOT NULL DEFAULT '#1E7838',
     "tipo" VARCHAR(40) NOT NULL,
     "capacidad" DECIMAL(10,2) NOT NULL,
     "unidad_cap" "UnidadMedida" NOT NULL DEFAULT 'KG',
@@ -522,6 +540,9 @@ CREATE UNIQUE INDEX "usuarios_email_key" ON "usuarios"("email");
 CREATE INDEX "usuarios_empresa_id_idx" ON "usuarios"("empresa_id");
 
 -- CreateIndex
+CREATE INDEX "sesiones_usuario_id_idx" ON "sesiones"("usuario_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "clientes_empresa_id_nit_key" ON "clientes"("empresa_id", "nit");
 
 -- CreateIndex
@@ -580,6 +601,9 @@ ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_empresa_id_fkey" FOREIGN KEY ("e
 
 -- AddForeignKey
 ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_rol_id_fkey" FOREIGN KEY ("rol_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "sesiones" ADD CONSTRAINT "sesiones_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "password_resets" ADD CONSTRAINT "password_resets_usuario_id_fkey" FOREIGN KEY ("usuario_id") REFERENCES "usuarios"("id") ON DELETE CASCADE ON UPDATE CASCADE;

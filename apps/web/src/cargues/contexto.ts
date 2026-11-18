@@ -1,5 +1,5 @@
 import { CLIENTES, DECLARACIONES, MANEJOS, PERMISOS, PERSONAS, VEHICULOS, item } from '../data/mock';
-import { norm, type Contexto } from './definiciones';
+import { norm, type Contexto } from '@terraviva/shared';
 
 /** Construye el contexto de validación con los datos actuales (en producción: consulta al API). */
 export function contextoActual(extra?: { nits?: string[]; sucursales?: [string, string][] }): Contexto {

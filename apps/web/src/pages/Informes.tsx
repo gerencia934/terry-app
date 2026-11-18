@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Download, FileSpreadsheet, Mail, Wallet, ClipboardList, ShieldCheck } from 'lucide-react';
-import { Button, Card, Field, Input, PageHeader, Select, Tabs, useToast } from '../components/ui';
+import { Button, Card, Field, Input, Kpi, PageHeader, Select, Tabs, useToast } from '../components/ui';
 import { CAUSALES_CANCELACION, CLIENTES, DIST_MANEJO, RUTAS_MES, SERIE_MENSUAL, VEHICULOS } from '../data/mock';
 import { fmtNum } from '../lib/format';
 
@@ -28,7 +28,7 @@ function Filtros({ extra }: { extra?: React.ReactNode }) {
       <Field label="Desde" id="i-d"><Input id="i-d" type="date" defaultValue="2026-11-01" /></Field>
       <Field label="Hasta" id="i-h"><Input id="i-h" type="date" defaultValue="2026-11-18" /></Field>
       <Field label="Cliente" id="i-c"><Select id="i-c" defaultValue=""><option value="">Todos</option>{CLIENTES.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
-      <Field label="Sucursal / generador" id="i-s"><Select id="i-s" defaultValue=""><option value="">Todas</option></Select></Field>
+      <Field label="Sede" id="i-s"><Select id="i-s" defaultValue=""><option value="">Todas</option></Select></Field>
       {extra}
     </div>
   );
@@ -37,17 +37,17 @@ function Filtros({ extra }: { extra?: React.ReactNode }) {
 export function Informes() {
   const toast = useToast();
   const items: [typeof FileSpreadsheet, string, string][] = [
-    [FileSpreadsheet, 'Informe general', 'Servicios, cantidades por residuo, manejo, destino y valor por cliente y sucursal.'],
-    [Wallet, 'Cartera', 'Facturado, recaudado y saldo por cliente según forma de pago.'],
-    [Mail, 'Informe de envíos de correos electrónicos', 'Actas, certificados y manifiestos enviados a cada cliente, con fecha de envío y lectura.'],
+    [FileSpreadsheet, 'Consolidado de servicios', 'Cada servicio con su residuo, cantidad, tratamiento, destino y valor, por cliente y sede.'],
+    [Wallet, 'Cartera por cliente', 'Facturado, recaudado y saldo según la forma de pago pactada.'],
+    [Mail, 'Trazabilidad de envíos al cliente', 'Certificados y manifiestos enviados a cada generador, con fecha de envío y de apertura.'],
     [ClipboardList, 'Informe para el IDEAM / CAR', 'Cantidades gestionadas por corriente Y/A y tipo de manejo para los informes a la autoridad ambiental.'],
     [ShieldCheck, 'Cumplimiento de permisos', 'Obligaciones de cada permiso de la CAS con su fecha y estado.'],
   ];
   return (
     <>
-      <PageHeader eyebrow="Reportes" title="Informes generales del sistema" subtitle="Cada informe se descarga en Excel con los filtros seleccionados." />
-      <Filtros extra={<Field label="Manifiesto" id="i-m"><Input id="i-m" placeholder="Nº MF" /></Field>} />
-      <Card title="Informes básicos" pad={false}>
+      <PageHeader eyebrow="Análisis" title="Informes" subtitle="Cada informe se descarga en Excel con los filtros seleccionados." />
+      <Filtros extra={<Field label="Manifiesto" id="i-m"><Input id="i-m" placeholder="MT-2401" /></Field>} />
+      <Card title="Informes disponibles" pad={false}>
         <ul className="divide-y divide-line">
           {items.map(([I, t, d]) => (
             <li key={t} className="flex items-center gap-3 px-4 py-3">
@@ -61,13 +61,6 @@ export function Informes() {
     </>
   );
 }
-
-const Total = ({ v, l }: { v: string; l: string }) => (
-  <div className="overflow-hidden rounded-xl border border-line bg-surface">
-    <div className="num bg-brand px-4 py-3 text-right font-display text-[26px] font-semibold leading-none text-on-brand">{v}</div>
-    <div className="px-4 py-2 text-right text-[12px] font-semibold text-brand-ink">{l}</div>
-  </div>
-);
 
 export default function Indicadores() {
   const c = useChartColors();
@@ -98,21 +91,21 @@ export default function Indicadores() {
 
   return (
     <>
-      <PageHeader eyebrow="Reportes" title="Indicadores" subtitle="*Noviembre es el mes en curso, con corte al día 18. Métrica principal: toneladas gestionadas." />
+      <PageHeader eyebrow="Análisis" title="Indicadores" subtitle="Doce meses de operación. *Noviembre va con corte al día 18." />
       <Filtros />
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Tabs value={tab} onChange={setTab} items={[{ value: 'gen', label: 'Indicadores generales' }, { value: 'op', label: 'Indicadores operativos' }]} />
-        <Button size="sm" variant="primary" onClick={() => toast('Indicadores descargados en Excel.', 'info')}><Download size={15} /> Descargar indicadores</Button>
+        <Tabs value={tab} onChange={setTab} items={[{ value: 'gen', label: 'Negocio' }, { value: 'op', label: 'Operación' }]} />
+        <Button size="sm" onClick={() => toast('Indicadores exportados a Excel.', 'info')}><Download size={15} /> Exportar</Button>
       </div>
       {tab === 'gen' ? (
         <div className="flex flex-col gap-5">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <Total v={`${fmtNum(nov.toneladas)} t`} l="Total (toneladas)" /><Total v={`$${fmtNum(nov.facturado)} M`} l="Total facturado" /><Total v={fmtNum(nov.servicios)} l="Total servicios" />
-            <Total v={`$${fmtNum(nov.facturado - 6)} M`} l="Total facturado (cobro)" /><Total v={`$${fmtNum(nov.comprado)} M`} l="Total comprado (compra)" />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Kpi label="Gestionado" value={`${fmtNum(nov.toneladas)} t`} hint="noviembre*" /><Kpi label="Facturado" value={`$${fmtNum(nov.facturado)} M`} hint="noviembre*" />
+            <Kpi label="Servicios" value={fmtNum(nov.servicios)} hint="noviembre*" /><Kpi label="Compras de aprovechables" value={`$${fmtNum(nov.comprado)} M`} hint="noviembre*" />
           </div>
           <div className="grid gap-5 xl:grid-cols-2">
-            <Card title="Toneladas por cliente (cargue y descargue)"><Barras rows={porCliente} unidad="t" /></Card>
-            <Card title="Toneladas descargadas por destino"><Torta unidad="t" rows={[{ nombre: 'PSA Los Pinos (propio)', valor: 158.2 }, { nombre: 'Gestor aliado · incineración', valor: 8.1 }, { nombre: 'Gestor aliado · RAEE y celda', valor: 4.7 }]} /></Card>
+            <Card title="Toneladas por cliente"><Barras rows={porCliente} unidad="t" /></Card>
+            <Card title="Toneladas por destino final"><Torta unidad="t" rows={[{ nombre: 'PSA Los Pinos (propio)', valor: 158.2 }, { nombre: 'Gestor aliado · incineración', valor: 8.1 }, { nombre: 'Gestor aliado · RAEE y celda', valor: 4.7 }]} /></Card>
             <Card title="Servicios por mes">
               <div className="h-64"><ResponsiveContainer><BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }} barCategoryGap="22%">
                 <CartesianGrid vertical={false} stroke={c.grid} /><XAxis dataKey="mes" {...axis} /><YAxis {...axis} axisLine={false} />
@@ -135,15 +128,16 @@ export default function Indicadores() {
       ) : (
         <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Total v={`${fmtNum(nov.toneladas)} t`} l="Total (toneladas)" /><Total v={String(totVeh)} l="Rutas programadas" /><Total v={fmtNum(nov.servicios)} l="Total servicios" /><Total v="96 %" l="Preoperacionales sin incumplimiento" />
+            <Kpi label="Recorridos" value={String(totVeh)} hint="al 18 nov" /><Kpi label="Servicios por recorrido" value={fmtNum(nov.servicios / Math.max(totVeh, 1))} hint="promedio" />
+            <Kpi label="Inspecciones aprobadas" value="96 %" hint="primer intento" /><Kpi label="Diferencia en báscula" value="−0,9 %" hint="promedio" />
           </div>
           <div className="grid gap-5 xl:grid-cols-2">
-            <Card title="Servicios por vehículo"><Barras rows={porVeh} unidad="servicios" /></Card>
-            <Card title="Porcentaje de vehículos por servicio"><Torta unidad="rutas" rows={porVeh.map((v) => ({ nombre: v.n, valor: v.v, color: v.color }))} /></Card>
+            <Card title="Recorridos por vehículo"><Barras rows={porVeh} unidad="servicios" /></Card>
+            <Card title="Participación de cada vehículo"><Torta unidad="rutas" rows={porVeh.map((v) => ({ nombre: v.n, valor: v.v, color: v.color }))} /></Card>
             <Card title="Toneladas por conductor"><Barras rows={porCond} unidad="t" /></Card>
             <Card title="Toneladas por auxiliar"><Barras rows={[{ n: 'Yesid Galvis', v: 63.1 }, { n: 'Camilo Pérez', v: 49.8 }, { n: 'Jhon Fredy Mora', v: 44.0 }]} unidad="t" /></Card>
-            <Card title="Distribución por disposición y manejo (conciliado, %)"><Torta unidad="%" rows={DIST_MANEJO.map((d) => ({ nombre: d.nombre, valor: d.valor }))} /></Card>
-            <Card title="Causales de cancelación de servicios"><Torta unidad="" rows={CAUSALES_CANCELACION.map((d) => ({ nombre: d.nombre, valor: d.valor }))} /></Card>
+            <Card title="Toneladas por tratamiento (%)"><Torta unidad="%" rows={DIST_MANEJO.map((d) => ({ nombre: d.nombre, valor: d.valor }))} /></Card>
+            <Card title="Motivos de cancelación"><Torta unidad="" rows={CAUSALES_CANCELACION.map((d) => ({ nombre: d.nombre, valor: d.valor }))} /></Card>
           </div>
         </div>
       )}
@@ -157,11 +151,11 @@ export function Exportable() {
     ['Declaraciones de residuos (detallado)', 'Todas las columnas: cliente, sucursal, corriente Y/A, CRETIB, manejo, embalaje, precio vigente, autorización.'],
     ['Declaraciones de servicios (detallado)', 'Frecuencia, programación automática, cantidad promedio y precio.'],
     ['Tarifas e historial de precios', 'Cada vigencia con su lote de asignación y usuario.'],
-    ['Declaraciones listas para recargar', 'Mismo formato de la plantilla de cargue masivo: edite en Excel y vuelva a subir.'],
+    ['Declaraciones listas para recargar', 'Mismo formato de la plantilla de importación: edite en Excel y vuelva a subir.'],
   ];
   return (
     <>
-      <PageHeader eyebrow="Declaraciones" title="Exportable detallado" subtitle="Exporte las declaraciones con todas sus columnas para revisión, auditoría o edición masiva en Excel." />
+      <PageHeader eyebrow="Comercial" title="Exportar" subtitle="Descargue declaraciones y tarifas con todas sus columnas para revisión, auditoría o edición en Excel." />
       <Filtros />
       <Card pad={false}><ul className="divide-y divide-line">{items.map(([t, d]) => (
         <li key={t} className="flex items-center gap-3 px-4 py-3"><FileSpreadsheet size={20} className="shrink-0 text-brand" /><div className="min-w-0 flex-1"><p className="text-[14px] font-medium">{t}</p><p className="text-[12px] text-muted">{d}</p></div>

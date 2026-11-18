@@ -2,13 +2,15 @@ import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/ui';
 import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
-import { Login, Recuperar } from './pages/Auth';
+import { MODO_REAL, sesionActual } from './lib/api';
+import { Login, Recuperar, Restablecer } from './pages/Auth';
 import Inicio from './pages/Inicio';
 import Declaraciones from './pages/Declaraciones';
+import DeclaracionesServidor from './pages/DeclaracionesServidor';
 import Precios from './pages/Precios';
 import Cargues from './pages/Cargues';
-import { EstadosRecorrido, InformeRutas, PreSolicitudes, Rastreo, Rutas, Solicitudes } from './pages/Logistica';
-import { Actas, Chequeo, Conciliaciones, Inventario, Manifiestos } from './pages/Operacion';
+import { Etapas, PorConfirmar, Programacion, ProgramacionTabla, Seguimiento, Solicitudes } from './pages/Logistica';
+import { Certificados, Inspecciones, Inventario, Manifiestos, Recepcion } from './pages/Operacion';
 import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
@@ -18,6 +20,11 @@ function Screen() {
   switch (route) {
     case 'login': return <Login />;
     case 'recuperar': return <Recuperar />;
+    case 'restablecer': return <Restablecer />;
+  }
+  // En modo servidor, sin sesión se vuelve al ingreso.
+  if (MODO_REAL && !sesionActual()) return <Login />;
+  switch (route) {
     case 'campo': return <CampoHoy />;
     case 'campo-preop': return <CampoPreop />;
     case 'campo-parada': return <CampoParada />;
@@ -25,30 +32,30 @@ function Screen() {
   const page = (() => {
     switch (route) {
       case 'inicio': return <Inicio />;
-      case 'declaraciones': return <Declaraciones />;
-      case 'precios': return <Precios />;
-      case 'cargues': return <Cargues />;
-      case 'exportable': return <Exportable />;
+      case 'clientes': return <Clientes />;
+      case 'declaraciones': return MODO_REAL ? <DeclaracionesServidor /> : <Declaraciones />;
+      case 'tarifas': return <Precios />;
+      case 'exportar': return <Exportable />;
       case 'solicitudes': return <Solicitudes />;
-      case 'pre-solicitudes': return <PreSolicitudes />;
-      case 'rutas': return <Rutas />;
-      case 'rastreo': return <Rastreo />;
-      case 'informe-rutas': return <InformeRutas />;
-      case 'estados-recorrido': return <EstadosRecorrido />;
-      case 'chequeo': return <Chequeo />;
+      case 'por-confirmar': return <PorConfirmar />;
+      case 'programacion': return <Programacion />;
+      case 'programacion-tabla': return <ProgramacionTabla />;
+      case 'seguimiento': return <Seguimiento />;
+      case 'inspecciones': return <Inspecciones />;
       case 'manifiestos': return <Manifiestos />;
-      case 'conciliaciones': return <Conciliaciones />;
-      case 'actas': return <Actas />;
+      case 'recepcion': return <Recepcion />;
       case 'inventario': return <Inventario />;
-      case 'informes': return <Informes />;
+      case 'certificados': return <Certificados />;
+      case 'permisos': return <Permisos />;
       case 'indicadores': return <Indicadores />;
-      case 'configuracion': return <ConfigIndex />;
-      case 'config-datos': return <MisDatos />;
-      case 'config-permisos': return <Permisos />;
-      case 'config-clientes': return <Clientes />;
-      case 'config-vehiculos': return <Vehiculos />;
-      case 'config-usuarios': return <Usuarios />;
-      case 'config-catalogos': return <Catalogos />;
+      case 'informes': return <Informes />;
+      case 'ajustes': return <ConfigIndex />;
+      case 'importar': return <Cargues />;
+      case 'empresa': return <MisDatos />;
+      case 'vehiculos': return <Vehiculos />;
+      case 'usuarios': return <Usuarios />;
+      case 'catalogos': return <Catalogos />;
+      case 'etapas': return <Etapas />;
     }
   })();
   return <AppShell>{page}</AppShell>;

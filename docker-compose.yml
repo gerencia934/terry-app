@@ -1,0 +1,33 @@
+# Entorno local completo: base de datos + API.
+#   docker compose up -d          (primera vez tarda unos minutos)
+#   docker compose run --rm api npm run db:seed
+# La app web se corre aparte con:  npm run dev:web
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: terraviva
+      POSTGRES_USER: terraviva
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-terraviva}
+    ports: ["5432:5432"]
+    volumes: [db-datos:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terraviva -d terraviva"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgresql://terraviva:${DB_PASSWORD:-terraviva}@db:5432/terraviva
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET en el archivo .env de la raíz}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      WEB_URL: ${WEB_URL:-http://localhost:5173}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+    ports: ["3000:3000"]
+
+volumes:
+  db-datos:

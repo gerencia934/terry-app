@@ -1,104 +1,71 @@
-# Arquitectura — Plataforma de Gestión Integral Terra Viva
+# Arquitectura — Plataforma Terra Viva
 
-## 1. Hilo de trazabilidad (núcleo del sistema)
+## 1. Cadena de trazabilidad (núcleo del sistema)
 
 ```
-Cliente → Sucursal → Declaración (+Tarifa) → Solicitud → Parada de ruta
-       → Manifiesto (origen) → Conciliación (báscula PSA Los Pinos) → Acta / Certificado → Factura
+Cliente → Sede → Declaración (+Tarifa) → Solicitud → Parada del recorrido
+       → Manifiesto → Recepción y pesaje (PSA Los Pinos) → Certificado → Factura
 ```
 
-Cada eslabón referencia al anterior por llave foránea. Si un registro rompe la cadena se pierde
-el soporte del certificado de disposición final ante la CAS o el cliente.
+Cada eslabón referencia al anterior. Si un registro rompe la cadena se pierde el soporte del
+certificado ante la CAS o el cliente.
 
 ## 2. Stack
 
 | Capa | Tecnología | Estado |
 |---|---|---|
-| Frontend web + PWA | React 18 + Vite 6 + TypeScript + Tailwind 3 | **Prototipo funcional** (`apps/web`) |
-| Gráficos | Recharts (paleta validada para daltonismo, claro/oscuro) | Hecho |
-| Backend | NestJS + Prisma (monolito modular) | Siguiente fase |
-| Base de datos | PostgreSQL 16 (+ PostGIS para zonas y check-in GPS) | **Esquema validado** (`packages/db`) |
-| Jobs | Redis + BullMQ (alertas de vencimientos, PDF, correos) | Siguiente fase |
-| Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Siguiente fase |
-| PDF | Gotenberg (HTML → PDF) | Siguiente fase |
-| Integraciones | Factura electrónica DIAN (proveedor tecnológico), RNDC | Fase 3 |
+| Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
+| API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 32 tablas, 2 migraciones, reglas en la base |
+| Reglas compartidas | `packages/shared` (validaciones e importación de Excel) | Hecho |
+| Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
+| Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Fase 2 |
+| PDF | Gotenberg (HTML → PDF) | Fase 2 |
+| Integraciones | Factura electrónica DIAN, RNDC | Fase 3 |
 
-### Cambio respecto a la propuesta inicial: Vite en lugar de Next.js
-La plataforma vive completa detrás de un inicio de sesión, así que no necesita SSR ni SEO
-(el sitio comercial terravivasas.com sigue siendo independiente). Con Vite:
-- el frontend se publica como archivos estáticos (hosting casi gratuito: S3 + CloudFront, Cloudflare Pages);
-- la PWA de conductores con modo sin conexión es más simple (sin capa de servidor de Next);
-- hay menos piezas que mantener: el único servidor es el API NestJS.
+## 3. API (`apps/api`, prefijo `/api/v1`)
 
-## 3. Base de datos
-
-- `packages/db/prisma/schema.prisma`: 32 tablas y 14 enums. Validado con `prisma validate` y aplicado
-  sobre PostgreSQL 16 sin errores.
-- `packages/db/prisma/schema.sql`: DDL generado.
-- `packages/db/prisma/reglas_negocio.sql`: reglas que la base de datos hace cumplir:
-  1. **Conciliación**: diferencia y % calculados; si |dif| > 2 % la justificación es obligatoria (CHECK).
-  2. **Preoperacional (PESV, Res. 40595/2022)**: una ruta no pasa de «Programada» sin preoperacional aprobado (trigger).
-  3. **Declaración autorizada**: no se programa la recolección de una declaración que no esté AUTORIZADA (trigger).
-
-Decisiones clave:
-- `empresa_id` en todas las tablas: el sistema queda listo para licenciarse como SaaS a otros gestores.
-- `tarifas` con vigencias: ningún precio se sobrescribe (soporte ante reclamos de facturación).
-- `catalogo_items` genérico: riesgos, embalajes, causales, líneas, tipos de manejo y métricas en una tabla,
-  administrados por un solo componente de interfaz.
-- `permisos_ambientales` + `obligaciones_permiso`: cada declaración se valida contra el alcance de los
-  permisos de la CAS (Res. 0235-2024, Res. 0632-2023, Auto SAA 0244-21, OF-311-21).
-
-## 4. Frontend (`apps/web/src`)
-
-```
-components/
-  AppShell.tsx     menú superior por módulo + menú lateral por submódulo; hamburguesa en < lg
-  data.tsx         ResponsiveTable (tabla ↔ tarjetas), FilterBar (fila ↔ hoja inferior), MonthCalendar (grilla ↔ agenda)
-  ui.tsx           Button, Badge, ColorBadge, Card, Sheet, Tabs, Field, Kpi, Toast
-lib/
-  router.tsx       rutas por hash (#inicio, #solicitudes…)
-  store.tsx        estado del prototipo (en producción: TanStack Query → API)
-  alertas.ts       reglas de alerta (permisos, SOAT/RTM, licencias, curso MP, preoperacional, conciliación)
-data/mock.ts       datos de demostración (servicios, permisos y planta reales; clientes ficticios)
-pages/
-  Auth.tsx         ingreso y recuperación de contraseña
-  Inicio.tsx       panel: KPIs, recorridos de hoy, alertas, permisos, accesos rápidos
-  Declaraciones.tsx residuos / servicios con 6 filtros, validación contra permisos, autorizar/rechazar
-  Precios.tsx      asignación masiva (ajuste % o precio fijo, vigencia, impacto estimado)
-  Logistica.tsx    solicitudes (formales/pre, tabla/calendario) y rutas (informe, calendario, estados con color)
-  Operacion.tsx    preoperacionales, manifiestos (RNDC), actas y conciliación origen vs. destino
-  Informes.tsx     indicadores generales y operativos
-  Configuracion.tsx permisos ambientales, clientes, vehículos, usuarios/roles, catálogos genéricos
-  Campo.tsx        PWA del conductor: mi ruta, preoperacional con firma, atención de parada
-```
-
-## 5. Cargues masivos (Excel)
-
-- `apps/web/src/cargues/definiciones.ts`: **fuente única** de las 8 plantillas (columnas, listas, reglas). La usan el
-  navegador, el script que genera los `.xlsx` y, en fase 1, el API para revalidar en servidor.
-- `apps/web/src/cargues/excel.ts`: genera la plantilla (hoja Plantilla con desplegables, hoja Instrucciones, hoja Listas
-  oculta) y lee el archivo diligenciado (ExcelJS, carga diferida).
-- Validación: obligatorios, tipos, listas, NIT + dígito de verificación DIAN, corrientes Y/A, placas, duplicados en el
-  archivo, cruce con clientes/sucursales/declaraciones existentes y advertencia si el manejo no está cubierto por un permiso.
-- Tabla `cargues_masivos` guarda cada cargue (archivo, filas OK/error, errores, usuario) para auditoría.
-- Plantillas listas en `docs/plantillas/` (`npm run plantillas` las regenera).
-
-## 6. Estrategia mobile-first
-
-1. Cada columna declara `priority`. En < 768 px la tabla se vuelve tarjetas con título, estado y solo
-   columnas de prioridad 1–2; el resto aparece en la hoja de detalle.
-2. Filtros en hoja inferior con contador de filtros activos.
-3. Calendario mensual → agenda por día.
-4. Vista de conductor separada: botones ≥ 44 px, barra inferior, sin tablas, flujo guiado:
-   preoperacional → paradas → cantidades reales → foto → firma → manifiesto.
-5. Sin conexión (siguiente fase): Service Worker + IndexedDB; la ruta del día se descarga al iniciar turno
-   y los registros se sincronizan al recuperar señal (el indicador «Sin señal · 2 en cola» ya está maquetado).
-
-## 7. Fases
-
-| Fase | Alcance | Resultado de negocio |
+| Módulo | Rutas | Reglas |
 |---|---|---|
-| 0 ✅ | Esquema BD + prototipo navegable | Validar flujos con logística, HSEQ y conductores |
-| 1 | API NestJS (auth, declaraciones, solicitudes, rutas) + conectar frontend + PWA offline | Menos digitación, rutas sin papel |
-| 2 | Manifiestos PDF, conciliación con báscula, actas/certificados, job de alertas | Cumplimiento automático ante la CAS |
-| 3 | Factura electrónica DIAN, RNDC, portal del cliente (pre-solicitudes y descarga de certificados) | Diferenciador comercial |
+| Auth | `POST auth/login · renovar · salir · recuperar · restablecer`, `GET auth/yo` | argon2id; token de acceso 15 min; token de renovación rotativo (reuso ⇒ cierra todas las sesiones); bloqueo 15 min tras 5 intentos; respuestas que no revelan si un correo existe |
+| Clientes | `GET/POST clientes`, `POST clientes/:id/sucursales` | DV del NIT calculado (DIAN) |
+| Declaraciones | `GET/POST declaraciones`, `PATCH :id/estado`, `POST tarifas/masivas` | No autoriza si ningún permiso vigente cubre el tratamiento; tarifas con vigencias |
+| Logística | `solicitudes`, `rutas`, `PATCH rutas/:id/estado`, `preoperacionales`, `PATCH paradas/:id` | Solo residuos autorizados (trigger); la ruta no inicia sin inspección aprobada (trigger); cancelar siempre se permite |
+| Cumplimiento | `permisos-ambientales`, `PATCH obligaciones/:id/cumplida`, `alertas`, `catalogos`, `vehiculos`, `estados-recorrido`, `elementos-chequeo`, `salud` | Alertas de obligaciones, SOAT/RTM/póliza, licencias y curso MP, rutas sin inspección |
+| Importación | `GET importacion/plantillas[/:id/archivo]`, `POST importacion/:id/vista-previa · confirmar`, `GET historial` | Revalida todo en servidor; guarda en una transacción; registra el cargue |
+
+Transversal: guard global (toda ruta exige token salvo `@Publico()`), permisos por rol con `@Permiso()`,
+**aislamiento por empresa** en cada consulta (`empresa_id` del token), auditoría de cada cambio,
+límite de peticiones, Helmet, CORS solo para la web, errores en español (los RAISE de la base se
+traducen a 409 con el mensaje de la regla).
+
+Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar.
+
+## 4. Base de datos (`packages/db`)
+
+- `prisma/schema.prisma` + `prisma/migrations/` (inicial y reglas de negocio).
+- Reglas en la base: tolerancia de báscula ±2 % con explicación obligatoria (CHECK), ruta sin
+  inspección aprobada no inicia (trigger), ítem de solicitud solo con declaración autorizada (trigger).
+- `prisma/seed.mjs`: idempotente. Empresa (NIT 901.089.780-8), roles, permisos ambientales de la CAS
+  (obligaciones de ejemplo marcadas «VERIFICAR»), catálogos, zonas, etapas, elementos de inspección,
+  flota y usuario administrador.
+
+## 5. Web (`apps/web`)
+
+- `lib/api.ts`: cliente HTTP con renovación automática del token. `VITE_API_URL` activa el modo servidor.
+- Conectado al servidor hoy: ingreso, recuperar/restablecer contraseña, Declaraciones, Importar datos, alertas.
+  Las demás secciones muestran un aviso de «datos de ejemplo» en modo servidor.
+- Navegación lateral por procesos (Comercial, Logística, Campo y HSEQ, Planta, Cumplimiento, Análisis,
+  Ajustes) y buscador con Ctrl + K.
+- Móvil: tablas que se vuelven tarjetas, filtros en hoja inferior, calendario que pasa a agenda,
+  app del conductor con botones grandes.
+
+## 6. Fases
+
+| Fase | Alcance | Estado |
+|---|---|---|
+| 0 | Esquema, prototipo, importación de Excel | ✅ |
+| 1 | API con autenticación, declaraciones, logística, cumplimiento, importación; web conectada en ingreso, declaraciones e importación | ✅ |
+| 1b | Conectar a la API las pantallas restantes (solicitudes, programación, inspecciones, manifiestos, recepción) y la app del conductor sin señal | Siguiente |
+| 2 | PDF de manifiestos y certificados, fotos y firmas en S3, tarea diaria de alertas por correo | |
+| 3 | Factura electrónica DIAN, RNDC, portal del cliente | |

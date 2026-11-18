@@ -178,7 +178,7 @@ export const DECLARACIONES: Declaracion[] = [
 
 // ---------------- Flota y personal ----------------
 export interface Vehiculo { id: string; placa: string; marca: string; tipo: string; capacidad: string; color: string; soat: string; rtm: string; polizaRc: string }
-// Placas y marcas de la flota real (capturas de Grinclic). Tipos, capacidades y vencimientos son de demostración.
+// Placas y marcas de la flota real de Terra Viva. Tipos, capacidades y vencimientos son de demostración.
 export const VEHICULOS: Vehiculo[] = [
   { id: 'v1', placa: 'USD855', marca: 'Chevrolet', tipo: 'Furgón RESPEL', capacidad: '3.500 kg', color: '#D92D20', soat: '2027-03-02', rtm: '2027-02-11', polizaRc: '2027-01-20' },
   { id: 'v2', placa: 'LPM482', marca: 'JMC', tipo: 'Furgón', capacidad: '2.000 kg', color: '#1E9BD7', soat: '2026-11-29', rtm: '2027-05-18', polizaRc: '2027-01-20' },
@@ -208,10 +208,10 @@ export const persona = (id?: string) => PERSONAS.find((p) => p.id === id);
 // ---------------- Estados de recorrido (configurables) ----------------
 export const ESTADOS_RUTA = [
   { id: 'e1', nombre: 'Programada', color: '#6B7A72', orden: 0, descripcion: 'Ruta creada, aún no inicia', rastreo: false },
-  { id: 'e2', nombre: 'En camino', color: '#E5B800', orden: 1, descripcion: 'Reporta ubicación geográfica continuamente durante el recorrido', rastreo: true },
-  { id: 'e3', nombre: 'En campo', color: '#1E9BD7', orden: 2, descripcion: 'Tripulación atendiendo al generador', rastreo: true },
-  { id: 'e4', nombre: 'Finalizado', color: '#1F8A3B', orden: 3, descripcion: 'Descargado en planta', rastreo: true },
-  { id: 'e5', nombre: 'Cancelado', color: '#D92D20', orden: 4, descripcion: 'Cancelado', rastreo: true },
+  { id: 'e2', nombre: 'En camino', color: '#E5B800', orden: 1, descripcion: 'El vehículo salió; envía su ubicación cada pocos minutos', rastreo: true },
+  { id: 'e3', nombre: 'Donde el generador', color: '#1E9BD7', orden: 2, descripcion: 'Tripulación cargando en la sede del cliente', rastreo: true },
+  { id: 'e4', nombre: 'Descargado en planta', color: '#1F8A3B', orden: 3, descripcion: 'Recibido y pesado en PSA Los Pinos', rastreo: true },
+  { id: 'e5', nombre: 'Cancelada', color: '#D92D20', orden: 4, descripcion: 'No se realizó', rastreo: false },
 ];
 export const estadoRuta = (id: string) => ESTADOS_RUTA.find((e) => e.id === id)!;
 
@@ -353,18 +353,18 @@ export const CAUSALES_CANCELACION = [
   { nombre: 'Residuo sin embalar', valor: 6 }, { nombre: 'Clima / vía cerrada', valor: 3 },
 ];
 
-// ---------------- Extensiones modelo Grinclic ----------------
-/** Tipo de solicitud (Grinclic): carga directa, carga automática (por frecuencia) o descargue. */
-export type TipoSolicitud = 'Carga directa' | 'Carga automática' | 'Descargue';
+// ---------------- Campos operativos derivados ----------------
+/** Modalidad de la solicitud: recolección en la sede, programada por frecuencia, o entrega del cliente en planta. */
+export type TipoSolicitud = 'Recolección' | 'Por frecuencia' | 'Entrega en planta';
 export const tipoSolicitud = (s: Solicitud): TipoSolicitud => {
   const it = item(decl(s.items[0].declId).itemId);
-  if (it.linea === 'RCD' && s.numero % 2 === 0) return 'Descargue';
-  return s.numero % 3 === 0 ? 'Carga automática' : 'Carga directa';
+  if (it.linea === 'RCD' && s.numero % 2 === 0) return 'Entrega en planta';
+  return s.numero % 3 === 0 ? 'Por frecuencia' : 'Recolección';
 };
 export const jornada = (s: Solicitud) => (s.franja.startsWith('13') || s.franja.startsWith('14') ? 'PM' : 'AM');
 export const ordenCompra = (s: Solicitud) => (s.numero % 4 === 0 ? `OC-${4400 + (s.numero % 97)}` : '');
-export const estadoGrinclic = (s: Solicitud) =>
-  s.estado === 'CANCELADA' ? 'Descartada' : s.estado === 'PENDIENTE' ? (s.clase === 'PRE' ? 'No aprobado' : 'Pendiente') : 'Gestionado';
+export const etiquetaEstado = (s: Solicitud) =>
+  ({ CANCELADA: 'Cancelada', PENDIENTE: s.clase === 'PRE' ? 'Por confirmar' : 'Pendiente', PROGRAMADA: 'Programada', RECOLECTADA: 'Recolectada' } as const)[s.estado];
 
 /** Rutas adicionales del mes para el calendario (demostración, determinísticas). */
 const rnd = (seed: number) => { const x = Math.sin(seed * 9301 + 49297) * 233280; return x - Math.floor(x); };
@@ -388,7 +388,7 @@ for (let d = 1; d <= 30; d++) {
 }
 export const horaRuta = (r: Ruta) => r.salida ?? HORAS[Number(r.id.replace(/\D/g, '')) % HORAS.length];
 
-/** Datos del generador que pide Grinclic en la declaración (derivados del catálogo). */
+/** Atributos del residuo para la declaración (derivados del catálogo). */
 export const extraDecl = (d: Declaracion) => {
   const it = item(d.itemId);
   const pel = it.peligrosidad.length > 0;

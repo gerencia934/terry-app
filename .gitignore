@@ -1,6 +1,8 @@
-node_modules/
-dist/
-dist-demo/
-.env
 *.log
+.env
+apps/api/.env
 apps/web/scripts/.gen.mjs
+dist-demo/
+dist-real/
+dist/
+node_modules/

@@ -11,7 +11,9 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "noUnusedLocals": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": { "@terraviva/shared": ["../../packages/shared/src/index.ts"] }
   },
-  "include": ["src"]
+  "include": ["src", "../../packages/shared/src"]
 }

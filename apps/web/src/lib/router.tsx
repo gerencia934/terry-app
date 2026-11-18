@@ -3,13 +3,14 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 // Enrutamiento por hash plano (#inicio, #solicitudes…). Funciona en hosting estático
 // y dentro del prototipo publicado. En producción puede migrarse a React Router sin tocar páginas.
 export const ROUTES = [
-  'login', 'recuperar', 'inicio',
-  'declaraciones', 'precios', 'cargues', 'exportable',
-  'solicitudes', 'pre-solicitudes',
-  'rutas', 'rastreo', 'informe-rutas', 'estados-recorrido',
-  'chequeo', 'manifiestos', 'conciliaciones', 'actas', 'inventario',
-  'informes', 'indicadores',
-  'configuracion', 'config-clientes', 'config-vehiculos', 'config-usuarios', 'config-catalogos', 'config-permisos', 'config-datos',
+  'login', 'recuperar', 'restablecer', 'inicio',
+  'clientes', 'declaraciones', 'tarifas', 'exportar',
+  'solicitudes', 'por-confirmar', 'programacion', 'programacion-tabla', 'seguimiento',
+  'inspecciones', 'manifiestos',
+  'recepcion', 'inventario', 'certificados',
+  'permisos',
+  'indicadores', 'informes',
+  'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'catalogos', 'etapas',
   'campo', 'campo-preop', 'campo-parada',
 ] as const;
 export type RouteName = (typeof ROUTES)[number];

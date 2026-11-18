@@ -104,6 +104,7 @@ enum UnidadMedida {
   TON
   M3
   GAL
+  L
   UND
   SERVICIO
 }
@@ -198,10 +199,29 @@ model Usuario {
   tarifasAsignadas    Tarifa[]
   solicitudesCreadas  Solicitud[]
   resetTokens         PasswordReset[]
+  sesiones            Sesion[]
+  intentosFallidos    Int       @default(0) @map("intentos_fallidos")
+  bloqueadoHasta      DateTime? @map("bloqueado_hasta") @db.Timestamptz
   auditoria           Auditoria[]
 
   @@index([empresaId])
   @@map("usuarios")
+}
+
+/** Sesión activa: guarda el hash del token de renovación (nunca el token). Permite cerrar sesiones remotamente. */
+model Sesion {
+  id          String    @id @default(uuid()) @db.Uuid
+  usuarioId   String    @map("usuario_id") @db.Uuid
+  tokenHash   String    @map("token_hash")
+  userAgent   String?   @map("user_agent") @db.VarChar(300)
+  ip          String?   @db.VarChar(64)
+  creadaEn    DateTime  @default(now()) @map("creada_en") @db.Timestamptz
+  expiraEn    DateTime  @map("expira_en") @db.Timestamptz
+  revocadaEn  DateTime? @map("revocada_en") @db.Timestamptz
+  usuario     Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@map("sesiones")
 }
 
 model PasswordReset {
@@ -312,6 +332,8 @@ model Vehiculo {
   empresaId     String    @map("empresa_id") @db.Uuid
   bodegaId      String?   @map("bodega_id") @db.Uuid
   placa         String    @unique @db.VarChar(7)
+  marca         String?   @db.VarChar(40)
+  color         String    @default("#1E7838") @db.VarChar(7) // color en el calendario de programación
   tipo          String    @db.VarChar(40) // furgón RESPEL, vactor, volqueta, estacas
   capacidad     Decimal   @db.Decimal(10, 2)
   unidadCap     UnidadMedida @default(KG) @map("unidad_cap")

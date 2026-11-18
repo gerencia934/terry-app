@@ -1,10 +1,22 @@
 {
   "name": "terraviva-plataforma",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "npm run dev -w @terraviva/web",
-    "build": "npm run build -w @terraviva/web",
-    "db:validate": "npm run validate -w @terraviva/db"
+    "dev:web": "npm run dev -w @terraviva/web",
+    "dev:api": "npm run build -w @terraviva/shared && npm run dev -w @terraviva/api",
+    "build": "npm run build -w @terraviva/shared && npm run build -w @terraviva/api && npm run build -w @terraviva/web",
+    "db:migrate": "npm run migrate:deploy -w @terraviva/db",
+    "db:seed": "npm run seed -w @terraviva/db",
+    "test:e2e": "npm run test:e2e -w @terraviva/api"
+  },
+  "devDependencies": {
+    "prisma": "6.19.0"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.0"
   }
 }

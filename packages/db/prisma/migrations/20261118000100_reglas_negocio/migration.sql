@@ -11,13 +11,14 @@ ALTER TABLE conciliacion_items
       OR ABS((cantidad_destino - cantidad_origen) * 100 / cantidad_origen) <= 2
       OR COALESCE(LENGTH(TRIM(justificacion)), 0) > 0);
 
--- 2) Una ruta no puede pasar a un estado distinto de "Programada" si su preoperacional
---    del día no está aprobado (Res. 40595/2022 – PESV).
+-- 2) Una ruta no puede iniciar el recorrido (estados intermedios) si el preoperacional
+--    del vehículo para ese día no está aprobado (Res. 40595/2022 – PESV).
 CREATE OR REPLACE FUNCTION fn_bloqueo_preoperacional() RETURNS trigger AS $$
-DECLARE orden_estado INT;
+DECLARE orden_estado INT; final_estado BOOLEAN;
 BEGIN
-  SELECT orden INTO orden_estado FROM estados_recorrido WHERE id = NEW.estado_recorrido_id;
-  IF orden_estado IS NOT NULL AND orden_estado > 1 AND NOT EXISTS (
+  SELECT orden, es_final INTO orden_estado, final_estado FROM estados_recorrido WHERE id = NEW.estado_recorrido_id;
+  -- Los estados finales (Finalizado, Cancelado) no se bloquean: cancelar siempre debe ser posible.
+  IF orden_estado IS NOT NULL AND orden_estado > 1 AND NOT final_estado AND NOT EXISTS (
        SELECT 1 FROM preoperacionales p
         WHERE p.vehiculo_id = NEW.vehiculo_id
           AND p.fecha_programada = NEW.fecha_programada

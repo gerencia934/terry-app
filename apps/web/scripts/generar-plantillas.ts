@@ -4,8 +4,8 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ExcelJS from 'exceljs';
-import { PLANTILLAS, plantilla, validarFilas, dvNit } from '../src/cargues/definiciones';
-import { construirPlantilla, leerArchivo } from '../src/cargues/excel';
+import { PLANTILLAS, plantilla, validarFilas, dvNit } from '../../../packages/shared/src/importacion/definiciones';
+import { construirPlantilla, leerArchivo } from '../../../packages/shared/src/importacion/excel';
 import { contextoActual } from '../src/cargues/contexto';
 
 const out = resolve(import.meta.dirname, '../../../docs/plantillas');

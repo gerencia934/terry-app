@@ -48,8 +48,8 @@ export default function Precios() {
 
   return (
     <>
-      <PageHeader eyebrow="Declaraciones" title="Asignación masiva de precios"
-        subtitle="Filtre por cliente, tipo de negociación y forma de pago; seleccione las declaraciones y aplique un precio fijo o un ajuste porcentual con fecha de vigencia." />
+      <PageHeader eyebrow="Comercial" title="Tarifas"
+        subtitle="Escoja las declaraciones que cambian de precio y aplique un ajuste porcentual o un valor fijo desde una fecha. El precio anterior queda en el historial." />
       <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => { setF({ cliente: '', negociacion: '', pago: '', linea: '' }); setSelected(new Set()); }}>
         <Field label="Cliente" id="p-cliente"><Select id="p-cliente" value={f.cliente} onChange={set('cliente')}><option value="">Todos</option>{CLIENTES.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
         <Field label="Tipo de negociación" id="p-neg"><Select id="p-neg" value={f.negociacion} onChange={set('negociacion')}><option value="">Todas</option><option value="COBRO">Cobro</option><option value="COMPRA">Compra</option><option value="SIN_COSTO">Sin costo</option></Select></Field>

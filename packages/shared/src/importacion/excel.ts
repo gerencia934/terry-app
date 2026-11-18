@@ -1,7 +1,7 @@
 import type ExcelJSNS from 'exceljs';
 import type { Plantilla } from './definiciones';
 
-// ExcelJS se carga solo cuando se usa (no pesa en el arranque de la app).
+// ExcelJS se carga solo cuando se usa (no pesa en el arranque de la app web; en el API se carga una vez).
 type ExcelJS = typeof ExcelJSNS;
 let lib: ExcelJS | null = null;
 async function excel(): Promise<ExcelJS> {
@@ -121,11 +121,4 @@ export async function exportarErrores(p: Plantilla, filas: { n: number; datos: R
   ws.getRow(1).font = { bold: true };
   filas.forEach((f) => { const r = ws.addRow({ ...f.datos, _e: f.errores.join(' | ') }); r.getCell('_e').font = { color: { argb: 'FFBE2828' } }; });
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
-}
-
-export function descargar(buf: ArrayBuffer, nombre: string) {
-  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = nombre; document.body.appendChild(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }

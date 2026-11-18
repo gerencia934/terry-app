@@ -1,10 +1,10 @@
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Download, Upload, FileSpreadsheet, CheckCircle2, XCircle, AlertTriangle, PlayCircle, Loader2, History, Info } from 'lucide-react';
 import { Badge, Button, Card, PageHeader, Tabs, useToast } from '../components/ui';
-import { PLANTILLAS, plantilla, validarFilas, type FilaValidada, type Plantilla } from '../cargues/definiciones';
+import { PLANTILLAS, plantilla, validarFilas, type FilaValidada, type Plantilla } from '@terraviva/shared';
 import { contextoActual } from '../cargues/contexto';
-import { tomarCargueInicial } from './Configuracion';
 import { cx } from '../lib/format';
+import { MODO_REAL, api, ErrorApi } from '../lib/api';
 
 // Filas de ejemplo (algunas con errores a propósito) para probar sin preparar un archivo.
 const EJEMPLOS: Record<string, Record<string, string>[]> = {
@@ -45,48 +45,65 @@ const EJEMPLOS: Record<string, Record<string, string>[]> = {
     { documento: '1098555666', nombre: 'Correo repetido', email: 'logistica@terravivasas.com', rol: 'Logística' },
   ],
   solicitudes: [
-    { nit: '901223456', sucursal: 'EDS Principal', tipo: 'Carga directa', fecha: '2026-12-02', jornada: 'AM', codigo: 'RP-008', cantidad: '120' },
-    { nit: '901223456', sucursal: 'EDS Principal', tipo: 'Carga directa', fecha: '2026-12-02', jornada: 'AM', codigo: 'RP-009', cantidad: '80' },
-    { nit: '900112345', sucursal: 'Planta extractora', tipo: 'Carga directa', fecha: '2026-12-05', codigo: 'XX-000', cantidad: '10' },
+    { nit: '901223456', sucursal: 'EDS Principal', tipo: 'Recolección en sede', fecha: '2026-12-02', jornada: 'AM', codigo: 'RP-008', cantidad: '120' },
+    { nit: '901223456', sucursal: 'EDS Principal', tipo: 'Recolección en sede', fecha: '2026-12-02', jornada: 'AM', codigo: 'RP-009', cantidad: '80' },
+    { nit: '900112345', sucursal: 'Planta extractora', tipo: 'Recolección en sede', fecha: '2026-12-05', codigo: 'XX-000', cantidad: '10' },
   ],
 };
 
 interface Cargue { fecha: string; plantilla: string; archivo: string; ok: number; error: number }
 const HISTORIAL_INICIAL: Cargue[] = [
-  { fecha: '2026-11-12 09:41', plantilla: 'Clientes directos', archivo: 'clientes_noviembre.xlsx', ok: 14, error: 0 },
-  { fecha: '2026-11-12 09:55', plantilla: 'Sucursales / generadores', archivo: 'sucursales_noviembre.xlsx', ok: 31, error: 2 },
-  { fecha: '2026-11-05 16:20', plantilla: 'Asignación masiva de precios', archivo: 'tarifas_2027.xlsx', ok: 58, error: 0 },
+  { fecha: '2026-11-12 09:41', plantilla: 'Clientes', archivo: 'clientes_noviembre.xlsx', ok: 14, error: 0 },
+  { fecha: '2026-11-12 09:55', plantilla: 'Sedes de clientes', archivo: 'sedes_noviembre.xlsx', ok: 31, error: 2 },
+  { fecha: '2026-11-05 16:20', plantilla: 'Tarifas', archivo: 'tarifas_2027.xlsx', ok: 58, error: 0 },
 ];
 
 export default function Cargues() {
   const toast = useToast();
-  const [pid, setPid] = useState(() => (PLANTILLAS.some((p) => p.id === tomarCargueInicial()) ? tomarCargueInicial() : 'clientes'));
+  const [pid, setPid] = useState('clientes');
   const [res, setRes] = useState<{ archivo: string; filas: FilaValidada[]; faltantes: string[] } | null>(null);
   const [cargando, setCargando] = useState(false);
   const [vista, setVista] = useState<'todas' | 'errores' | 'validas'>('todas');
-  const [historial, setHistorial] = useState(HISTORIAL_INICIAL);
+  const [historial, setHistorial] = useState(MODO_REAL ? [] as Cargue[] : HISTORIAL_INICIAL);
+  const [archivoActual, setArchivoActual] = useState<Blob | null>(null);
+  const cargarHistorial = () => MODO_REAL && api<{ plantilla: string; archivo: string; filasOk: number; filasError: number; creadoEn: string }[]>('/importacion/historial')
+    .then((h) => setHistorial(h.map((x) => ({ fecha: x.creadoEn.slice(0, 16).replace('T', ' '), plantilla: PLANTILLAS.find((q) => q.id === x.plantilla)?.nombre ?? x.plantilla, archivo: x.archivo, ok: x.filasOk, error: x.filasError })))).catch(() => undefined);
+  useEffect(() => { cargarHistorial(); }, []);
   const [drag, setDrag] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const p = plantilla(pid);
 
   const elegir = (id: string) => { setPid(id); setRes(null); setVista('todas'); };
   const bajar = async () => {
-    try { const { construirPlantilla, descargar } = await import('../cargues/excel'); descargar(await construirPlantilla(p), p.archivo); toast(`Plantilla ${p.archivo} generada.`); }
+    try {
+      const { descargar } = await import('../cargues/descargar');
+      if (MODO_REAL) descargar(await (await api<Blob>(`/importacion/plantillas/${p.id}/archivo`, { blob: true })).arrayBuffer(), p.archivo);
+      else { const { construirPlantilla } = await import('@terraviva/shared'); descargar(await construirPlantilla(p), p.archivo); }
+      toast(`Plantilla ${p.archivo} generada.`);
+    }
     catch { toast('No se pudo generar la plantilla en este navegador.', 'warn'); }
   };
   const procesar = async (nombre: string, buf: ArrayBuffer) => {
     setCargando(true); setVista('todas');
     try {
-      const { leerArchivo } = await import('../cargues/excel');
-      const { filas, faltantes } = await leerArchivo(p, buf);
-      setRes({ archivo: nombre, filas: validarFilas(p, filas, contextoActual()), faltantes });
-    } catch { toast('No se pudo leer el archivo. Verifique que sea un .xlsx generado con la plantilla.', 'warn'); }
+      if (MODO_REAL) {
+        // El servidor valida contra los datos reales de la empresa.
+        const blob = new Blob([buf]); setArchivoActual(blob);
+        const form = new FormData(); form.append('archivo', blob, nombre);
+        const r = await api<{ archivo: string; filas: FilaValidada[]; faltantes: string[] }>(`/importacion/${p.id}/vista-previa`, { form });
+        setRes({ archivo: r.archivo, filas: r.filas, faltantes: r.faltantes });
+      } else {
+        const { leerArchivo } = await import('@terraviva/shared');
+        const { filas, faltantes } = await leerArchivo(p, buf);
+        setRes({ archivo: nombre, filas: validarFilas(p, filas, contextoActual()), faltantes });
+      }
+    } catch (e) { toast(e instanceof ErrorApi ? e.message : 'No se pudo leer el archivo. Verifique que sea un .xlsx generado con la plantilla.', 'warn'); }
     setCargando(false);
   };
   const subir = async (f?: File | null) => { if (f) await procesar(f.name, await f.arrayBuffer()); };
   const probar = async () => {
     setCargando(true);
-    const { construirPlantilla } = await import('../cargues/excel');
+    const { construirPlantilla } = await import('@terraviva/shared');
     const ExcelJS = ((await import('exceljs')) as unknown as { default: typeof import('exceljs') }).default;
     const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await construirPlantilla(p));
     const ws = wb.getWorksheet('Plantilla')!;
@@ -95,19 +112,28 @@ export default function Cargues() {
   };
   const validas = res?.filas.filter((f) => !f.errores.length) ?? [];
   const conError = res?.filas.filter((f) => f.errores.length) ?? [];
-  const cargar = () => {
+  const cargar = async () => {
     if (!res) return;
+    if (MODO_REAL && archivoActual) {
+      try {
+        const form = new FormData(); form.append('archivo', archivoActual, res.archivo);
+        const r = await api<{ creadas: number; actualizadas: number; rechazadas: number }>(`/importacion/${p.id}/confirmar`, { form });
+        toast(`Guardado: ${r.creadas} nuevos y ${r.actualizadas} actualizados.${r.rechazadas ? ` ${r.rechazadas} filas con errores quedaron por fuera.` : ''}`);
+        setRes(null); cargarHistorial();
+      } catch (e) { toast(e instanceof ErrorApi ? e.message : 'No se pudo guardar.', 'warn'); }
+      return;
+    }
     setHistorial((h) => [{ fecha: '2026-11-18 ' + new Date().toTimeString().slice(0, 5), plantilla: p.nombre, archivo: res.archivo, ok: validas.length, error: conError.length }, ...h]);
     toast(`Se cargaron ${validas.length} registros de «${p.nombre}». ${conError.length ? `${conError.length} filas con errores quedaron por fuera.` : ''}`);
     setRes(null);
   };
-  const bajarErrores = async () => { const { exportarErrores, descargar } = await import('../cargues/excel'); descargar(await exportarErrores(p, conError), `errores_${p.archivo}`); };
+  const bajarErrores = async () => { const { exportarErrores } = await import('@terraviva/shared'); const { descargar } = await import('../cargues/descargar'); descargar(await exportarErrores(p, conError), `errores_${p.archivo}`); };
   const visibles = vista === 'errores' ? conError : vista === 'validas' ? validas : res?.filas ?? [];
   const resumen = (f: FilaValidada) => p.columnas.slice(0, 3).map((c) => f.datos[c.key]).filter(Boolean).join(' · ');
 
   return (
     <>
-      <PageHeader eyebrow="Cargues masivos" title="Cargue masivo con plantilla de Excel" subtitle="Descargue la plantilla, diligénciela en Excel y súbala. El sistema revisa cada fila antes de guardar: nada se carga hasta que usted confirma." />
+      <PageHeader eyebrow="Ajustes" title="Importar datos" subtitle="Descargue la plantilla, llénela en Excel y súbala. Cada fila se revisa antes de guardar y nada se guarda hasta que usted confirme." />
       <div className="grid gap-5 xl:grid-cols-[300px_1fr]">
         {/* Plantillas */}
         <div className="flex flex-col gap-2">
@@ -173,7 +199,7 @@ export default function Cargues() {
             </Card>
           )}
 
-          <Card title={<span className="flex items-center gap-2"><History size={17} />Historial de cargues</span>} pad={false}>
+          <Card title={<span className="flex items-center gap-2"><History size={17} />Importaciones anteriores</span>} pad={false}>
             <ul className="divide-y divide-line">{historial.map((h, i) => (
               <li key={i} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-[13px]">
                 <span className="num text-muted">{h.fecha}</span><span className="font-medium">{h.plantilla}</span><span className="min-w-0 flex-1 truncate text-muted">{h.archivo}</span>
@@ -181,7 +207,7 @@ export default function Cargues() {
               </li>))}
             </ul>
           </Card>
-          <p className="flex items-start gap-2 text-[12px] text-muted"><Info size={14} className="mt-px shrink-0" />En el prototipo publicado como página, el visor puede bloquear la descarga de archivos. Las 8 plantillas también se entregan como archivos .xlsx aparte; diligéncielas y súbalas aquí.</p>
+          {!MODO_REAL && <p className="flex items-start gap-2 text-[12px] text-muted"><Info size={14} className="mt-px shrink-0" />Modo demostración: la revisión se hace en el navegador contra datos de ejemplo y nada se guarda. Con el servidor conectado, la revisión y el guardado los hace el API.</p>}
         </div>
       </div>
     </>
