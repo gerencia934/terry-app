@@ -1,0 +1,726 @@
+// =====================================================================
+// Terra Viva S.A.S. E.S.P. — Plataforma de Gestión Integral de Residuos
+// Esquema relacional (PostgreSQL 16 + PostGIS)
+//
+// Hilo de trazabilidad:
+// Cliente → Sucursal → Declaración (+Tarifa) → Solicitud → Parada de ruta
+//   → Manifiesto → Conciliación (báscula Los Pinos) → Acta / Certificado → Factura
+// =====================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto]
+}
+
+// ---------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------
+enum TipoDeclaracion {
+  RESIDUO
+  SERVICIO
+}
+
+enum EstadoDeclaracion {
+  BORRADOR
+  PENDIENTE
+  AUTORIZADA
+  RECHAZADA
+  INACTIVA
+}
+
+enum TipoNegociacion {
+  COBRO     // el cliente paga por la gestión
+  COMPRA    // Terra Viva compra el material (aprovechables)
+  SIN_COSTO
+}
+
+enum FormaPago {
+  CONTADO
+  CREDITO_30
+  CREDITO_60
+  CREDITO_90
+}
+
+enum ClaseSolicitud {
+  PRE
+  FORMAL
+}
+
+enum Operacion {
+  CARGA
+  DESCARGA
+}
+
+enum EstadoSolicitud {
+  PENDIENTE
+  PROGRAMADA
+  EN_CURSO
+  RECOLECTADA
+  CANCELADA
+}
+
+enum EstadoParada {
+  PENDIENTE
+  ATENDIDA
+  NO_ATENDIDA
+}
+
+enum ResultadoChequeo {
+  OK
+  NO_OK
+  NA
+}
+
+enum EstadoDocumento {
+  BORRADOR
+  EMITIDO
+  EN_TRANSITO
+  RECIBIDO
+  CERRADO
+  ANULADO
+}
+
+enum TipoActa {
+  DISPOSICION
+  CONCILIACION
+  APROVECHAMIENTO
+}
+
+enum EstadoPermiso {
+  VIGENTE
+  POR_VENCER
+  VENCIDO
+  EN_TRAMITE
+}
+
+enum UnidadMedida {
+  KG
+  TON
+  M3
+  GAL
+  UND
+  SERVICIO
+}
+
+// ---------------------------------------------------------------------
+// MULTIEMPRESA Y SEGURIDAD
+// ---------------------------------------------------------------------
+model Empresa {
+  id           String   @id @default(uuid()) @db.Uuid
+  nit          String   @unique @db.VarChar(15)
+  razonSocial  String   @map("razon_social") @db.VarChar(200)
+  logoUrl      String?  @map("logo_url")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  usuarios       Usuario[]
+  roles          Rol[]
+  clientes       Cliente[]
+  proveedores    Proveedor[]
+  vehiculos      Vehiculo[]
+  bodegas        Bodega[]
+  zonas          Zona[]
+  catalogo       CatalogoResiduo[]
+  declaraciones  Declaracion[]
+  solicitudes    Solicitud[]
+  rutas          Ruta[]
+  estadosRuta    EstadoRecorrido[]
+  catalogoItems  CatalogoItem[]
+  elementosCheck ElementoChequeo[]
+  permisos       PermisoAmbiental[]
+  manifiestos    Manifiesto[]
+  actas          Acta[]
+
+  @@map("empresas")
+}
+
+model Rol {
+  id         String   @id @default(uuid()) @db.Uuid
+  empresaId  String   @map("empresa_id") @db.Uuid
+  nombre     String   @db.VarChar(60)
+  empresa    Empresa  @relation(fields: [empresaId], references: [id])
+  permisos   RolPermiso[]
+  usuarios   Usuario[]
+
+  @@unique([empresaId, nombre])
+  @@map("roles")
+}
+
+model Permiso {
+  id      String       @id @default(uuid()) @db.Uuid
+  codigo  String       @unique @db.VarChar(60) // ej. "rutas.editar"
+  nombre  String       @db.VarChar(120)
+  roles   RolPermiso[]
+
+  @@map("permisos")
+}
+
+model RolPermiso {
+  rolId     String  @map("rol_id") @db.Uuid
+  permisoId String  @map("permiso_id") @db.Uuid
+  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+  @@map("rol_permisos")
+}
+
+model Usuario {
+  id            String    @id @default(uuid()) @db.Uuid
+  empresaId     String    @map("empresa_id") @db.Uuid
+  rolId         String    @map("rol_id") @db.Uuid
+  nombre        String    @db.VarChar(150)
+  documento     String    @db.VarChar(20)
+  email         String    @unique @db.VarChar(150)
+  passwordHash  String    @map("password_hash")
+  telefono      String?   @db.VarChar(20)
+  esConductor   Boolean   @default(false) @map("es_conductor")
+  esAuxiliar    Boolean   @default(false) @map("es_auxiliar")
+  licenciaCat   String?   @map("licencia_cat") @db.VarChar(5)
+  licenciaVence DateTime? @map("licencia_vence") @db.Date
+  cursoMpVence  DateTime? @map("curso_mp_vence") @db.Date // Res. 1223/2014
+  activo        Boolean   @default(true)
+  ultimoLogin   DateTime? @map("ultimo_login") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa             Empresa            @relation(fields: [empresaId], references: [id])
+  rol                 Rol                @relation(fields: [rolId], references: [id])
+  rutasConductor      Ruta[]             @relation("RutaConductor")
+  rutasAuxiliar       Ruta[]             @relation("RutaAuxiliar")
+  preopConductor      Preoperacional[]   @relation("PreopConductor")
+  preopAuxiliar       Preoperacional[]   @relation("PreopAuxiliar")
+  manifiestos         Manifiesto[]
+  tarifasAsignadas    Tarifa[]
+  solicitudesCreadas  Solicitud[]
+  resetTokens         PasswordReset[]
+  auditoria           Auditoria[]
+
+  @@index([empresaId])
+  @@map("usuarios")
+}
+
+model PasswordReset {
+  id         String    @id @default(uuid()) @db.Uuid
+  usuarioId  String    @map("usuario_id") @db.Uuid
+  tokenHash  String    @map("token_hash")
+  expiraEn   DateTime  @map("expira_en") @db.Timestamptz
+  usadoEn    DateTime? @map("usado_en") @db.Timestamptz
+  usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+// ---------------------------------------------------------------------
+// ENTIDADES BASE
+// ---------------------------------------------------------------------
+model Cliente {
+  id               String          @id @default(uuid()) @db.Uuid
+  empresaId        String          @map("empresa_id") @db.Uuid
+  nit              String          @db.VarChar(15)
+  dv               String?         @db.Char(1)
+  razonSocial      String          @map("razon_social") @db.VarChar(200)
+  sector           String?         @db.VarChar(60) // hidrocarburos, palma, salud, construcción...
+  tipoNegociacion  TipoNegociacion @default(COBRO) @map("tipo_negociacion")
+  formaPago        FormaPago       @default(CONTADO) @map("forma_pago")
+  emailFacturacion String?         @map("email_facturacion") @db.VarChar(150)
+  activo           Boolean         @default(true)
+  camposExtra      Json            @default("{}") @map("campos_extra")
+
+  empresa       Empresa       @relation(fields: [empresaId], references: [id])
+  sucursales    Sucursal[]
+  declaraciones Declaracion[]
+  solicitudes   Solicitud[]
+  manifiestos   Manifiesto[]
+  actas         Acta[]
+
+  @@unique([empresaId, nit])
+  @@map("clientes")
+}
+
+model Sucursal {
+  id             String  @id @default(uuid()) @db.Uuid
+  clienteId      String  @map("cliente_id") @db.Uuid
+  zonaId         String? @map("zona_id") @db.Uuid
+  nombre         String  @db.VarChar(150)
+  direccion      String? @db.VarChar(250)
+  municipioDane  String? @map("municipio_dane") @db.Char(5)
+  latitud        Decimal? @db.Decimal(9, 6) // en producción: GEOGRAPHY(POINT,4326) vía PostGIS
+  longitud       Decimal? @db.Decimal(9, 6)
+  registroRespel String?  @map("registro_respel") @db.VarChar(50) // Registro generador IDEAM
+  contacto       String?  @db.VarChar(150)
+  telefono       String?  @db.VarChar(20)
+  horario        String?  @db.VarChar(100)
+
+  cliente       Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  zona          Zona?         @relation(fields: [zonaId], references: [id])
+  declaraciones Declaracion[]
+  solicitudes   Solicitud[]
+  manifiestos   Manifiesto[]
+
+  @@map("sucursales")
+}
+
+model Proveedor {
+  id           String  @id @default(uuid()) @db.Uuid
+  empresaId    String  @map("empresa_id") @db.Uuid
+  nit          String  @db.VarChar(15)
+  razonSocial  String  @map("razon_social") @db.VarChar(200)
+  esDestino    Boolean @default(true) @map("es_destino") // planta / gestor de destino
+  esPropio     Boolean @default(false) @map("es_propio") // Parque de Saneamiento Ambiental Los Pinos
+  licencia     String? @db.VarChar(120)                  // acto administrativo del gestor
+  municipio    String? @db.VarChar(80)
+
+  empresa       Empresa       @relation(fields: [empresaId], references: [id])
+  declaraciones Declaracion[]
+  manifiestos   Manifiesto[]
+  actas         Acta[]
+
+  @@map("proveedores")
+}
+
+model Zona {
+  id         String  @id @default(uuid()) @db.Uuid
+  empresaId  String  @map("empresa_id") @db.Uuid
+  nombre     String  @db.VarChar(80)
+  color      String  @default("#15803D") @db.VarChar(7)
+  // poligono GEOGRAPHY(POLYGON,4326) — agregado vía migración SQL (PostGIS)
+
+  empresa    Empresa    @relation(fields: [empresaId], references: [id])
+  sucursales Sucursal[]
+  rutas      Ruta[]
+
+  @@map("zonas")
+}
+
+model Bodega {
+  id         String     @id @default(uuid()) @db.Uuid
+  empresaId  String     @map("empresa_id") @db.Uuid
+  nombre     String     @db.VarChar(100)
+  empresa    Empresa    @relation(fields: [empresaId], references: [id])
+  vehiculos  Vehiculo[]
+
+  @@map("bodegas")
+}
+
+model Vehiculo {
+  id            String    @id @default(uuid()) @db.Uuid
+  empresaId     String    @map("empresa_id") @db.Uuid
+  bodegaId      String?   @map("bodega_id") @db.Uuid
+  placa         String    @unique @db.VarChar(7)
+  tipo          String    @db.VarChar(40) // furgón RESPEL, vactor, volqueta, estacas
+  capacidad     Decimal   @db.Decimal(10, 2)
+  unidadCap     UnidadMedida @default(KG) @map("unidad_cap")
+  soatVence     DateTime? @map("soat_vence") @db.Date
+  rtmVence      DateTime? @map("rtm_vence") @db.Date
+  polizaRcVence DateTime? @map("poliza_rc_vence") @db.Date
+  activo        Boolean   @default(true)
+
+  empresa          Empresa          @relation(fields: [empresaId], references: [id])
+  bodega           Bodega?          @relation(fields: [bodegaId], references: [id])
+  rutas            Ruta[]
+  preoperacionales Preoperacional[]
+  manifiestos      Manifiesto[]
+
+  @@map("vehiculos")
+}
+
+// Catálogos simples (riesgos, embalajes, causales, líneas de servicio, tipos de manejo,
+// métricas…) viven en una sola tabla para no construir 10 CRUD distintos.
+model CatalogoItem {
+  id         String  @id @default(uuid()) @db.Uuid
+  empresaId  String  @map("empresa_id") @db.Uuid
+  tipo       String  @db.VarChar(40) // LINEA_SERVICIO | TIPO_MANEJO | EMBALAJE | CAUSAL | RIESGO | METRICA
+  codigo     String  @db.VarChar(20)
+  nombre     String  @db.VarChar(150)
+  color      String? @db.VarChar(7)
+  activo     Boolean @default(true)
+  meta       Json    @default("{}")
+
+  empresa               Empresa           @relation(fields: [empresaId], references: [id])
+  residuosPorLinea      CatalogoResiduo[] @relation("LineaServicio")
+  residuosPorManejo     CatalogoResiduo[] @relation("TipoManejoResiduo")
+  declaracionesManejo   Declaracion[]     @relation("TipoManejoDeclaracion")
+  declaracionesEmbalaje Declaracion[]     @relation("Embalaje")
+  declaracionesCausal   Declaracion[]     @relation("CausalDeclaracion")
+  solicitudesCausal     Solicitud[]       @relation("CausalCancelacion")
+
+  @@unique([empresaId, tipo, codigo])
+  @@map("catalogo_items")
+}
+
+// ---------------------------------------------------------------------
+// PERMISOS AMBIENTALES (prioridad #1: cumplimiento)
+// ---------------------------------------------------------------------
+model PermisoAmbiental {
+  id            String        @id @default(uuid()) @db.Uuid
+  empresaId     String        @map("empresa_id") @db.Uuid
+  acto          String        @db.VarChar(60)  // "Resolución 0235-2024"
+  autoridad     String        @db.VarChar(80)  // "CAS"
+  alcance       String
+  expedicion    DateTime?     @db.Date
+  vence         DateTime?     @db.Date
+  estado        EstadoPermiso @default(VIGENTE)
+  manejosCubiertos String[]   @map("manejos_cubiertos") // códigos TIPO_MANEJO autorizados
+  documentoUrl  String?       @map("documento_url")
+
+  empresa       Empresa             @relation(fields: [empresaId], references: [id])
+  obligaciones  ObligacionPermiso[]
+
+  @@map("permisos_ambientales")
+}
+
+model ObligacionPermiso {
+  id          String    @id @default(uuid()) @db.Uuid
+  permisoId   String    @map("permiso_id") @db.Uuid
+  descripcion String    // ICA, monitoreo de suelos, caracterización de vertimiento…
+  periodicidad String   @db.VarChar(30)
+  proximaFecha DateTime @map("proxima_fecha") @db.Date
+  responsable String?   @db.VarChar(120)
+  cumplida    Boolean   @default(false)
+  permiso     PermisoAmbiental @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@map("obligaciones_permiso")
+}
+
+// ---------------------------------------------------------------------
+// CATÁLOGO DE RESIDUOS / SERVICIOS Y DECLARACIONES
+// ---------------------------------------------------------------------
+model CatalogoResiduo {
+  id              String          @id @default(uuid()) @db.Uuid
+  empresaId       String          @map("empresa_id") @db.Uuid
+  tipo            TipoDeclaracion
+  codigo          String          @db.VarChar(20)
+  nombre          String          @db.VarChar(200)
+  corriente       String?         @db.VarChar(10)   // Y1..Y45 / A1010..A4160 (Dec. 1076/2015)
+  peligrosidad    String[]                          // C,R,E,T,I,B
+  numeroOnu       String?         @map("numero_onu") @db.VarChar(10)
+  claseRiesgo     String?         @map("clase_riesgo") @db.VarChar(5)
+  estadoFisico    String?         @map("estado_fisico") @db.VarChar(10)
+  unidad          UnidadMedida    @default(KG)
+  lineaServicioId String?         @map("linea_servicio_id") @db.Uuid
+  tipoManejoId    String?         @map("tipo_manejo_id") @db.Uuid
+
+  empresa       Empresa       @relation(fields: [empresaId], references: [id])
+  lineaServicio CatalogoItem? @relation("LineaServicio", fields: [lineaServicioId], references: [id])
+  tipoManejo    CatalogoItem? @relation("TipoManejoResiduo", fields: [tipoManejoId], references: [id])
+  declaraciones Declaracion[]
+
+  @@unique([empresaId, codigo])
+  @@map("catalogo_residuos")
+}
+
+model Declaracion {
+  id                String            @id @default(uuid()) @db.Uuid
+  empresaId         String            @map("empresa_id") @db.Uuid
+  numero            Int               @default(autoincrement())
+  tipo              TipoDeclaracion
+  clienteId         String            @map("cliente_id") @db.Uuid
+  sucursalId        String            @map("sucursal_id") @db.Uuid
+  residuoId         String            @map("residuo_id") @db.Uuid
+  estado            EstadoDeclaracion @default(PENDIENTE)
+  autorizacion      String?           @db.VarChar(50)
+  causalId          String?           @map("causal_id") @db.Uuid
+  tipoManejoId      String?           @map("tipo_manejo_id") @db.Uuid
+  destinoId         String?           @map("destino_id") @db.Uuid
+  embalajeId        String?           @map("embalaje_id") @db.Uuid
+  cantidadEstimada  Decimal?          @map("cantidad_estimada") @db.Decimal(12, 2)
+  frecuencia        String?           @db.VarChar(15)
+  fichaSeguridadUrl String?           @map("ficha_seguridad_url")
+  vigenteHasta      DateTime?         @map("vigente_hasta") @db.Date
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa    Empresa         @relation(fields: [empresaId], references: [id])
+  cliente    Cliente         @relation(fields: [clienteId], references: [id])
+  sucursal   Sucursal        @relation(fields: [sucursalId], references: [id])
+  residuo    CatalogoResiduo @relation(fields: [residuoId], references: [id])
+  causal     CatalogoItem?   @relation("CausalDeclaracion", fields: [causalId], references: [id])
+  tipoManejo CatalogoItem?   @relation("TipoManejoDeclaracion", fields: [tipoManejoId], references: [id])
+  embalaje   CatalogoItem?   @relation("Embalaje", fields: [embalajeId], references: [id])
+  destino    Proveedor?      @relation(fields: [destinoId], references: [id])
+  tarifas    Tarifa[]
+  items      SolicitudItem[]
+
+  @@index([empresaId, tipo, estado])
+  @@index([clienteId])
+  @@map("declaraciones")
+}
+
+// Los precios nunca se sobrescriben: cada cambio es una nueva vigencia.
+model Tarifa {
+  id               String          @id @default(uuid()) @db.Uuid
+  declaracionId    String          @map("declaracion_id") @db.Uuid
+  precioUnitario   Decimal         @map("precio_unitario") @db.Decimal(14, 2)
+  tipoNegociacion  TipoNegociacion @map("tipo_negociacion")
+  formaPago        FormaPago       @map("forma_pago")
+  vigenteDesde     DateTime        @map("vigente_desde") @db.Date
+  vigenteHasta     DateTime?       @map("vigente_hasta") @db.Date
+  loteAsignacionId String?         @map("lote_asignacion_id") @db.Uuid // asignación masiva
+  asignadoPorId    String?         @map("asignado_por") @db.Uuid
+
+  declaracion Declaracion @relation(fields: [declaracionId], references: [id], onDelete: Cascade)
+  asignadoPor Usuario?    @relation(fields: [asignadoPorId], references: [id])
+
+  @@index([declaracionId, vigenteDesde])
+  @@map("tarifas")
+}
+
+// ---------------------------------------------------------------------
+// LOGÍSTICA
+// ---------------------------------------------------------------------
+model Solicitud {
+  id                  String          @id @default(uuid()) @db.Uuid
+  empresaId           String          @map("empresa_id") @db.Uuid
+  numero              Int             @default(autoincrement())
+  clase               ClaseSolicitud
+  operacion           Operacion       @default(CARGA)
+  clienteId           String          @map("cliente_id") @db.Uuid
+  sucursalId          String          @map("sucursal_id") @db.Uuid
+  fechaSolicitada     DateTime        @map("fecha_solicitada") @db.Date
+  franjaHoraria       String?         @map("franja_horaria") @db.VarChar(20)
+  estado              EstadoSolicitud @default(PENDIENTE)
+  causalCancelacionId String?         @map("causal_cancelacion_id") @db.Uuid
+  totalEstimado       Decimal?        @map("total_estimado") @db.Decimal(14, 2)
+  creadoPorId         String?         @map("creado_por") @db.Uuid
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa   Empresa         @relation(fields: [empresaId], references: [id])
+  cliente   Cliente         @relation(fields: [clienteId], references: [id])
+  sucursal  Sucursal        @relation(fields: [sucursalId], references: [id])
+  causal    CatalogoItem?   @relation("CausalCancelacion", fields: [causalCancelacionId], references: [id])
+  creadoPor Usuario?        @relation(fields: [creadoPorId], references: [id])
+  items     SolicitudItem[]
+  paradas   RutaParada[]
+
+  @@index([empresaId, fechaSolicitada])
+  @@map("solicitudes")
+}
+
+model SolicitudItem {
+  id                String   @id @default(uuid()) @db.Uuid
+  solicitudId       String   @map("solicitud_id") @db.Uuid
+  declaracionId     String   @map("declaracion_id") @db.Uuid // solo declaraciones AUTORIZADAS
+  cantidadEstimada  Decimal? @map("cantidad_estimada") @db.Decimal(12, 2)
+  cantidadReal      Decimal? @map("cantidad_real") @db.Decimal(12, 2) // pesaje en campo
+  cantidadEmbalajes Int?     @map("cantidad_embalajes")
+  precioUnitario    Decimal? @map("precio_unitario") @db.Decimal(14, 2) // congelado al confirmar
+
+  solicitud       Solicitud         @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  declaracion     Declaracion       @relation(fields: [declaracionId], references: [id])
+  manifiestoItems ManifiestoItem[]
+
+  @@map("solicitud_items")
+}
+
+model EstadoRecorrido {
+  id         String  @id @default(uuid()) @db.Uuid
+  empresaId  String  @map("empresa_id") @db.Uuid
+  nombre     String  @db.VarChar(40) // Programada, En tránsito, En planta, Finalizado
+  color      String  @db.VarChar(7)
+  orden      Int
+  esFinal    Boolean @default(false) @map("es_final")
+  empresa    Empresa @relation(fields: [empresaId], references: [id])
+  rutas      Ruta[]
+
+  @@map("estados_recorrido")
+}
+
+model Ruta {
+  id                 String    @id @default(uuid()) @db.Uuid
+  empresaId          String    @map("empresa_id") @db.Uuid
+  codigo             String    @db.VarChar(20)
+  fechaProgramada    DateTime  @map("fecha_programada") @db.Date
+  zonaId             String?   @map("zona_id") @db.Uuid
+  vehiculoId         String    @map("vehiculo_id") @db.Uuid
+  conductorId        String    @map("conductor_id") @db.Uuid
+  auxiliarId         String?   @map("auxiliar_id") @db.Uuid
+  estadoRecorridoId  String?   @map("estado_recorrido_id") @db.Uuid
+  kmInicial          Int?      @map("km_inicial")
+  kmFinal            Int?      @map("km_final")
+  horaSalida         DateTime? @map("hora_salida") @db.Timestamptz
+  horaLlegadaPlanta  DateTime? @map("hora_llegada_planta") @db.Timestamptz
+
+  empresa          Empresa          @relation(fields: [empresaId], references: [id])
+  zona             Zona?            @relation(fields: [zonaId], references: [id])
+  vehiculo         Vehiculo         @relation(fields: [vehiculoId], references: [id])
+  conductor        Usuario          @relation("RutaConductor", fields: [conductorId], references: [id])
+  auxiliar         Usuario?         @relation("RutaAuxiliar", fields: [auxiliarId], references: [id])
+  estadoRecorrido  EstadoRecorrido? @relation(fields: [estadoRecorridoId], references: [id])
+  paradas          RutaParada[]
+  preoperacionales Preoperacional[]
+  manifiestos      Manifiesto[]
+
+  @@unique([empresaId, codigo])
+  @@index([fechaProgramada, vehiculoId])
+  @@map("rutas")
+}
+
+model RutaParada {
+  id            String       @id @default(uuid()) @db.Uuid
+  rutaId        String       @map("ruta_id") @db.Uuid
+  solicitudId   String       @map("solicitud_id") @db.Uuid
+  orden         Int          @db.SmallInt
+  horaLlegada   DateTime?    @map("hora_llegada") @db.Timestamptz
+  latCheckin    Decimal?     @map("lat_checkin") @db.Decimal(9, 6)
+  lngCheckin    Decimal?     @map("lng_checkin") @db.Decimal(9, 6)
+  estado        EstadoParada @default(PENDIENTE)
+  firmaUrl      String?      @map("firma_url")
+  fotos         String[]
+  observaciones String?
+
+  ruta      Ruta      @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  solicitud Solicitud @relation(fields: [solicitudId], references: [id])
+
+  @@unique([rutaId, orden])
+  @@map("ruta_paradas")
+}
+
+// ---------------------------------------------------------------------
+// HSEQ Y DOCUMENTACIÓN
+// ---------------------------------------------------------------------
+model ElementoChequeo {
+  id         String  @id @default(uuid()) @db.Uuid
+  empresaId  String  @map("empresa_id") @db.Uuid
+  grupo      String  @db.VarChar(60) // Documentos, Luces, Llantas, Kit derrames, EPP…
+  nombre     String  @db.VarChar(150)
+  critico    Boolean @default(false) // si falla, la ruta NO puede salir
+  activo     Boolean @default(true)
+  empresa    Empresa @relation(fields: [empresaId], references: [id])
+  respuestas PreopRespuesta[]
+
+  @@map("elementos_chequeo")
+}
+
+model Preoperacional {
+  id              String    @id @default(uuid()) @db.Uuid
+  vehiculoId      String    @map("vehiculo_id") @db.Uuid
+  rutaId          String?   @map("ruta_id") @db.Uuid
+  conductorId     String    @map("conductor_id") @db.Uuid
+  auxiliarId      String?   @map("auxiliar_id") @db.Uuid
+  fechaProgramada DateTime  @map("fecha_programada") @db.Date
+  fechaReal       DateTime? @map("fecha_real") @db.Timestamptz
+  km              Int?
+  aprobado        Boolean?
+  observaciones   String?
+  firmaUrl        String?   @map("firma_url")
+
+  vehiculo   Vehiculo         @relation(fields: [vehiculoId], references: [id])
+  ruta       Ruta?            @relation(fields: [rutaId], references: [id])
+  conductor  Usuario          @relation("PreopConductor", fields: [conductorId], references: [id])
+  auxiliar   Usuario?         @relation("PreopAuxiliar", fields: [auxiliarId], references: [id])
+  respuestas PreopRespuesta[]
+
+  @@map("preoperacionales")
+}
+
+model PreopRespuesta {
+  preoperacionalId String           @map("preoperacional_id") @db.Uuid
+  elementoId       String           @map("elemento_id") @db.Uuid
+  resultado        ResultadoChequeo
+  fotoUrl          String?          @map("foto_url")
+  preoperacional   Preoperacional   @relation(fields: [preoperacionalId], references: [id], onDelete: Cascade)
+  elemento         ElementoChequeo  @relation(fields: [elementoId], references: [id])
+
+  @@id([preoperacionalId, elementoId])
+  @@map("preop_respuestas")
+}
+
+model Manifiesto {
+  id             String          @id @default(uuid()) @db.Uuid
+  empresaId      String          @map("empresa_id") @db.Uuid
+  numero         String          @db.VarChar(20)
+  rutaId         String?         @map("ruta_id") @db.Uuid
+  clienteId      String          @map("cliente_id") @db.Uuid
+  sucursalId     String          @map("sucursal_id") @db.Uuid
+  vehiculoId     String          @map("vehiculo_id") @db.Uuid
+  conductorId    String          @map("conductor_id") @db.Uuid
+  destinoId      String          @map("destino_id") @db.Uuid
+  fechaEmision   DateTime        @map("fecha_emision") @db.Timestamptz
+  estado         EstadoDocumento @default(EMITIDO)
+  consecutivoRndc String?        @map("consecutivo_rndc") @db.VarChar(30)
+  pdfUrl         String?         @map("pdf_url")
+
+  empresa   Empresa          @relation(fields: [empresaId], references: [id])
+  ruta      Ruta?            @relation(fields: [rutaId], references: [id])
+  cliente   Cliente          @relation(fields: [clienteId], references: [id])
+  sucursal  Sucursal         @relation(fields: [sucursalId], references: [id])
+  vehiculo  Vehiculo         @relation(fields: [vehiculoId], references: [id])
+  conductor Usuario          @relation(fields: [conductorId], references: [id])
+  destino   Proveedor        @relation(fields: [destinoId], references: [id])
+  items     ManifiestoItem[]
+
+  @@unique([empresaId, numero])
+  @@map("manifiestos")
+}
+
+model ManifiestoItem {
+  id              String        @id @default(uuid()) @db.Uuid
+  manifiestoId    String        @map("manifiesto_id") @db.Uuid
+  solicitudItemId String        @map("solicitud_item_id") @db.Uuid
+  cantidadOrigen  Decimal       @map("cantidad_origen") @db.Decimal(12, 2)
+  embalajes       Int?
+
+  manifiesto    Manifiesto         @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
+  solicitudItem SolicitudItem      @relation(fields: [solicitudItemId], references: [id])
+  conciliacion  ConciliacionItem[]
+
+  @@map("manifiesto_items")
+}
+
+model Acta {
+  id             String          @id @default(uuid()) @db.Uuid
+  empresaId      String          @map("empresa_id") @db.Uuid
+  numero         String          @db.VarChar(20)
+  tipo           TipoActa
+  clienteId      String          @map("cliente_id") @db.Uuid
+  destinoId      String          @map("destino_id") @db.Uuid
+  periodoDesde   DateTime        @map("periodo_desde") @db.Date
+  periodoHasta   DateTime        @map("periodo_hasta") @db.Date
+  estado         EstadoDocumento @default(BORRADOR)
+  pdfUrl         String?         @map("pdf_url")
+  certificadoUrl String?         @map("certificado_url")
+
+  empresa Empresa            @relation(fields: [empresaId], references: [id])
+  cliente Cliente            @relation(fields: [clienteId], references: [id])
+  destino Proveedor          @relation(fields: [destinoId], references: [id])
+  items   ConciliacionItem[]
+
+  @@unique([empresaId, numero])
+  @@map("actas")
+}
+
+model ConciliacionItem {
+  id               String         @id @default(uuid()) @db.Uuid
+  actaId           String         @map("acta_id") @db.Uuid
+  manifiestoItemId String         @map("manifiesto_item_id") @db.Uuid
+  cantidadOrigen   Decimal        @map("cantidad_origen") @db.Decimal(12, 2)
+  cantidadDestino  Decimal        @map("cantidad_destino") @db.Decimal(12, 2) // báscula de planta
+  justificacion    String?        // obligatoria si |diferencia| > tolerancia (ver CHECK en migración)
+
+  acta           Acta           @relation(fields: [actaId], references: [id], onDelete: Cascade)
+  manifiestoItem ManifiestoItem @relation(fields: [manifiestoItemId], references: [id])
+
+  @@map("conciliacion_items")
+}
+
+// ---------------------------------------------------------------------
+// AUDITORÍA (Ley 1581/2012 y soporte ante autoridad)
+// ---------------------------------------------------------------------
+model Auditoria {
+  id        BigInt   @id @default(autoincrement())
+  usuarioId String?  @map("usuario_id") @db.Uuid
+  entidad   String   @db.VarChar(60)
+  entidadId String   @map("entidad_id")
+  accion    String   @db.VarChar(20)
+  antes     Json?
+  despues   Json?
+  fecha     DateTime @default(now()) @db.Timestamptz
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@index([entidad, entidadId])
+  @@map("auditoria")
+}

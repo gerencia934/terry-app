@@ -1,0 +1,10 @@
+{
+  "name": "terraviva-plataforma",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "npm run dev -w @terraviva/web",
+    "build": "npm run build -w @terraviva/web",
+    "db:validate": "npm run validate -w @terraviva/db"
+  }
+}
