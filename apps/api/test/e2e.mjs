@@ -175,8 +175,9 @@ r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerp
 prueba('una sede nueva se suma sola a las declaraciones con alcance TODAS', r.status === 201 && (await db.declaracionSucursal.count({ where: { declaracionId: aceite.id } })) === 3, JSON.stringify(r.json));
 r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede rara', municipioDane: '99999' } });
 prueba('municipio que no está en DIVIPOLA → 400', r.status === 400);
-// Simula un gestor aliado sin vigencia registrada (en los datos reales, la licencia de Sandesol rige por la vida útil del proyecto)
-await db.proveedor.updateMany({ where: { nit: '804001490-7' }, data: { licenciaIndefinida: false, licenciaVence: null } });
+// Simula que ningún incinerador tiene vigencia registrada (en los datos reales hay varios: Sandesol, BIOGER, EMAS…)
+const incineradores = await db.proveedor.findMany({ where: { disposicionesGestionadas: { some: { disposicion: { codigo: 'INCH' } } } }, select: { id: true, licenciaIndefinida: true, licenciaVence: true } });
+await db.proveedor.updateMany({ where: { id: { in: incineradores.map((p) => p.id) } }, data: { licenciaIndefinida: false, licenciaVence: null } });
 r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...formulario, codigoInterno: 'AU-02', fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf', disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'INCH') }] } });
 const incineracion = r.json;
 r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
@@ -206,7 +207,7 @@ const hosp = idDe(cat.tiposResiduo, 'HOSP');
 r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
 prueba('hospitalario a celda de seguridad: lo cubre CGS (Las Bateas no recibe hospitalarios)', r.status === 200 && r.json.cubierto && /Centro de Gestión Sostenible/.test(r.json.detalle[0].soporte) && !/Veolia/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 300));
 const cgs = await db.proveedor.findFirst({ where: { nit: '901483038-1' } });
-await db.proveedor.update({ where: { id: cgs.id }, data: { excluyeTiposResiduo: ['HOSP'] } });
+await db.proveedor.updateMany({ where: { disposicionesGestionadas: { some: { disposicion: { codigo: 'DF' } } } }, data: { excluyeTiposResiduo: ['HOSP'] } });
 r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
 prueba('…si ningún gestor aliado vigente lo recibe, no queda cubierta', r.status === 200 && !r.json.cubierto && /recibe este tipo/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 200));
 await db.proveedor.update({ where: { id: cgs.id }, data: { excluyeTiposResiduo: [] } });
@@ -545,6 +546,7 @@ r = await llamar('PATCH', `/gestores-aliados/${sandesol.id}`, { token: thseq, cu
 prueba('al registrar la vigencia de su licencia, Sandesol queda cubriendo', r.status === 200 && r.json.vigencia.cubre === true && r.json.vigencia.estado === 'VIGENTE', JSON.stringify(r.json).slice(0, 200));
 r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
 prueba('…y la declaración de incineración que antes se rechazaba ahora se autoriza', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
+for (const p of incineradores.filter((x) => x.id !== sandesol.id)) await db.proveedor.update({ where: { id: p.id }, data: { licenciaIndefinida: p.licenciaIndefinida, licenciaVence: p.licenciaVence } });
 // Licencias nuevas (respuesta de la gerencia del 19-11-2026: dejar espacio para subir la de un aliado nuevo o una propia)
 const PDF_LIC = Buffer.from('%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF\n');
 const conPdf = () => { const fo = new FormData(); fo.append('archivo', new Blob([PDF_LIC]), 'licencia.pdf'); return fo; };
