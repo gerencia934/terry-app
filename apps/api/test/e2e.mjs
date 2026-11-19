@@ -954,6 +954,12 @@ const auxiliarE2e = await db.usuario.upsert({ where: { email: 'auxiliar.e2e@terr
 const tAux = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: auxiliarE2e.email, clave: 'Auxiliar2026!' } })).json)).accessToken;
 r = await llamar('GET', '/informes/indicadores?desde=2026-01-01&hasta=2026-12-31', { token: tAux });
 prueba('…sin el permiso «informes.ver» (auxiliar) no se ven → 403', r.status === 403, String(r.status));
+r = await llamar('GET', '/informes/recepcion-planta?desde=2026-01-01&hasta=2026-12-31', { token: T8 });
+const enLosPinos = (indic.porDestino ?? []).find((x) => /Los Pinos/.test(x.nombre))?.toneladas ?? 0;
+prueba('inventario: lo recibido en Los Pinos por tratamiento coincide con su parte en los indicadores', r.status === 200 && Math.abs(r.json.toneladas - enLosPinos) < 0.05
+  && r.json.tratamientos.every((t) => t.servicios >= 1 && t.primera <= t.ultima), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', '/informes/recepcion-planta?desde=2026-01-01&hasta=2026-12-31', { token: tAux });
+prueba('…sin «informes.ver» no se ve → 403', r.status === 403, String(r.status));
 r = await llamar('GET', '/informes/inicio', { token: T8 });
 prueba('inicio: cadena del mes, agenda, obligaciones y cifras del mes para quien ve informes', r.status === 200 && typeof r.json.cadena?.solicitadas === 'number' && r.json.negocio !== null
   && Array.isArray(r.json.obligaciones) && Array.isArray(r.json.rutasHoy) && typeof r.json.agenda?.semana === 'number', JSON.stringify(r.json).slice(0, 300));

@@ -30,6 +30,7 @@ import { PermisosServidor } from './pages/PermisosServidor';
 import { FlotaServidor, InspeccionesServidor } from './pages/FlotaServidor';
 import { UsuariosServidor } from './pages/UsuariosServidor';
 import { IndicadoresServidor, InicioServidor } from './pages/IndicadoresServidor';
+import { CatalogosServidor, InventarioServidor } from './pages/CatalogosServidor';
 import Verificar from './pages/Verificar';
 
 function Screen() {
@@ -68,7 +69,7 @@ function Screen() {
       case 'manifiestos': return MODO_REAL ? <ManifiestosServidor /> : <Manifiestos />;
       case 'recepcion': return MODO_REAL ? <ConciliacionServidor /> : <Recepcion />;
       case 'descargues': return MODO_REAL ? <RecepcionPlantaServidor /> : <Recepcion />;
-      case 'inventario': return <Inventario />;
+      case 'inventario': return MODO_REAL ? <InventarioServidor /> : <Inventario />;
       case 'certificados': return MODO_REAL ? <ActasServidor /> : <Certificados />;
       case 'permisos': return MODO_REAL ? <PermisosServidor /> : <Permisos />;
       case 'indicadores': return MODO_REAL ? <IndicadoresServidor /> : <Indicadores />;
@@ -78,8 +79,8 @@ function Screen() {
       case 'empresa': return MODO_REAL ? <EmpresaServidor /> : <MisDatos />;
       case 'vehiculos': return MODO_REAL ? <FlotaServidor /> : <Vehiculos />;
       case 'usuarios': return MODO_REAL ? <UsuariosServidor /> : <Usuarios />;
-      case 'catalogos': return <Catalogos />;
-      case 'etapas': return <Etapas />;
+      case 'catalogos': return MODO_REAL ? <CatalogosServidor /> : <Catalogos />;
+      case 'etapas': return MODO_REAL ? <CatalogosServidor inicial="etapas" /> : <Etapas />;
     }
   })();
   return <AppShell><Proteccion key={route}>{page}</Proteccion></AppShell>;

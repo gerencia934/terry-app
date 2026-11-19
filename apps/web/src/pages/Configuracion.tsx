@@ -11,6 +11,8 @@ import { cx, diasEntre, fmtFecha } from '../lib/format';
 import { negLabel } from './Declaraciones';
 
 let catalogoInicial = 'residuos';
+/** Catálogo elegido desde Ajustes (lo lee también la pantalla de catálogos del servidor). */
+export const catalogoElegido = () => catalogoInicial;
 
 const Vence = ({ f }: { f?: string }) => {
   if (!f) return <span className="text-subtle">—</span>;

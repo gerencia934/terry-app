@@ -74,8 +74,8 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-286 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
-límites de peticiones, roles, aislamiento entre empresas, clientes y sedes, tarifas, permisos y gestores aliados, flota e inspecciones, usuarios (invitación, inactivar cierra sesiones), indicadores e inicio, importación de Excel y CSV (también deshacer un cargue),
+288 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
+límites de peticiones, roles, aislamiento entre empresas, clientes y sedes, tarifas, permisos y gestores aliados, flota e inspecciones, usuarios (invitación, inactivar cierra sesiones), inicio, indicadores y recepción en planta, importación de Excel y CSV (también deshacer un cargue),
 declaraciones (crear, completar y editar desde el formulario de 8 secciones) y permisos ambientales,
 residuos no autorizados, inspección vehicular, tarifas, auditoría (con IP e inmutable) y la cadena operativa completa:
 programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con QR y hash, actas de

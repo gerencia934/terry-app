@@ -37,7 +37,7 @@ certificado ante la CAS o el cliente.
 | Manifiestos | `manifiestos`, `desde-ruta`, `:id/items`, `:id/evidencias`, `:id/grabar`, `:id/anular`, `:id/pdf`, `:id/recibo` (80 mm) | Firma táctil, báscula, ARL/EPS de terceros; al grabar abre la conciliación (regla en la base) |
 | Conciliaciones | `conciliaciones`, `consolidado`, `:id/items`, `:id/igualar · aprobar · reabrir`, `:id/excel` | Totales por unidad (shared); ±2 % con justificación; aprobada solo cambia factura/pago |
 | Actas | `actas`, `pendientes`, `:id/emitir`, `cargar`, `:id/pdf`, `zip`, `PATCH lineas/:id/certificado-aliado`, `verificar/:código` (pública; el QR abre `<web>/#verificar/<código>`) | Solo líneas aprobadas; soporte legal a la fecha del servicio; PDF con QR (pdfkit) |
-| Informes | `informes/inicio` (cadena del mes, operación de hoy, agenda, obligaciones; cifras de dinero solo con «informes.ver»), `informes/indicadores` (toneladas, facturado, comprado y servicios por mes; por cliente, destino, tratamiento, vehículo y conductor; inspecciones y diferencia de báscula), `informes/rutas/rendimiento`, `informes/rutas/costos` | Sobre las conciliaciones no anuladas; toneladas solo de líneas en masa (factor a kg); lo facturado coincide con el consolidado de conciliaciones; fletes en Excel |
+| Informes | `informes/inicio` (cadena del mes, operación de hoy, agenda, obligaciones; cifras de dinero solo con «informes.ver»), `informes/indicadores` (toneladas, facturado, comprado y servicios por mes; por cliente, destino, tratamiento, vehículo y conductor; inspecciones y diferencia de báscula), `informes/recepcion-planta` (lo que entró a Los Pinos por tratamiento), `informes/rutas/rendimiento`, `informes/rutas/costos` | Sobre las conciliaciones no anuladas; toneladas solo de líneas en masa (factor a kg); lo facturado coincide con el consolidado de conciliaciones; fletes en Excel |
 | Empresa | `empresa`, `PATCH empresa/configuracion`, `PATCH empresa/consecutivos/:documento`, `empresa/textos-legales` (versiones) | Numeración TV/PSAP (el último número solo sube); textos legales con versión que salen según la disposición |
 | Archivos | `archivos?clave=` | Carpeta local por empresa (S3/R2 en producción); tipo real validado |
 
@@ -71,11 +71,12 @@ Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Condu
 ## 5. Web (`apps/web`)
 
 - `lib/api.ts`: cliente HTTP con renovación automática del token. `VITE_API_URL` activa el modo servidor.
-- Conectado al servidor hoy: ingreso, recuperar/restablecer contraseña, Declaraciones, Importar datos, alertas, la app
-  del conductor (`pages/CampoServidor.tsx`) y la torre de control (`pages/torre/`): Solicitudes, Por confirmar,
-  Programación (calendario y por línea), Programación en tabla, Seguimiento, Manifiestos, Conciliación y Certificados.
-  La página pública `#verificar/<código>` (`pages/Verificar.tsx`) no pide sesión. Las demás secciones muestran un aviso
-  de «datos de ejemplo» en modo servidor.
+- Conectado al servidor: ingreso, recuperar/restablecer contraseña, Inicio, Clientes y sedes, Declaraciones, Tarifas,
+  Importar datos, alertas, la app del conductor (`pages/CampoServidor.tsx`), la torre de control (`pages/torre/`:
+  Solicitudes, Por confirmar, Programación, Seguimiento, Manifiestos, Conciliación y Certificados), Inspecciones, Flota,
+  Permisos y gestores aliados, Inventario (recepción en Los Pinos), Indicadores, Usuarios y roles, Catálogos, Etapas y
+  Datos de la empresa. La página pública `#verificar/<código>` no pide sesión. Siguen de ejemplo Exportar e Informes
+  (descargas), con el aviso de «datos de ejemplo» en modo servidor.
 - Navegación lateral por procesos (Comercial, Logística, Campo y HSEQ, Planta, Cumplimiento, Análisis,
   Ajustes) y buscador con Ctrl + K.
 - Móvil: tablas que se vuelven tarjetas, filtros en hoja inferior, calendario que pasa a agenda,
@@ -88,6 +89,6 @@ Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Condu
 | 0 | Esquema, prototipo, importación de Excel | ✅ |
 | 1 | API con autenticación, declaraciones, logística, cumplimiento, importación; web conectada en ingreso, declaraciones e importación | ✅ |
 | 1b / 3 | Núcleo operativo: modelo y reglas (3-A), API (3-B), app del conductor sin señal (3-C) y torre de control (3-D) | ✅ |
-| 1c | Conectar a la API lo que aún es de ejemplo: clientes, tarifas, inspecciones (vista de oficina), inventario, permisos, indicadores y ajustes | Siguiente |
+| 1c | Conectar a la API lo que aún era de ejemplo: clientes, tarifas, permisos, inspecciones, flota, usuarios, inicio, indicadores, inventario (entradas) y catálogos | ✅ (falta el saldo de inventario y editar catálogos: preguntas F1 y F2) |
 | 2 | PDF de manifiestos y certificados, fotos y firmas en S3, tarea diaria de alertas por correo | |
 | 3 | Factura electrónica DIAN, RNDC, portal del cliente | |

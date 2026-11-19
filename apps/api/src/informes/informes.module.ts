@@ -137,6 +137,44 @@ class InformesService {
     };
   }
 
+  /**
+   * Lo que entró a la planta propia (Los Pinos) por tratamiento: masa (kg o toneladas), otras unidades, servicios y la
+   * recepción más antigua y más reciente del rango. Solo entradas: el saldo por tratar depende de cómo se registre el
+   * fin del tratamiento (pregunta abierta a la gerencia, docs/PREGUNTAS_GERENCIA.md).
+   */
+  async recepcionPlanta(a: Actor, f: z.infer<typeof RangoIndicadores>) {
+    const cliente = f.clienteId ?? null;
+    type Fila = { disposicion: string; codigo: string | null; mes: string; kg: Prisma.Decimal | null; otras: Prisma.Decimal | null; unidades: string | null; servicios: bigint; primera: Date; ultima: Date };
+    const filas = await this.db.$queryRaw<Fila[]>`
+      SELECT COALESCE(d.nombre, 'Sin tratamiento asignado') AS disposicion, d.codigo, to_char(m.fecha_servicio, 'YYYY-MM') AS mes,
+             sum(COALESCE(ci.cantidad_destino, ci.cantidad_origen) * COALESCE(mc.factor_a_kg, mm.factor_a_kg)) AS kg,
+             sum(COALESCE(ci.cantidad_destino, ci.cantidad_origen)) FILTER (WHERE COALESCE(mc.factor_a_kg, mm.factor_a_kg) IS NULL) AS otras,
+             string_agg(DISTINCT COALESCE(mc.abreviacion, mm.abreviacion), ', ') FILTER (WHERE COALESCE(mc.factor_a_kg, mm.factor_a_kg) IS NULL) AS unidades,
+             count(DISTINCT m.id) AS servicios, min(m.fecha_servicio) AS primera, max(m.fecha_servicio) AS ultima
+        FROM conciliaciones c JOIN manifiestos m ON m.id = c.manifiesto_id JOIN proveedores p ON p.id = m.destino_id AND p.es_propio
+        JOIN conciliacion_items ci ON ci.conciliacion_id = c.id JOIN manifiesto_items mi ON mi.id = ci.manifiesto_item_id
+        LEFT JOIN metricas mc ON mc.id = ci.metrica_id LEFT JOIN metricas mm ON mm.id = mi.metrica_id
+        LEFT JOIN disposiciones d ON d.id = COALESCE(ci.disposicion_id, mi.disposicion_id)
+       WHERE c.empresa_id = ${a.empresaId}::uuid AND c.estado::text <> 'ANULADA' AND m.fecha_servicio BETWEEN ${f.desde}::date AND ${f.hasta}::date
+         AND (${cliente}::uuid IS NULL OR m.cliente_id = ${cliente}::uuid)
+       GROUP BY 1, 2, 3 ORDER BY 1, 3`;
+    const n = (v: Prisma.Decimal | bigint | null) => (v === null ? 0 : Number(v));
+    const porTratamiento = new Map<string, { tratamiento: string; codigo: string | null; toneladas: number; otras: number; unidades: Set<string>; servicios: number; primera: string; ultima: string; meses: { mes: string; toneladas: number }[] }>();
+    for (const x of filas) {
+      const t = porTratamiento.get(x.disposicion) ?? { tratamiento: x.disposicion, codigo: x.codigo, toneladas: 0, otras: 0, unidades: new Set<string>(), servicios: 0, primera: dia(x.primera), ultima: dia(x.ultima), meses: [] };
+      t.toneladas += n(x.kg) / 1000; t.otras += n(x.otras); t.servicios += n(x.servicios);
+      x.unidades?.split(', ').forEach((u) => t.unidades.add(u));
+      if (dia(x.primera) < t.primera) t.primera = dia(x.primera);
+      if (dia(x.ultima) > t.ultima) t.ultima = dia(x.ultima);
+      t.meses.push({ mes: x.mes, toneladas: Math.round(n(x.kg) / 10) / 100 });
+      porTratamiento.set(x.disposicion, t);
+    }
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const tratamientos = [...porTratamiento.values()].map((t) => ({ ...t, toneladas: r2(t.toneladas), otras: r2(t.otras), unidades: [...t.unidades] }))
+      .sort((x, y) => y.toneladas - x.toneladas);
+    return { desde: dia(f.desde), hasta: dia(f.hasta), toneladas: r2(tratamientos.reduce((acc, t) => acc + t.toneladas, 0)), servicios: tratamientos.reduce((acc, t) => acc + t.servicios, 0), tratamientos };
+  }
+
   private rutas(a: Actor, f: z.infer<typeof Rango>) {
     return this.db.ruta.findMany({
       where: { empresaId: a.empresaId, fechaProgramada: { gte: f.desde, lte: f.hasta }, vehiculoId: f.vehiculoId, conductorId: f.conductorId, auxiliarId: f.auxiliarId },
@@ -211,6 +249,7 @@ class InformesService {
 @Controller('informes')
 class InformesController {
   constructor(private readonly s: InformesService) {}
+  @Permiso('informes.ver') @Get('recepcion-planta') recepcion(@ActorActual() a: Actor, @Query(new Zod(RangoIndicadores)) f: z.infer<typeof RangoIndicadores>) { return this.s.recepcionPlanta(a, f); }
   @Get('inicio') inicio(@ActorActual() a: Actor) { return this.s.inicio(a); }
   @Permiso('informes.ver') @Get('indicadores') indicadores(@ActorActual() a: Actor, @Query(new Zod(RangoIndicadores)) f: z.infer<typeof RangoIndicadores>) { return this.s.indicadores(a, f); }
   @Permiso('informes.ver') @Get('rutas/rendimiento') rendimiento(@ActorActual() a: Actor, @Query(new Zod(Rango)) f: z.infer<typeof Rango>) { return this.s.rendimiento(a, f); }

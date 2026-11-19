@@ -243,3 +243,28 @@ Estas no son preguntas: son pasos que solo puede dar el dueño de la cuenta de G
 1. Activar el doble factor (2FA) en la cuenta: Settings › Password and authentication.
 2. Proteger la rama `main` para que nada entre sin pasar las pruebas: Settings › Branches › Add rule, y marcar
    «Require status checks to pass» con la prueba «Compilar y probar».
+
+## F. Preguntas nuevas (fase 1c, 19-11-2026)
+
+Surgieron al conectar las pantallas que aún eran de ejemplo. Puede responderlas el jefe de planta con HSEQ.
+
+### F1. ¿Cuándo se da por tratado un residuo en Los Pinos?
+
+Hoy el sistema sabe lo que **entra** a la planta (recepción y conciliación), pero no cuándo termina su tratamiento.
+Sin eso no se puede mostrar el saldo pendiente por tratar ni avisar si algo lleva demasiado tiempo en la planta.
+
+1. ¿Cómo controlan hoy el tratamiento? ¿Por celda de biorremediación, por lote, por pila de compost, por tanque?
+2. ¿Qué documento cierra un tratamiento? Por ejemplo, un análisis de laboratorio, un acta interna o el informe a la CAS.
+3. ¿Hay un tiempo máximo que un residuo puede estar en la planta sin tratarse? ¿Lo fija algún permiso?
+4. ¿Qué sale de la planta y hacia dónde? Por ejemplo, el suelo tratado, los lodos o el agua tratada a vertimiento o
+   riego.
+
+### F2. ¿Quién puede cambiar los catálogos?
+
+Los catálogos (tratamientos, líneas de servicio, embalajes, zonas, motivos de cancelación, elementos de la inspección
+vehicular) hoy solo se consultan en la pantalla y se cambian con soporte, porque un cambio afecta declaraciones y
+certificados.
+
+1. ¿Cuáles quieren poder cambiar ustedes mismos? Las zonas, los motivos y los elementos de la inspección son los de
+   menor riesgo.
+2. ¿Quién los cambia: Administración, HSEQ o Logística?
