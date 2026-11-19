@@ -46,8 +46,10 @@ class CumplimientoService {
     per.forEach((u) => ([['Licencia de conducción', u.licenciaVence], ['Curso de mercancías peligrosas', u.cursoMpVence]] as const).forEach(([doc, f]) => {
       if (f && f <= lim45) out.push({ tipo: 'personal', nivel: nivel(dias(f)), titulo: `${u.nombre}: ${doc.toLowerCase()} vence en ${dias(f)} días`, detalle: 'Res. 1223 de 2014', fecha: f.toISOString().slice(0, 10), referencia: u.id });
     }));
-    rutasHoy.filter((r) => !preops.some((p) => p.vehiculoId === r.vehiculo.id && p.aprobado)).forEach((r) =>
-      out.push({ tipo: 'operacion', nivel: 'media', titulo: `Ruta ${r.codigo} (${r.vehiculo.placa}) sin preoperacional aprobado`, detalle: 'No puede salir hasta aprobar la inspección', referencia: r.id }));
+    rutasHoy.filter((r) => !r.vehiculo || !preops.some((p) => p.vehiculoId === r.vehiculo!.id && p.aprobado)).forEach((r) =>
+      out.push(r.vehiculo
+        ? { tipo: 'operacion', nivel: 'media', titulo: `Ruta ${r.codigo} (${r.vehiculo.placa}) sin preoperacional aprobado`, detalle: 'No puede salir hasta aprobar la inspección', referencia: r.id }
+        : { tipo: 'operacion', nivel: 'alta', titulo: `Ruta ${r.codigo} sin vehículo asignado`, detalle: 'Asigne vehículo y conductor para que pueda salir', referencia: r.id }));
     if (pend) out.push({ tipo: 'operacion', nivel: 'info', titulo: `${pend} declaraciones por autorizar`, detalle: 'Revisar ficha de caracterización y cobertura de permisos' });
     const orden = { alta: 0, media: 1, info: 2 };
     return out.sort((x, y) => orden[x.nivel] - orden[y.nivel]);

@@ -6,22 +6,24 @@ import { randomBytes } from 'node:crypto';
 import shared from '@terraviva/shared';
 
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
-  PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS } = shared;
+  PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS,
+  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
 const PERMISOS = [
   ['*', 'Acceso total'], ['declaraciones.crear', 'Crear declaraciones'], ['declaraciones.autorizar', 'Autorizar o rechazar declaraciones'],
   ['tarifas.asignar', 'Asignar tarifas'], ['clientes.editar', 'Crear y editar clientes y sucursales'], ['solicitudes.crear', 'Crear y gestionar solicitudes'],
+  ['solicitudes.aprobar', 'Aprobar o no aprobar solicitudes'],
   ['rutas.programar', 'Programar rutas'], ['rutas.operar', 'Operar rutas en campo (preoperacional, paradas, estados)'],
   ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel'],
   ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
 ];
 const ROLES = {
   Administrador: ['*'],
-  Logística: ['solicitudes.crear', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar'],
+  Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar'],
   HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'permisos.gestionar', 'rutas.operar'],
-  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar'],
+  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar'],
   Facturación: ['tarifas.asignar', 'reportes.facturacion'],
   Conductor: ['rutas.operar'],
   Auxiliar: ['rutas.operar'],
@@ -92,9 +94,17 @@ async function main() {
   if (!(await db.proveedor.findFirst({ where: { empresaId: E, esPropio: true } })))
     await db.proveedor.create({ data: { empresaId: E, nit: '901089780', razonSocial: 'TERRA VIVA S.A.S. E.S.P. · Parque de Saneamiento Ambiental Los Pinos', esPropio: true, municipio: 'Sabana de Torres', licencia: 'Res. CAS 0632-2023 / 0235-2024' } });
 
-  // Etapas del recorrido. Las de orden > 1 que no son finales exigen preoperacional aprobado.
-  for (const [orden, nombre, color, esFinal] of [[1, 'Programada', '#6B7A72', false], [2, 'En camino', '#E5B800', false], [3, 'Donde el generador', '#1E9BD7', false], [4, 'Descargado en planta', '#1F8A3B', true], [5, 'Cancelada', '#D92D20', true]])
-    if (!(await db.estadoRecorrido.findFirst({ where: { empresaId: E, nombre } }))) await db.estadoRecorrido.create({ data: { empresaId: E, nombre, color, orden, esFinal } });
+  // Etapas del recorrido. Las de orden > 1 que no son finales exigen vehículo, conductor e inspección aprobada.
+  // «rastreo»: GPS solo mientras la ruta está en esa etapa. «cancela»: libera las líneas sin recoger.
+  for (const [orden, nombre, color, esFinal, cancela, rastreo, descripcion] of ETAPAS_RECORRIDO) {
+    const e = await db.estadoRecorrido.findFirst({ where: { empresaId: E, nombre } });
+    if (!e) await db.estadoRecorrido.create({ data: { empresaId: E, nombre, color, orden, esFinal, cancela, rastreo, descripcion } });
+    else if (e.descripcion === null) await db.estadoRecorrido.update({ where: { id: e.id }, data: { cancela, rastreo, descripcion } }); // completa las de la fase 1 sin pisar ajustes
+  }
+
+  // Núcleo operativo: ARL/EPS (globales) y especificaciones adicionales
+  for (const x of ENTIDADES_SEGURIDAD_SOCIAL) await db.entidadSeguridadSocial.upsert({ where: { tipo_nombre: { tipo: x.tipo, nombre: x.nombre } }, update: {}, create: x });
+  await porEmpresa('especificacionAdicional', E, ESPECIFICACIONES_ADICIONALES, (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null, abreviatura: x.abreviatura }));
 
   // Elementos de la inspección preoperacional (críticos bloquean la salida)
   const CHEQUEO = [

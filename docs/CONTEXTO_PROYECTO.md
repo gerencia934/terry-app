@@ -28,6 +28,7 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 |---|---|---|
 | 0 | Prototipo web, esquema y plantillas de Excel | `apps/web`, `docs/plantillas` |
 | 1 | API NestJS + Prisma + PostgreSQL. 37 pruebas e2e OK. Web conectada en ingreso, declaraciones e importación | rama `master` |
+| 3-A | **Núcleo operativo: modelo y reglas, entregado para revisión** (20-11-2026). Cadena Solicitud → Ruta → Manifiesto → Conciliación → Acta; migración abierta; 40 pruebas de reglas y 52 e2e OK | rama `fase-3-operacion` (leer `docs/operacion/MODELO_OPERACION.md`) |
 | 2-A | **Modelo de datos de Declaraciones: aprobado y adoptado** (19-11-2026). 50 tablas, 3 migraciones, reglas en la base, catálogos reales en `packages/shared`, API e importación ajustadas; 52 pruebas e2e OK | rama `fase-2-declaraciones` (leer `docs/declaraciones/MODELO_DATOS.md`) |
 
 Stack:

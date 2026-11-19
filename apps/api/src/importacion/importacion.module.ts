@@ -237,11 +237,14 @@ class ImportacionService {
           include: { tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
         if (!decl) throw new BadRequestException({ mensaje: `La declaración ${d.codigo} no está autorizada y activa para la sede «${d.sucursal}».` });
         const fechaS = fecha(d.fecha)!;
-        // Agrupa en una sola solicitud las filas del mismo cliente, sucursal, fecha y jornada.
-        let s = await tx.solicitud.findFirst({ where: { empresaId: emp, sucursalId: suc.id, fechaSolicitada: fechaS, franjaHoraria: d.jornada || null, estado: 'PENDIENTE', creadoPorId: a.id } });
+        // Agrupa en una sola solicitud las filas del mismo cliente, tipo y fecha (la sede y la jornada van por línea).
+        // Queda PENDIENTE de aprobación: el cargue no reemplaza la decisión comercial.
+        const operacion = d.tipo === 'Entrega en planta' ? 'DESCARGA' as const : 'CARGA' as const;
+        let s = await tx.solicitud.findFirst({ where: { empresaId: emp, clienteId: suc.clienteId, operacion, fechaSolicitada: fechaS, aprobacion: 'PENDIENTE', estado: 'PENDIENTE', creadoPorId: a.id, ordenCompra: d.oc || null } });
         const creada = !s;
-        if (!s) s = await tx.solicitud.create({ data: { empresaId: emp, clase: 'FORMAL', operacion: d.tipo === 'Entrega en planta' ? 'DESCARGA' : 'CARGA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: fechaS, franjaHoraria: d.jornada || null, creadoPorId: a.id } });
-        await tx.solicitudItem.create({ data: { solicitudId: s.id, declaracionId: decl.id, cantidadEstimada: num(d.cantidad), precioUnitario: decl.tarifas[0]?.precioUnitario } });
+        if (!s) s = await tx.solicitud.create({ data: { empresaId: emp, clase: 'FORMAL', operacion, clienteId: suc.clienteId, fechaSolicitada: fechaS, ordenCompra: d.oc || null, observaciones: d.observaciones || null, creadoPorId: a.id } });
+        const jornada = d.jornada === 'AM' || d.jornada === 'PM' ? d.jornada : null;
+        await tx.solicitudItem.create({ data: { solicitudId: s.id, declaracionId: decl.id, sucursalId: suc.id, jornada, cantidadEstimada: num(d.cantidad), precioUnitario: decl.tarifas[0]?.precioUnitario } });
         return creada ? 'creadas' : 'actualizadas';
       }
     }

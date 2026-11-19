@@ -16,7 +16,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 50 tablas, 5 migraciones, reglas en la base |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 60 tablas, 7 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Fase 2 |

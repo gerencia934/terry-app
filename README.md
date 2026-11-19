@@ -73,8 +73,17 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-37 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
-permisos ambientales, residuos no autorizados, inspección vehicular, tarifas y auditoría.
+52 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
+declaraciones y permisos ambientales, residuos no autorizados, inspección vehicular, tarifas y auditoría.
+
+Reglas de la cadena operativa escritas directamente en la base (sin API), sobre una base migrada y sembrada:
+
+```bash
+DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:reglas -w @terraviva/db
+```
+
+40 pruebas: aprobación y programación por línea, rutas y rastreo GPS, grabar y anular manifiestos,
+conciliación, actas y descargue en planta.
 
 ## Modo demostración
 

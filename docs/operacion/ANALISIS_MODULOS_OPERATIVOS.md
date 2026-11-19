@@ -1,6 +1,6 @@
 # TERRY-GO — Núcleo operativo: análisis y plan (propuesta)
 
-Estado: **propuesta para revisión** (19-11-2026). Todavía no hay cambios de código en estos módulos.
+Estado: análisis del 19-11-2026. La fase **3-A** (modelo y reglas) ya está hecha: ver `MODELO_OPERACION.md`.
 
 Este documento cruza tres fuentes:
 - la operación de Terra Viva;

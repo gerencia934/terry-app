@@ -124,13 +124,75 @@ enum ResultadoChequeo {
   NA
 }
 
-enum EstadoDocumento {
-  BORRADOR
-  EMITIDO
-  EN_TRANSITO
-  RECIBIDO
-  CERRADO
+// ---------- Núcleo operativo (fase 3-A) ----------
+/// Aprobación comercial de la solicitud (distinta del avance operativo, que es EstadoSolicitud).
+enum AprobacionSolicitud {
+  PENDIENTE
+  APROBADA
+  NO_APROBADA
+}
+
+/// Avance de cada línea de la solicitud: se programa línea por línea.
+enum EstadoItemSolicitud {
+  PENDIENTE // sin programar
+  PROGRAMADO // en una ruta activa
+  REALIZADO // quedó en un manifiesto realizado
+  DESCARTADO
+}
+
+enum Jornada {
+  AM
+  PM
+  DIA // todo el día
+}
+
+enum TipoSeguridadSocial {
+  ARL
+  EPS
+}
+
+enum TipoManifiesto {
+  CARGUE // Terra Viva recoge en la sede del cliente (con ruta)
+  DESCARGUE // el cliente o un tercero entrega en planta (sin ruta)
+}
+
+enum EstadoManifiesto {
+  PENDIENTE
+  REALIZADO // grabado con firma, horas y báscula: abre la conciliación
   ANULADO
+}
+
+enum TipoConciliacion {
+  INTERNA
+  EXTERNA
+}
+
+enum TipoEvidencia {
+  FOTO
+  PDF
+}
+
+enum EstadoConciliacion {
+  BORRADOR
+  APROBADA // habilita el acta
+}
+
+enum EstadoPago {
+  PENDIENTE
+  ABONADA
+  PAGADA
+  ANULADA
+}
+
+enum EstadoActa {
+  BORRADOR
+  EMITIDA
+  ANULADA
+}
+
+enum OrigenActa {
+  GENERADA // la emite TERRY-GO con cantidades conciliadas
+  CARGADA // acta de un gestor aliado, subida como archivo
 }
 
 enum TipoActa {
@@ -166,32 +228,36 @@ model Empresa {
   logoUrl     String?  @map("logo_url")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  usuarios       Usuario[]
-  roles          Rol[]
-  clientes       Cliente[]
-  proveedores    Proveedor[]
-  vehiculos      Vehiculo[]
-  bodegas        Bodega[]
-  zonas          Zona[]
-  catalogo       CatalogoResiduo[]
-  declaraciones  Declaracion[]
-  solicitudes    Solicitud[]
-  rutas          Ruta[]
-  estadosRuta    EstadoRecorrido[]
-  catalogoItems  CatalogoItem[]
-  elementosCheck ElementoChequeo[]
-  permisos       PermisoAmbiental[]
-  manifiestos    Manifiesto[]
-  actas          Acta[]
-  categorias     CategoriaDeclarado[]
-  tiposResiduo   TipoResiduo[]
-  unidades       UnidadNegocio[]
-  lineas         LineaServicio[]
-  metricas       Metrica[]
-  disposiciones  Disposicion[]
-  tiposEmbalaje  TipoEmbalaje[]
-  materiales     MaterialEmbalaje[]
-  cargues        CargueMasivo[]
+  usuarios         Usuario[]
+  roles            Rol[]
+  clientes         Cliente[]
+  proveedores      Proveedor[]
+  vehiculos        Vehiculo[]
+  bodegas          Bodega[]
+  zonas            Zona[]
+  catalogo         CatalogoResiduo[]
+  declaraciones    Declaracion[]
+  solicitudes      Solicitud[]
+  rutas            Ruta[]
+  estadosRuta      EstadoRecorrido[]
+  catalogoItems    CatalogoItem[]
+  elementosCheck   ElementoChequeo[]
+  permisos         PermisoAmbiental[]
+  manifiestos      Manifiesto[]
+  actas            Acta[]
+  categorias       CategoriaDeclarado[]
+  tiposResiduo     TipoResiduo[]
+  unidades         UnidadNegocio[]
+  lineas           LineaServicio[]
+  metricas         Metrica[]
+  disposiciones    Disposicion[]
+  tiposEmbalaje    TipoEmbalaje[]
+  materiales       MaterialEmbalaje[]
+  cargues          CargueMasivo[]
+  especificaciones EspecificacionAdicional[]
+  transportes      TransporteTercero[]
+  conciliaciones   Conciliacion[]
+  consecutivos     Consecutivo[]
 
   @@map("empresas")
 }
@@ -241,27 +307,41 @@ model Usuario {
   licenciaCat   String?   @map("licencia_cat") @db.VarChar(5)
   licenciaVence DateTime? @map("licencia_vence") @db.Date
   cursoMpVence  DateTime? @map("curso_mp_vence") @db.Date // Res. 1223/2014
+  arlId         String?   @map("arl_id") @db.Uuid // seguridad social: requisito de ingreso a planta
+  epsId         String?   @map("eps_id") @db.Uuid
   activo        Boolean   @default(true)
   ultimoLogin   DateTime? @map("ultimo_login") @db.Timestamptz
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  empresa                Empresa          @relation(fields: [empresaId], references: [id])
-  rol                    Rol              @relation(fields: [rolId], references: [id])
-  rutasConductor         Ruta[]           @relation("RutaConductor")
-  rutasAuxiliar          Ruta[]           @relation("RutaAuxiliar")
-  preopConductor         Preoperacional[] @relation("PreopConductor")
-  preopAuxiliar          Preoperacional[] @relation("PreopAuxiliar")
-  manifiestos            Manifiesto[]
-  tarifasAsignadas       Tarifa[]
-  solicitudesCreadas     Solicitud[]
-  resetTokens            PasswordReset[]
-  sesiones               Sesion[]
-  intentosFallidos       Int              @default(0) @map("intentos_fallidos")
-  bloqueadoHasta         DateTime?        @map("bloqueado_hasta") @db.Timestamptz
-  auditoria              Auditoria[]
-  declaracionesAprobadas Declaracion[]    @relation("DeclAprobadaPor")
-  declaracionesAceptadas Declaracion[]    @relation("DeclAceptadaPor")
-  declaracionesCreadas   Declaracion[]    @relation("DeclCreadaPor")
+  empresa                 Empresa                 @relation(fields: [empresaId], references: [id])
+  rol                     Rol                     @relation(fields: [rolId], references: [id])
+  arl                     EntidadSeguridadSocial? @relation("UsuarioArl", fields: [arlId], references: [id])
+  eps                     EntidadSeguridadSocial? @relation("UsuarioEps", fields: [epsId], references: [id])
+  rutasConductor          Ruta[]                  @relation("RutaConductor")
+  rutasAuxiliar           Ruta[]                  @relation("RutaAuxiliar")
+  preopConductor          Preoperacional[]        @relation("PreopConductor")
+  preopAuxiliar           Preoperacional[]        @relation("PreopAuxiliar")
+  manifiestos             Manifiesto[]            @relation("MfConductor")
+  manifiestosAuxiliar     Manifiesto[]            @relation("MfAuxiliar")
+  manifiestosCreados      Manifiesto[]            @relation("MfCreadoPor")
+  manifiestosRealizados   Manifiesto[]            @relation("MfRealizadoPor")
+  manifiestosAnulados     Manifiesto[]            @relation("MfAnuladoPor")
+  evidenciasSubidas       ManifiestoEvidencia[]
+  solicitudesAprobadas    Solicitud[]             @relation("SolAprobadaPor")
+  conciliacionesAprobadas Conciliacion[]
+  actasEmitidas           Acta[]                  @relation("ActaEmitidaPor")
+  actasCargadas           Acta[]                  @relation("ActaCargadaPor")
+  clientesAsesorados      Cliente[]               @relation("ClienteAsesor")
+  tarifasAsignadas        Tarifa[]
+  solicitudesCreadas      Solicitud[]
+  resetTokens             PasswordReset[]
+  sesiones                Sesion[]
+  intentosFallidos        Int                     @default(0) @map("intentos_fallidos")
+  bloqueadoHasta          DateTime?               @map("bloqueado_hasta") @db.Timestamptz
+  auditoria               Auditoria[]
+  declaracionesAprobadas  Declaracion[]           @relation("DeclAprobadaPor")
+  declaracionesAceptadas  Declaracion[]           @relation("DeclAceptadaPor")
+  declaracionesCreadas    Declaracion[]           @relation("DeclCreadaPor")
 
   @@index([empresaId])
   @@map("usuarios")
@@ -310,10 +390,12 @@ model Cliente {
   tipoNegociacion  TipoNegociacion @default(COBRO) @map("tipo_negociacion")
   formaPago        FormaPago       @default(CONTADO) @map("forma_pago")
   emailFacturacion String?         @map("email_facturacion") @db.VarChar(150)
+  asesorId         String?         @map("asesor_id") @db.Uuid // asesor comercial (aparece en conciliaciones)
   activo           Boolean         @default(true)
   camposExtra      Json            @default("{}") @map("campos_extra")
 
   empresa       Empresa        @relation(fields: [empresaId], references: [id])
+  asesor        Usuario?       @relation("ClienteAsesor", fields: [asesorId], references: [id])
   sucursales    Sucursal[]
   declaraciones Declaracion[]
   solicitudes   Solicitud[]
@@ -352,32 +434,36 @@ model Sucursal {
   observaciones   String?
   activa          Boolean            @default(true)
 
-  cliente       Cliente               @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  zona          Zona?                 @relation(fields: [zonaId], references: [id])
-  municipio     Municipio?            @relation(fields: [municipioDane], references: [codigoDane])
-  declaraciones DeclaracionSucursal[]
-  solicitudes   Solicitud[]
-  manifiestos   Manifiesto[]
+  cliente         Cliente               @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  zona            Zona?                 @relation(fields: [zonaId], references: [id])
+  municipio       Municipio?            @relation(fields: [municipioDane], references: [codigoDane])
+  declaraciones   DeclaracionSucursal[]
+  solicitudItems  SolicitudItem[]
+  paradas         RutaParada[]
+  manifiestoItems ManifiestoItem[] // como generador de la línea
 
   @@unique([clienteId, codigo])
   @@map("sucursales")
 }
 
 model Proveedor {
-  id            String    @id @default(uuid()) @db.Uuid
-  empresaId     String    @map("empresa_id") @db.Uuid
-  nit           String    @db.VarChar(15)
-  razonSocial   String    @map("razon_social") @db.VarChar(200)
-  esDestino     Boolean   @default(true) @map("es_destino") // planta / gestor de destino
-  esPropio      Boolean   @default(false) @map("es_propio") // Parque de Saneamiento Ambiental Los Pinos
-  licencia      String?   @db.VarChar(120) // acto administrativo del gestor
-  licenciaVence DateTime? @map("licencia_vence") @db.Date // sin fecha o vencida ⇒ no cubre la disposición
-  municipio     String?   @db.VarChar(80)
+  id              String    @id @default(uuid()) @db.Uuid
+  empresaId       String    @map("empresa_id") @db.Uuid
+  nit             String    @db.VarChar(15)
+  razonSocial     String    @map("razon_social") @db.VarChar(200)
+  esDestino       Boolean   @default(true) @map("es_destino") // planta / gestor de destino
+  esPropio        Boolean   @default(false) @map("es_propio") // Parque de Saneamiento Ambiental Los Pinos
+  esTransportador Boolean   @default(false) @map("es_transportador") // dueño de vehículos que Terra Viva contrata
+  licencia        String?   @db.VarChar(120) // acto administrativo del gestor
+  licenciaVence   DateTime? @map("licencia_vence") @db.Date // sin fecha o vencida ⇒ no cubre la disposición
+  municipio       String?   @db.VarChar(80)
 
   empresa       Empresa       @relation(fields: [empresaId], references: [id])
   disposiciones Disposicion[]
   manifiestos   Manifiesto[]
   actas         Acta[]
+  vehiculos     Vehiculo[] // vehículos de terceros (flete)
+  solicitudes   Solicitud[] // destino de descarga
 
   @@map("proveedores")
 }
@@ -416,6 +502,8 @@ model Vehiculo {
   tipo          String       @db.VarChar(40) // furgón RESPEL, vactor, volqueta, estacas
   capacidad     Decimal      @db.Decimal(10, 2)
   unidadCap     UnidadMedida @default(KG) @map("unidad_cap")
+  volumenM3     Decimal?     @map("volumen_m3") @db.Decimal(8, 2)
+  proveedorId   String?      @map("proveedor_id") @db.Uuid // NULL = propio; si no, el transportador que cobra flete
   soatVence     DateTime?    @map("soat_vence") @db.Date
   rtmVence      DateTime?    @map("rtm_vence") @db.Date
   polizaRcVence DateTime?    @map("poliza_rc_vence") @db.Date
@@ -423,6 +511,8 @@ model Vehiculo {
 
   empresa          Empresa          @relation(fields: [empresaId], references: [id])
   bodega           Bodega?          @relation(fields: [bodegaId], references: [id])
+  proveedor        Proveedor?       @relation(fields: [proveedorId], references: [id])
+  rastreo          RutaRastreo[]
   rutas            Ruta[]
   preoperacionales Preoperacional[]
   manifiestos      Manifiesto[]
@@ -442,9 +532,11 @@ model CatalogoItem {
   activo    Boolean @default(true)
   meta      Json    @default("{}")
 
-  empresa             Empresa       @relation(fields: [empresaId], references: [id])
-  declaracionesCausal Declaracion[] @relation("CausalDeclaracion")
-  solicitudesCausal   Solicitud[]   @relation("CausalCancelacion")
+  empresa             Empresa         @relation(fields: [empresaId], references: [id])
+  declaracionesCausal Declaracion[]   @relation("CausalDeclaracion")
+  solicitudesCausal   Solicitud[]     @relation("CausalCancelacion")
+  itemsDescartados    SolicitudItem[]
+  manifiestosAnulados Manifiesto[]    @relation("CausalAnulacionMf")
 
   @@unique([empresaId, tipo, codigo])
   @@map("catalogo_items")
@@ -603,12 +695,13 @@ model Declaracion {
   creadoPor       Usuario?             @relation("DeclCreadaPor", fields: [creadoPorId], references: [id])
   cargue          CargueMasivo?        @relation(fields: [cargueId], references: [id])
 
-  sucursales    DeclaracionSucursal[]
-  disposiciones DeclaracionDisposicion[]
-  riesgos       DeclaracionRiesgo[]
-  etiquetados   DeclaracionEtiquetado[]
-  tarifas       Tarifa[]
-  items         SolicitudItem[]
+  sucursales      DeclaracionSucursal[]
+  disposiciones   DeclaracionDisposicion[]
+  riesgos         DeclaracionRiesgo[]
+  etiquetados     DeclaracionEtiquetado[]
+  tarifas         Tarifa[]
+  items           SolicitudItem[]
+  manifiestoItems ManifiestoItem[]
 
   @@unique([empresaId, numero])
   @@unique([clienteId, codigoInterno]) // varios NULL permitidos
@@ -642,85 +735,224 @@ model Tarifa {
 // ---------------------------------------------------------------------
 // LOGÍSTICA
 // ---------------------------------------------------------------------
+/// Solicitud de recolección (CARGA) o de entrega en planta (DESCARGA). La sede va en cada línea.
+/// clase PRE = solicitud recurrente creada sola (desde un manifiesto) que espera activarse.
 model Solicitud {
-  id                  String          @id @default(uuid()) @db.Uuid
-  empresaId           String          @map("empresa_id") @db.Uuid
-  numero              Int             @default(autoincrement())
+  id                  String              @id @default(uuid()) @db.Uuid
+  empresaId           String              @map("empresa_id") @db.Uuid
+  numero              Int                 @default(autoincrement())
   clase               ClaseSolicitud
-  operacion           Operacion       @default(CARGA)
-  clienteId           String          @map("cliente_id") @db.Uuid
-  sucursalId          String          @map("sucursal_id") @db.Uuid
-  fechaSolicitada     DateTime        @map("fecha_solicitada") @db.Date
-  franjaHoraria       String?         @map("franja_horaria") @db.VarChar(20)
-  estado              EstadoSolicitud @default(PENDIENTE)
-  causalCancelacionId String?         @map("causal_cancelacion_id") @db.Uuid
-  totalEstimado       Decimal?        @map("total_estimado") @db.Decimal(14, 2)
-  creadoPorId         String?         @map("creado_por") @db.Uuid
-  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  operacion           Operacion           @default(CARGA)
+  clienteId           String              @map("cliente_id") @db.Uuid
+  fechaSolicitada     DateTime            @map("fecha_solicitada") @db.Date // fecha aprox. de servicio / de descarga
+  franjaHoraria       String?             @map("franja_horaria") @db.VarChar(20) // (fase 1) la jornada va por línea
+  // Aprobación comercial (distinta del avance operativo)
+  aprobacion          AprobacionSolicitud @default(PENDIENTE)
+  aprobadaPorId       String?             @map("aprobada_por") @db.Uuid
+  aprobadaEn          DateTime?           @map("aprobada_en") @db.Timestamptz
+  estado              EstadoSolicitud     @default(PENDIENTE) // lo calcula la base a partir de las líneas
+  causalCancelacionId String?             @map("causal_cancelacion_id") @db.Uuid
+  ordenCompra         String?             @map("orden_compra") @db.VarChar(40)
+  adjuntoUrl          String?             @map("adjunto_url")
+  observaciones       String?
+  notificarCliente    Boolean             @default(false) @map("notificar_cliente") // enviar las observaciones al cliente
+  // Descarga en planta
+  destinoId           String?             @map("destino_id") @db.Uuid // planta o gestor que recibe
+  transporteId        String?             @map("transporte_id") @db.Uuid // vehículo y tripulación de terceros
+  telefonoContacto    String?             @map("telefono_contacto") @db.VarChar(20)
+  // Recurrencia (clase PRE)
+  fechaActivacion     DateTime?           @map("fecha_activacion") @db.Date
+  manifiestoOrigenId  String?             @map("manifiesto_origen_id") @db.Uuid
+  totalEstimado       Decimal?            @map("total_estimado") @db.Decimal(14, 2)
+  creadoPorId         String?             @map("creado_por") @db.Uuid
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz
 
-  empresa   Empresa         @relation(fields: [empresaId], references: [id])
-  cliente   Cliente         @relation(fields: [clienteId], references: [id])
-  sucursal  Sucursal        @relation(fields: [sucursalId], references: [id])
-  causal    CatalogoItem?   @relation("CausalCancelacion", fields: [causalCancelacionId], references: [id])
-  creadoPor Usuario?        @relation(fields: [creadoPorId], references: [id])
-  items     SolicitudItem[]
-  paradas   RutaParada[]
+  empresa          Empresa            @relation(fields: [empresaId], references: [id])
+  cliente          Cliente            @relation(fields: [clienteId], references: [id])
+  causal           CatalogoItem?      @relation("CausalCancelacion", fields: [causalCancelacionId], references: [id])
+  creadoPor        Usuario?           @relation(fields: [creadoPorId], references: [id])
+  aprobadaPor      Usuario?           @relation("SolAprobadaPor", fields: [aprobadaPorId], references: [id])
+  destino          Proveedor?         @relation(fields: [destinoId], references: [id])
+  transporte       TransporteTercero? @relation(fields: [transporteId], references: [id])
+  manifiestoOrigen Manifiesto?        @relation("SolicitudRecurrente", fields: [manifiestoOrigenId], references: [id])
+  items            SolicitudItem[]
 
   @@index([empresaId, fechaSolicitada])
+  @@index([empresaId, aprobacion, estado])
   @@map("solicitudes")
 }
 
 model SolicitudItem {
-  id                String   @id @default(uuid()) @db.Uuid
-  solicitudId       String   @map("solicitud_id") @db.Uuid
-  declaracionId     String   @map("declaracion_id") @db.Uuid // solo declaraciones AUTORIZADAS
-  cantidadEstimada  Decimal? @map("cantidad_estimada") @db.Decimal(12, 2)
-  cantidadReal      Decimal? @map("cantidad_real") @db.Decimal(12, 2) // pesaje en campo
-  cantidadEmbalajes Int?     @map("cantidad_embalajes")
-  precioUnitario    Decimal? @map("precio_unitario") @db.Decimal(14, 2) // congelado al confirmar
+  id                String              @id @default(uuid()) @db.Uuid
+  solicitudId       String              @map("solicitud_id") @db.Uuid
+  declaracionId     String              @map("declaracion_id") @db.Uuid // autorizada, activa y asignada a la sede
+  sucursalId        String              @map("sucursal_id") @db.Uuid // sede donde se recoge
+  jornada           Jornada?
+  estado            EstadoItemSolicitud @default(PENDIENTE)
+  causalDescarteId  String?             @map("causal_descarte_id") @db.Uuid
+  cantidadEstimada  Decimal?            @map("cantidad_estimada") @db.Decimal(12, 2)
+  cantidadReal      Decimal?            @map("cantidad_real") @db.Decimal(12, 2) // pesaje en campo
+  cantidadEmbalajes Int?                @map("cantidad_embalajes")
+  precioUnitario    Decimal?            @map("precio_unitario") @db.Decimal(14, 2) // congelado al crear
+  observaciones     String?             @db.VarChar(300) // especificaciones en texto libre
 
-  solicitud       Solicitud        @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
-  declaracion     Declaracion      @relation(fields: [declaracionId], references: [id])
-  manifiestoItems ManifiestoItem[]
+  solicitud        Solicitud                     @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  declaracion      Declaracion                   @relation(fields: [declaracionId], references: [id])
+  sucursal         Sucursal                      @relation(fields: [sucursalId], references: [id])
+  causalDescarte   CatalogoItem?                 @relation(fields: [causalDescarteId], references: [id])
+  especificaciones SolicitudItemEspecificacion[]
+  rutaItems        RutaItem[]
+  manifiestoItems  ManifiestoItem[]
 
+  @@index([solicitudId])
+  @@index([estado])
   @@map("solicitud_items")
 }
 
+/// Especificaciones adicionales del servicio (cadena de custodia, destrucción certificada…).
+model EspecificacionAdicional {
+  id          String  @id @default(uuid()) @db.Uuid
+  empresaId   String  @map("empresa_id") @db.Uuid
+  codigo      String  @db.VarChar(20)
+  nombre      String  @db.VarChar(100)
+  descripcion String?
+  abreviatura String? @db.VarChar(10)
+  activo      Boolean @default(true)
+
+  empresa         Empresa                        @relation(fields: [empresaId], references: [id])
+  solicitudItems  SolicitudItemEspecificacion[]
+  manifiestoItems ManifiestoItemEspecificacion[]
+
+  @@unique([empresaId, codigo])
+  @@map("especificaciones_adicionales")
+}
+
+model SolicitudItemEspecificacion {
+  solicitudItemId  String                  @map("solicitud_item_id") @db.Uuid
+  especificacionId String                  @map("especificacion_id") @db.Uuid
+  solicitudItem    SolicitudItem           @relation(fields: [solicitudItemId], references: [id], onDelete: Cascade)
+  especificacion   EspecificacionAdicional @relation(fields: [especificacionId], references: [id])
+
+  @@id([solicitudItemId, especificacionId])
+  @@map("solicitud_item_especificaciones")
+}
+
+/// ARL y EPS (entidades nacionales: catálogo global).
+model EntidadSeguridadSocial {
+  id     String              @id @default(uuid()) @db.Uuid
+  tipo   TipoSeguridadSocial
+  nombre String              @db.VarChar(120)
+  nit    String?             @db.VarChar(15)
+  activo Boolean             @default(true)
+
+  usuariosArl    Usuario[]           @relation("UsuarioArl")
+  usuariosEps    Usuario[]           @relation("UsuarioEps")
+  conductoresArl TransporteTercero[] @relation("TerceroConductorArl")
+  conductoresEps TransporteTercero[] @relation("TerceroConductorEps")
+  auxiliaresArl  TransporteTercero[] @relation("TerceroAuxiliarArl")
+  auxiliaresEps  TransporteTercero[] @relation("TerceroAuxiliarEps")
+
+  @@unique([tipo, nombre])
+  @@map("entidades_seguridad_social")
+}
+
+/// Vehículo y tripulación de un tercero que entrega en planta (descargas). Datos personales: Ley 1581/2012.
+model TransporteTercero {
+  id                    String   @id @default(uuid()) @db.Uuid
+  empresaId             String   @map("empresa_id") @db.Uuid
+  empresaTransportadora String   @map("empresa_transportadora") @db.VarChar(200)
+  tipoVehiculo          String?  @map("tipo_vehiculo") @db.VarChar(40)
+  placa                 String?  @db.VarChar(7)
+  conductorNombre       String?  @map("conductor_nombre") @db.VarChar(150)
+  conductorDocumento    String?  @map("conductor_documento") @db.VarChar(20)
+  conductorArlId        String?  @map("conductor_arl_id") @db.Uuid
+  conductorEpsId        String?  @map("conductor_eps_id") @db.Uuid
+  auxiliarNombre        String?  @map("auxiliar_nombre") @db.VarChar(150)
+  auxiliarDocumento     String?  @map("auxiliar_documento") @db.VarChar(20)
+  auxiliarArlId         String?  @map("auxiliar_arl_id") @db.Uuid
+  auxiliarEpsId         String?  @map("auxiliar_eps_id") @db.Uuid
+  telefono              String?  @db.VarChar(20)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa      Empresa                 @relation(fields: [empresaId], references: [id])
+  conductorArl EntidadSeguridadSocial? @relation("TerceroConductorArl", fields: [conductorArlId], references: [id])
+  conductorEps EntidadSeguridadSocial? @relation("TerceroConductorEps", fields: [conductorEpsId], references: [id])
+  auxiliarArl  EntidadSeguridadSocial? @relation("TerceroAuxiliarArl", fields: [auxiliarArlId], references: [id])
+  auxiliarEps  EntidadSeguridadSocial? @relation("TerceroAuxiliarEps", fields: [auxiliarEpsId], references: [id])
+  solicitudes  Solicitud[]
+  manifiestos  Manifiesto[]
+
+  @@map("transportes_terceros")
+}
+
+/// Consecutivos de documentos por empresa (manifiesto, inspección, acta). El formato lo define Terra Viva.
+model Consecutivo {
+  empresaId     String  @map("empresa_id") @db.Uuid
+  documento     String  @db.VarChar(20) // MANIFIESTO | INSPECCION | ACTA
+  prefijo       String  @default("") @db.VarChar(10)
+  digitos       Int     @default(5) @db.SmallInt
+  reinicioAnual Boolean @default(true) @map("reinicio_anual")
+  anio          Int     @db.SmallInt
+  ultimo        Int     @default(0)
+
+  empresa Empresa @relation(fields: [empresaId], references: [id])
+
+  @@id([empresaId, documento])
+  @@map("consecutivos")
+}
+
 model EstadoRecorrido {
-  id        String  @id @default(uuid()) @db.Uuid
-  empresaId String  @map("empresa_id") @db.Uuid
-  nombre    String  @db.VarChar(40) // Programada, En tránsito, En planta, Finalizado
-  color     String  @db.VarChar(7)
-  orden     Int
-  esFinal   Boolean @default(false) @map("es_final")
-  empresa   Empresa @relation(fields: [empresaId], references: [id])
-  rutas     Ruta[]
+  id          String  @id @default(uuid()) @db.Uuid
+  empresaId   String  @map("empresa_id") @db.Uuid
+  nombre      String  @db.VarChar(40) // En camino, En sitio, Finalizada, Cancelada (configurables)
+  descripcion String? @db.VarChar(200)
+  color       String  @db.VarChar(7)
+  orden       Int
+  esFinal     Boolean @default(false) @map("es_final")
+  cancela     Boolean @default(false) // al entrar, la ruta se cancela y sus líneas sin realizar vuelven a pendientes
+  rastreo     Boolean @default(false) // GPS continuo mientras la ruta esté en esta etapa (Ley 1581: solo en jornada)
+  activo      Boolean @default(true)
+  empresa     Empresa @relation(fields: [empresaId], references: [id])
+  rutas       Ruta[]
 
   @@map("estados_recorrido")
 }
 
+/// Ruta programada. Puede crearse sin vehículo o conductor («sin recursos»), pero no sale sin ellos.
 model Ruta {
   id                String    @id @default(uuid()) @db.Uuid
   empresaId         String    @map("empresa_id") @db.Uuid
   codigo            String    @db.VarChar(20)
   fechaProgramada   DateTime  @map("fecha_programada") @db.Date
+  horaProgramada    DateTime? @map("hora_programada") @db.Time(0)
   zonaId            String?   @map("zona_id") @db.Uuid
-  vehiculoId        String    @map("vehiculo_id") @db.Uuid
-  conductorId       String    @map("conductor_id") @db.Uuid
+  vehiculoId        String?   @map("vehiculo_id") @db.Uuid
+  conductorId       String?   @map("conductor_id") @db.Uuid
   auxiliarId        String?   @map("auxiliar_id") @db.Uuid
   estadoRecorridoId String?   @map("estado_recorrido_id") @db.Uuid
+  interna           Boolean   @default(false) // movimiento dentro de la planta
+  valorFlete        Decimal?  @map("valor_flete") @db.Decimal(14, 2) // vehículo de tercero
+  // Recurrencia: la ruta base genera rutas futuras cada «frecuenciaDias»
+  frecuenciaDias    Int?      @map("frecuencia_dias")
+  recurrenteActiva  Boolean   @default(false) @map("recurrente_activa")
+  rutaBaseId        String?   @map("ruta_base_id") @db.Uuid
   kmInicial         Int?      @map("km_inicial")
   kmFinal           Int?      @map("km_final")
   horaSalida        DateTime? @map("hora_salida") @db.Timestamptz
   horaLlegadaPlanta DateTime? @map("hora_llegada_planta") @db.Timestamptz
+  observaciones     String?
 
   empresa          Empresa          @relation(fields: [empresaId], references: [id])
   zona             Zona?            @relation(fields: [zonaId], references: [id])
-  vehiculo         Vehiculo         @relation(fields: [vehiculoId], references: [id])
-  conductor        Usuario          @relation("RutaConductor", fields: [conductorId], references: [id])
+  vehiculo         Vehiculo?        @relation(fields: [vehiculoId], references: [id])
+  conductor        Usuario?         @relation("RutaConductor", fields: [conductorId], references: [id])
   auxiliar         Usuario?         @relation("RutaAuxiliar", fields: [auxiliarId], references: [id])
   estadoRecorrido  EstadoRecorrido? @relation(fields: [estadoRecorridoId], references: [id])
+  rutaBase         Ruta?            @relation("RutaRecurrente", fields: [rutaBaseId], references: [id])
+  generadas        Ruta[]           @relation("RutaRecurrente")
   paradas          RutaParada[]
+  items            RutaItem[]
+  rastreo          RutaRastreo[]
   preoperacionales Preoperacional[]
   manifiestos      Manifiesto[]
 
@@ -729,24 +961,61 @@ model Ruta {
   @@map("rutas")
 }
 
+/// Parada de la ruta en una sede. Lo que se recoge ahí está en ruta_items.
 model RutaParada {
   id            String       @id @default(uuid()) @db.Uuid
   rutaId        String       @map("ruta_id") @db.Uuid
-  solicitudId   String       @map("solicitud_id") @db.Uuid
+  sucursalId    String       @map("sucursal_id") @db.Uuid
   orden         Int          @db.SmallInt
   horaLlegada   DateTime?    @map("hora_llegada") @db.Timestamptz
   latCheckin    Decimal?     @map("lat_checkin") @db.Decimal(9, 6)
   lngCheckin    Decimal?     @map("lng_checkin") @db.Decimal(9, 6)
   estado        EstadoParada @default(PENDIENTE)
-  firmaUrl      String?      @map("firma_url")
-  fotos         String[]
   observaciones String?
 
-  ruta      Ruta      @relation(fields: [rutaId], references: [id], onDelete: Cascade)
-  solicitud Solicitud @relation(fields: [solicitudId], references: [id])
+  ruta     Ruta       @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  sucursal Sucursal   @relation(fields: [sucursalId], references: [id])
+  items    RutaItem[]
 
   @@unique([rutaId, orden])
   @@map("ruta_paradas")
+}
+
+/// Programación por línea: qué línea de qué solicitud se recoge en qué parada.
+/// Una línea solo puede estar en una ruta vigente (índice parcial «liberado = false» en SQL).
+model RutaItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  rutaId          String   @map("ruta_id") @db.Uuid
+  paradaId        String   @map("parada_id") @db.Uuid
+  solicitudItemId String   @map("solicitud_item_id") @db.Uuid
+  liberado        Boolean  @default(false) // ruta cancelada o manifiesto anulado: la línea vuelve a pendiente
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  ruta          Ruta          @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  parada        RutaParada    @relation(fields: [paradaId], references: [id], onDelete: Cascade)
+  solicitudItem SolicitudItem @relation(fields: [solicitudItemId], references: [id])
+
+  @@index([solicitudItemId])
+  @@map("ruta_items")
+}
+
+/// Puntos GPS. Solo se aceptan mientras la etapa de la ruta tenga rastreo (regla en la base).
+model RutaRastreo {
+  id           BigInt   @id @default(autoincrement())
+  rutaId       String   @map("ruta_id") @db.Uuid
+  vehiculoId   String?  @map("vehiculo_id") @db.Uuid
+  latitud      Decimal  @db.Decimal(9, 6)
+  longitud     Decimal  @db.Decimal(9, 6)
+  precisionM   Decimal? @map("precision_m") @db.Decimal(7, 1)
+  velocidadKmh Decimal? @map("velocidad_kmh") @db.Decimal(5, 1)
+  registradoEn DateTime @map("registrado_en") @db.Timestamptz // hora del teléfono (puede llegar tarde sin señal)
+  recibidoEn   DateTime @default(now()) @map("recibido_en") @db.Timestamptz
+
+  ruta     Ruta      @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  vehiculo Vehiculo? @relation(fields: [vehiculoId], references: [id])
+
+  @@index([rutaId, registradoEn])
+  @@map("ruta_rastreo")
 }
 
 // ---------------------------------------------------------------------
@@ -767,6 +1036,7 @@ model ElementoChequeo {
 
 model Preoperacional {
   id              String    @id @default(uuid()) @db.Uuid
+  numero          String    @default("") @db.VarChar(20) // consecutivo: lo asigna la base al crear
   vehiculoId      String    @map("vehiculo_id") @db.Uuid
   rutaId          String?   @map("ruta_id") @db.Uuid
   conductorId     String    @map("conductor_id") @db.Uuid
@@ -784,6 +1054,7 @@ model Preoperacional {
   auxiliar   Usuario?         @relation("PreopAuxiliar", fields: [auxiliarId], references: [id])
   respuestas PreopRespuesta[]
 
+  @@unique([vehiculoId, numero], map: "ux_preoperacional_numero")
   @@map("preoperacionales")
 }
 
@@ -792,6 +1063,7 @@ model PreopRespuesta {
   elementoId       String           @map("elemento_id") @db.Uuid
   resultado        ResultadoChequeo
   fotoUrl          String?          @map("foto_url")
+  observacion      String?          @db.VarChar(300)
   preoperacional   Preoperacional   @relation(fields: [preoperacionalId], references: [id], onDelete: Cascade)
   elemento         ElementoChequeo  @relation(fields: [elementoId], references: [id])
 
@@ -799,82 +1071,218 @@ model PreopRespuesta {
   @@map("preop_respuestas")
 }
 
+/// Manifiesto de cargue (con ruta) o de descargue (entrega en planta). Un solo consecutivo para ambos.
+/// Al pasar a REALIZADO (firma, horas, báscula) la base crea la conciliación en borrador.
 model Manifiesto {
-  id              String          @id @default(uuid()) @db.Uuid
-  empresaId       String          @map("empresa_id") @db.Uuid
-  numero          String          @db.VarChar(20)
-  rutaId          String?         @map("ruta_id") @db.Uuid
-  clienteId       String          @map("cliente_id") @db.Uuid
-  sucursalId      String          @map("sucursal_id") @db.Uuid
-  vehiculoId      String          @map("vehiculo_id") @db.Uuid
-  conductorId     String          @map("conductor_id") @db.Uuid
-  destinoId       String          @map("destino_id") @db.Uuid
-  fechaEmision    DateTime        @map("fecha_emision") @db.Timestamptz
-  estado          EstadoDocumento @default(EMITIDO)
-  consecutivoRndc String?         @map("consecutivo_rndc") @db.VarChar(30)
-  pdfUrl          String?         @map("pdf_url")
+  id                String           @id @default(uuid()) @db.Uuid
+  empresaId         String           @map("empresa_id") @db.Uuid
+  numero            String           @default("") @db.VarChar(20) // consecutivo: lo asigna la base al crear
+  tipo              TipoManifiesto   @default(CARGUE)
+  estado            EstadoManifiesto @default(PENDIENTE)
+  rutaId            String?          @map("ruta_id") @db.Uuid // solo cargue
+  clienteId         String           @map("cliente_id") @db.Uuid
+  destinoId         String           @map("destino_id") @db.Uuid // planta o sede que recibe
+  tipoConciliacion  TipoConciliacion @default(INTERNA) @map("tipo_conciliacion")
+  fechaServicio     DateTime         @map("fecha_servicio") @db.Date
+  ordenCompra       String?          @map("orden_compra") @db.VarChar(40)
+  manifiestoCliente String?          @map("manifiesto_cliente") @db.VarChar(40) // número del documento del cliente
+  // Tripulación: propia (cargue) o de terceros (descargue)
+  vehiculoId        String?          @map("vehiculo_id") @db.Uuid
+  conductorId       String?          @map("conductor_id") @db.Uuid
+  auxiliarId        String?          @map("auxiliar_id") @db.Uuid
+  transporteId      String?          @map("transporte_id") @db.Uuid
+  // Báscula (kg). Neto = entrada − salida
+  pesoEntrada       Decimal?         @map("peso_entrada") @db.Decimal(12, 2)
+  pesoSalida        Decimal?         @map("peso_salida") @db.Decimal(12, 2)
+  pesoNeto          Decimal?         @map("peso_neto") @db.Decimal(12, 2)
+  horaLlegada       DateTime?        @map("hora_llegada") @db.Timestamptz
+  horaSalida        DateTime?        @map("hora_salida") @db.Timestamptz
+  observaciones     String?
+  // Cierre: firma táctil del conductor
+  firmaUrl          String?          @map("firma_url")
+  firmaNombre       String?          @map("firma_nombre") @db.VarChar(150)
+  firmaDocumento    String?          @map("firma_documento") @db.VarChar(20)
+  realizadoEn       DateTime?        @map("realizado_en") @db.Timestamptz
+  realizadoPorId    String?          @map("realizado_por") @db.Uuid
+  // Anulación
+  causalAnulacionId String?          @map("causal_anulacion_id") @db.Uuid
+  motivoAnulacion   String?          @map("motivo_anulacion") @db.VarChar(300)
+  anuladoEn         DateTime?        @map("anulado_en") @db.Timestamptz
+  anuladoPorId      String?          @map("anulado_por") @db.Uuid
+  consecutivoRndc   String?          @map("consecutivo_rndc") @db.VarChar(30)
+  pdfUrl            String?          @map("pdf_url")
+  creadoPorId       String?          @map("creado_por") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz
 
-  empresa   Empresa          @relation(fields: [empresaId], references: [id])
-  ruta      Ruta?            @relation(fields: [rutaId], references: [id])
-  cliente   Cliente          @relation(fields: [clienteId], references: [id])
-  sucursal  Sucursal         @relation(fields: [sucursalId], references: [id])
-  vehiculo  Vehiculo         @relation(fields: [vehiculoId], references: [id])
-  conductor Usuario          @relation(fields: [conductorId], references: [id])
-  destino   Proveedor        @relation(fields: [destinoId], references: [id])
-  items     ManifiestoItem[]
+  empresa         Empresa               @relation(fields: [empresaId], references: [id])
+  ruta            Ruta?                 @relation(fields: [rutaId], references: [id])
+  cliente         Cliente               @relation(fields: [clienteId], references: [id])
+  destino         Proveedor             @relation(fields: [destinoId], references: [id])
+  vehiculo        Vehiculo?             @relation(fields: [vehiculoId], references: [id])
+  conductor       Usuario?              @relation("MfConductor", fields: [conductorId], references: [id])
+  auxiliar        Usuario?              @relation("MfAuxiliar", fields: [auxiliarId], references: [id])
+  transporte      TransporteTercero?    @relation(fields: [transporteId], references: [id])
+  realizadoPor    Usuario?              @relation("MfRealizadoPor", fields: [realizadoPorId], references: [id])
+  causalAnulacion CatalogoItem?         @relation("CausalAnulacionMf", fields: [causalAnulacionId], references: [id])
+  anuladoPor      Usuario?              @relation("MfAnuladoPor", fields: [anuladoPorId], references: [id])
+  creadoPor       Usuario?              @relation("MfCreadoPor", fields: [creadoPorId], references: [id])
+  items           ManifiestoItem[]
+  evidencias      ManifiestoEvidencia[]
+  conciliacion    Conciliacion?
+  recurrentes     Solicitud[]           @relation("SolicitudRecurrente")
 
   @@unique([empresaId, numero])
+  @@index([empresaId, estado, fechaServicio])
   @@map("manifiestos")
 }
 
+/// Línea del manifiesto. Puede venir de una línea de solicitud o agregarse en campo
+/// (siempre con una declaración autorizada, activa y asignada al generador).
 model ManifiestoItem {
-  id              String  @id @default(uuid()) @db.Uuid
-  manifiestoId    String  @map("manifiesto_id") @db.Uuid
-  solicitudItemId String  @map("solicitud_item_id") @db.Uuid
-  cantidadOrigen  Decimal @map("cantidad_origen") @db.Decimal(12, 2)
+  id              String   @id @default(uuid()) @db.Uuid
+  manifiestoId    String   @map("manifiesto_id") @db.Uuid
+  solicitudItemId String?  @map("solicitud_item_id") @db.Uuid
+  declaracionId   String   @map("declaracion_id") @db.Uuid
+  sucursalId      String   @map("sucursal_id") @db.Uuid // generador
+  cantidad        Decimal  @map("cantidad_origen") @db.Decimal(12, 2)
+  metricaId       String?  @map("metrica_id") @db.Uuid
+  disposicionId   String?  @map("disposicion_id") @db.Uuid
+  tipoEmbalajeId  String?  @map("tipo_embalaje_id") @db.Uuid
   embalajes       Int?
+  precioUnitario  Decimal? @map("precio_unitario") @db.Decimal(14, 2) // tarifa vigente al crear la línea
+  observaciones   String?  @db.VarChar(300)
 
-  manifiesto    Manifiesto         @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
-  solicitudItem SolicitudItem      @relation(fields: [solicitudItemId], references: [id])
-  conciliacion  ConciliacionItem[]
+  manifiesto       Manifiesto                     @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
+  solicitudItem    SolicitudItem?                 @relation(fields: [solicitudItemId], references: [id])
+  declaracion      Declaracion                    @relation(fields: [declaracionId], references: [id])
+  sucursal         Sucursal                       @relation(fields: [sucursalId], references: [id])
+  metrica          Metrica?                       @relation(fields: [metricaId], references: [id])
+  disposicion      Disposicion?                   @relation(fields: [disposicionId], references: [id])
+  tipoEmbalaje     TipoEmbalaje?                  @relation(fields: [tipoEmbalajeId], references: [id])
+  especificaciones ManifiestoItemEspecificacion[]
+  conciliacion     ConciliacionItem?
 
+  @@index([manifiestoId])
   @@map("manifiesto_items")
 }
 
-model Acta {
-  id             String          @id @default(uuid()) @db.Uuid
-  empresaId      String          @map("empresa_id") @db.Uuid
-  numero         String          @db.VarChar(20)
-  tipo           TipoActa
-  clienteId      String          @map("cliente_id") @db.Uuid
-  destinoId      String          @map("destino_id") @db.Uuid
-  periodoDesde   DateTime        @map("periodo_desde") @db.Date
-  periodoHasta   DateTime        @map("periodo_hasta") @db.Date
-  estado         EstadoDocumento @default(BORRADOR)
-  pdfUrl         String?         @map("pdf_url")
-  certificadoUrl String?         @map("certificado_url")
+model ManifiestoItemEspecificacion {
+  manifiestoItemId String                  @map("manifiesto_item_id") @db.Uuid
+  especificacionId String                  @map("especificacion_id") @db.Uuid
+  manifiestoItem   ManifiestoItem          @relation(fields: [manifiestoItemId], references: [id], onDelete: Cascade)
+  especificacion   EspecificacionAdicional @relation(fields: [especificacionId], references: [id])
 
-  empresa Empresa            @relation(fields: [empresaId], references: [id])
-  cliente Cliente            @relation(fields: [clienteId], references: [id])
-  destino Proveedor          @relation(fields: [destinoId], references: [id])
-  items   ConciliacionItem[]
+  @@id([manifiestoItemId, especificacionId])
+  @@map("manifiesto_item_especificaciones")
+}
+
+/// Fotos desde la cámara del celular (máx. 2) y PDF escaneado (máx. 1).
+model ManifiestoEvidencia {
+  id            String        @id @default(uuid()) @db.Uuid
+  manifiestoId  String        @map("manifiesto_id") @db.Uuid
+  tipo          TipoEvidencia
+  url           String
+  nombreArchivo String?       @map("nombre_archivo") @db.VarChar(200)
+  bytes         Int?
+  tomadaEn      DateTime?     @map("tomada_en") @db.Timestamptz
+  latitud       Decimal?      @db.Decimal(9, 6)
+  longitud      Decimal?      @db.Decimal(9, 6)
+  subidaPorId   String?       @map("subida_por") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  manifiesto Manifiesto @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
+  subidaPor  Usuario?   @relation(fields: [subidaPorId], references: [id])
+
+  @@index([manifiestoId])
+  @@map("manifiesto_evidencias")
+}
+
+/// Conciliación de un manifiesto realizado: cantidades finales y dinero. Al aprobarla se habilita el acta.
+model Conciliacion {
+  id            String             @id @default(uuid()) @db.Uuid
+  empresaId     String             @map("empresa_id") @db.Uuid
+  manifiestoId  String             @unique @map("manifiesto_id") @db.Uuid
+  estado        EstadoConciliacion @default(BORRADOR)
+  aprobadaPorId String?            @map("aprobada_por") @db.Uuid
+  aprobadaEn    DateTime?          @map("aprobada_en") @db.Timestamptz
+  observaciones String?
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa     Empresa            @relation(fields: [empresaId], references: [id])
+  manifiesto  Manifiesto         @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
+  aprobadaPor Usuario?           @relation(fields: [aprobadaPorId], references: [id])
+  items       ConciliacionItem[]
+
+  @@index([empresaId, estado])
+  @@map("conciliaciones")
+}
+
+/// Línea conciliada. La diferencia cargada/conciliada de más de ±2 % exige justificación (CHECK en la base).
+/// Después de aprobar solo cambian los datos de factura y pago (cartera).
+model ConciliacionItem {
+  id                 String           @id @default(uuid()) @db.Uuid
+  conciliacionId     String           @map("conciliacion_id") @db.Uuid
+  manifiestoItemId   String           @unique @map("manifiesto_item_id") @db.Uuid
+  actaId             String?          @map("acta_id") @db.Uuid // acta que la certifica
+  cantidadCargada    Decimal          @map("cantidad_origen") @db.Decimal(12, 2)
+  cantidadConciliada Decimal?         @map("cantidad_destino") @db.Decimal(12, 2) // báscula de planta / acordada
+  metricaId          String?          @map("metrica_id") @db.Uuid
+  precioUnitario     Decimal?         @map("precio_unitario") @db.Decimal(14, 2)
+  tipoNegociacion    TipoNegociacion? @map("tipo_negociacion")
+  formaPago          FormaPago?       @map("forma_pago")
+  disposicionId      String?          @map("disposicion_id") @db.Uuid
+  ordenCompra        String?          @map("orden_compra") @db.VarChar(40)
+  facturaNumero      String?          @map("factura_numero") @db.VarChar(30)
+  facturaEmision     DateTime?        @map("factura_emision") @db.Date
+  facturaVencimiento DateTime?        @map("factura_vencimiento") @db.Date
+  estadoPago         EstadoPago       @default(PENDIENTE) @map("estado_pago")
+  justificacion      String?
+
+  conciliacion   Conciliacion   @relation(fields: [conciliacionId], references: [id], onDelete: Cascade)
+  manifiestoItem ManifiestoItem @relation(fields: [manifiestoItemId], references: [id])
+  acta           Acta?          @relation(fields: [actaId], references: [id])
+  metrica        Metrica?       @relation(fields: [metricaId], references: [id])
+  disposicion    Disposicion?   @relation(fields: [disposicionId], references: [id])
+
+  @@index([conciliacionId])
+  @@index([actaId])
+  @@map("conciliacion_items")
+}
+
+/// Acta / certificado de disposición final. Solo certifica líneas de conciliaciones aprobadas.
+/// Al emitirla se guarda en «contenido» una copia fija de lo certificado (cantidades, tratamientos y
+/// permisos vigentes), para que el certificado no cambie si después cambian los datos.
+model Acta {
+  id                 String     @id @default(uuid()) @db.Uuid
+  empresaId          String     @map("empresa_id") @db.Uuid
+  numero             String     @default("") @db.VarChar(20) // consecutivo: lo asigna la base al crear
+  tipo               TipoActa
+  origen             OrigenActa @default(GENERADA)
+  clienteId          String     @map("cliente_id") @db.Uuid
+  destinoId          String     @map("destino_id") @db.Uuid
+  periodoDesde       DateTime   @map("periodo_desde") @db.Date
+  periodoHasta       DateTime   @map("periodo_hasta") @db.Date
+  estado             EstadoActa @default(BORRADOR)
+  codigoVerificacion String     @unique @default(dbgenerated("encode(gen_random_bytes(12), 'hex'::text)")) @map("codigo_verificacion") @db.VarChar(32) // va en el QR
+  contenido          Json? // copia fija de lo certificado, al emitir
+  emitidaEn          DateTime?  @map("emitida_en") @db.Timestamptz
+  emitidaPorId       String?    @map("emitida_por") @db.Uuid
+  pdfUrl             String?    @map("pdf_url")
+  archivoUrl         String?    @map("archivo_url") // acta CARGADA de un gestor aliado
+  cargadaPorId       String?    @map("cargada_por") @db.Uuid
+  motivoAnulacion    String?    @map("motivo_anulacion") @db.VarChar(300)
+  anuladaEn          DateTime?  @map("anulada_en") @db.Timestamptz
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa    Empresa            @relation(fields: [empresaId], references: [id])
+  cliente    Cliente            @relation(fields: [clienteId], references: [id])
+  destino    Proveedor          @relation(fields: [destinoId], references: [id])
+  emitidaPor Usuario?           @relation("ActaEmitidaPor", fields: [emitidaPorId], references: [id])
+  cargadaPor Usuario?           @relation("ActaCargadaPor", fields: [cargadaPorId], references: [id])
+  items      ConciliacionItem[]
 
   @@unique([empresaId, numero])
   @@map("actas")
-}
-
-model ConciliacionItem {
-  id               String  @id @default(uuid()) @db.Uuid
-  actaId           String  @map("acta_id") @db.Uuid
-  manifiestoItemId String  @map("manifiesto_item_id") @db.Uuid
-  cantidadOrigen   Decimal @map("cantidad_origen") @db.Decimal(12, 2)
-  cantidadDestino  Decimal @map("cantidad_destino") @db.Decimal(12, 2) // báscula de planta
-  justificacion    String? // obligatoria si |diferencia| > tolerancia (ver CHECK en migración)
-
-  acta           Acta           @relation(fields: [actaId], references: [id], onDelete: Cascade)
-  manifiestoItem ManifiestoItem @relation(fields: [manifiestoItemId], references: [id])
-
-  @@map("conciliacion_items")
 }
 
 // ---------------------------------------------------------------------
@@ -1079,9 +1487,11 @@ model Metrica {
   factorAKg   Decimal?   @map("factor_a_kg") @db.Decimal(14, 6) // ton = 1000; para informes en kg
   activo      Boolean    @default(true)
 
-  empresa       Empresa       @relation(fields: [empresaId], references: [id])
-  tarifas       Tarifa[]
-  declaraciones Declaracion[]
+  empresa           Empresa            @relation(fields: [empresaId], references: [id])
+  tarifas           Tarifa[]
+  declaraciones     Declaracion[]
+  manifiestoItems   ManifiestoItem[]
+  conciliacionItems ConciliacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("metricas")
@@ -1103,10 +1513,12 @@ model Disposicion {
   proveedorId     String? @map("proveedor_id") @db.Uuid
   activo          Boolean @default(true)
 
-  empresa       Empresa                  @relation(fields: [empresaId], references: [id])
-  proveedor     Proveedor?               @relation(fields: [proveedorId], references: [id])
-  permisos      PermisoDisposicion[]
-  declaraciones DeclaracionDisposicion[]
+  empresa           Empresa                  @relation(fields: [empresaId], references: [id])
+  proveedor         Proveedor?               @relation(fields: [proveedorId], references: [id])
+  permisos          PermisoDisposicion[]
+  declaraciones     DeclaracionDisposicion[]
+  manifiestoItems   ManifiestoItem[]
+  conciliacionItems ConciliacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("disposiciones")
@@ -1120,8 +1532,9 @@ model TipoEmbalaje {
   esOtro    Boolean @default(false) @map("es_otro") // exige texto en otro_tipo_embalaje
   activo    Boolean @default(true)
 
-  empresa       Empresa       @relation(fields: [empresaId], references: [id])
-  declaraciones Declaracion[]
+  empresa         Empresa          @relation(fields: [empresaId], references: [id])
+  declaraciones   Declaracion[]
+  manifiestoItems ManifiestoItem[]
 
   @@unique([empresaId, codigo])
   @@map("tipos_embalaje")

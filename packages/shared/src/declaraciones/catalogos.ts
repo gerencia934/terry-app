@@ -143,6 +143,31 @@ export const MUNICIPIOS: { codigoDane: string; nombre: string; departamento: str
   { codigoDane: '54001', nombre: 'Cúcuta', departamento: 'Norte de Santander' },
 ];
 
+/** ARL y EPS (catálogo nacional). VERIFICAR con Terra Viva la lista que usa (pregunta 3 del análisis operativo). */
+export const ENTIDADES_SEGURIDAD_SOCIAL: { tipo: 'ARL' | 'EPS'; nombre: string }[] = [
+  ...['Positiva Compañía de Seguros', 'ARL SURA', 'Colmena Seguros', 'Seguros Bolívar', 'AXA Colpatria', 'La Equidad Seguros',
+    'Seguros de Vida Alfa', 'Mapfre Colombia Vida'].map((nombre) => ({ tipo: 'ARL' as const, nombre })),
+  ...['Nueva EPS', 'EPS Sura', 'Sanitas', 'Salud Total', 'Compensar', 'Famisanar', 'Coosalud', 'Mutual Ser', 'Aliansalud',
+    'SOS (Servicio Occidental de Salud)', 'Cajacopi', 'Asmet Salud'].map((nombre) => ({ tipo: 'EPS' as const, nombre })),
+];
+
+/** Especificaciones adicionales del servicio (por línea de solicitud y de manifiesto). VERIFICAR. */
+export const ESPECIFICACIONES_ADICIONALES: (ItemCatalogo & { abreviatura: string })[] = [
+  { codigo: 'CUSTODIA', nombre: 'Cadena de custodia', abreviatura: 'CC', descripcion: 'Registro de quién entrega y recibe en cada paso' },
+  { codigo: 'DESTRUCCION', nombre: 'Destrucción certificada', abreviatura: 'DC', descripcion: 'Destrucción total con certificado (marcas, documentos, producto vencido)' },
+  { codigo: 'TESTIGO', nombre: 'Con testigo del cliente', abreviatura: 'TC', descripcion: 'Un delegado del cliente presencia el tratamiento' },
+  { codigo: 'FOTOS', nombre: 'Registro fotográfico del tratamiento', abreviatura: 'RF' },
+];
+
+/** Etapas del recorrido iniciales: [orden, nombre, color, final, cancela, rastreo GPS, descripción]. */
+export const ETAPAS_RECORRIDO: [number, string, string, boolean, boolean, boolean, string][] = [
+  [1, 'Programada', '#6B7A72', false, false, false, 'Ruta creada, aún no sale de planta'],
+  [2, 'En camino', '#E5B800', false, false, true, 'Salió de planta; se registra la ubicación'],
+  [3, 'Donde el generador', '#1E9BD7', false, false, false, 'En la sede del cliente: cargue y manifiesto'],
+  [4, 'Descargado en planta', '#1F8A3B', true, false, false, 'Terminó: residuos en PSA Los Pinos'],
+  [5, 'Cancelada', '#D92D20', true, true, false, 'No se hizo: las líneas vuelven a pendientes'],
+];
+
 /** Estado físico: etiqueta visible ↔ valor del enum de la base de datos. */
 export const ESTADOS_FISICOS: [string, 'SOLIDO' | 'SEMISOLIDO' | 'LIQUIDO' | 'GASEOSO'][] = [
   ['Sólido', 'SOLIDO'], ['Semisólido / lodo', 'SEMISOLIDO'], ['Líquido', 'LIQUIDO'], ['Gaseoso', 'GASEOSO'],
