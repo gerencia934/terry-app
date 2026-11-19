@@ -12,6 +12,8 @@ const Configuracion = z.object({
   ciudadFirma: z.string().trim().max(80).optional(),
   representanteLegal: z.string().trim().max(150).optional(),
   cargoFirmante: z.string().trim().max(80).optional(),
+  // Certificado comercial: lo firma el representante legal con este cargo (por omisión, Gerente General) y este correo
+  certificadoComercial: z.object({ cargo: z.string().trim().max(80), correo: z.string().trim().max(150) }).partial().optional(),
   // Solo se imprimen las que tienen número y no han vencido (respuesta C2: el sello NORSOK no sale sin certificado vigente)
   certificaciones: z.array(z.object({
     norma: z.string().trim().min(2).max(60), numero: z.string().trim().max(60),
@@ -34,7 +36,7 @@ const Configuracion = z.object({
     laboratorio: z.string().trim().max(120), vigenteHasta: fechaOVacia,
   }).partial().optional(),
 });
-const DOCUMENTOS = ['MANIFIESTO', 'ACTA', 'INSPECCION'] as const;
+const DOCUMENTOS = ['MANIFIESTO', 'ACTA', 'INSPECCION', 'CERT_COMERCIAL'] as const;
 const Consecutivo = z.object({
   prefijo: z.string().trim().max(10).regex(/^[A-Za-z0-9-]*$/, 'Solo letras, números y guion.').optional(),
   digitos: z.number().int().min(0).max(8).optional(),
@@ -50,6 +52,7 @@ const TextoNuevo = Texto.extend({ codigo: z.string().trim().toUpperCase().regex(
 /** Valores por defecto de cada consecutivo (los mismos de la base, fn_siguiente_consecutivo). */
 const DEFECTO: Record<(typeof DOCUMENTOS)[number], { prefijo: string; digitos: number; reinicioAnual: boolean }> = {
   MANIFIESTO: { prefijo: 'TV', digitos: 4, reinicioAnual: false }, ACTA: { prefijo: 'PSAP', digitos: 0, reinicioAnual: true }, INSPECCION: { prefijo: 'INS-', digitos: 5, reinicioAnual: true },
+  CERT_COMERCIAL: { prefijo: 'CC-', digitos: 4, reinicioAnual: true },
 };
 /** Cómo se verá el próximo número (igual que fn_siguiente_consecutivo). */
 const muestra = (c: { prefijo: string; digitos: number; reinicioAnual: boolean; anio: number; ultimo: number }) => {

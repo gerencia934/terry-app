@@ -3,6 +3,7 @@
 // para producir los .xlsx del repositorio y (3) el API, que vuelve a validar todo antes de guardar.
 
 import { CODIGOS_BASE, ESTADOS_FISICOS, TIPOS_RCD, corrienteDe, tipoRcdDe, type ClaveCatalogo } from '../declaraciones/catalogos';
+import { SECTORES } from '../clientes';
 
 export type TipoCol = 'texto' | 'numero' | 'fecha' | 'lista' | 'email' | 'si_no' | 'codigo';
 export interface Columna {
@@ -68,6 +69,7 @@ export const L = {
   formaPago: ['Contado', 'Crédito 30 días', 'Crédito 60 días', 'Crédito 90 días'],
   tipoPersona: ['Jurídica', 'Natural'],
   tipoCliente: ['Directo', 'Gestor'],
+  sector: [...SECTORES] as string[],
   estadoFisico: ESTADOS_FISICOS.map(([etiqueta]) => etiqueta),
   tipoRcd: TIPOS_RCD.map((t) => `${t.numeral} ${t.nombre}`),
   unidad: ['kg', 't', 'm³', 'gal', 'L', 'und'],
@@ -132,7 +134,7 @@ export const PLANTILLAS: Plantilla[] = [
         ayuda: 'Como en el certificado de existencia y representación. Si es persona natural, su propio nombre. Sale en la constancia de RCD.', ancho: 28,
         validar: (v) => v && v.trim().length < 3 ? 'Escriba el nombre completo del representante legal.' : null },
       { key: 'tipo', header: 'Tipo de cliente', tipo: 'lista', opciones: L.tipoCliente, ejemplo: 'Directo', ayuda: 'Directo = el cliente genera el residuo. Gestor = cada sede es un generador tercero. Vacío = Directo.', ancho: 14 },
-      { key: 'sector', header: 'Sector', tipo: 'texto', ejemplo: 'Palma de aceite', ayuda: 'Hidrocarburos, salud, construcción…', ancho: 20 },
+      { key: 'sector', header: 'Sector', tipo: 'lista', opciones: L.sector, ejemplo: 'Agrícola', ayuda: 'Elija de la lista: hidrocarburos, doméstico, industrial, agrícola, minero, alimenticio…', ancho: 20 },
       { key: 'negociacion', header: 'Tipo de negociación', requerido: true, tipo: 'lista', opciones: L.negociacion, ejemplo: 'Cobro', ayuda: 'Compra = Terra Viva paga por el material.', ancho: 18 },
       { key: 'pago', header: 'Forma de pago', requerido: true, tipo: 'lista', opciones: L.formaPago, ejemplo: 'Crédito 30 días', ayuda: '', ancho: 18 },
       { key: 'email', header: 'Email facturación', tipo: 'email', ejemplo: 'facturas@cliente.com', ayuda: 'Recibe la factura electrónica.', ancho: 28 },

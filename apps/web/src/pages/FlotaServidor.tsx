@@ -6,7 +6,7 @@ import { AlertTriangle, CheckCircle2, Clock, Loader2, Pencil, Plus, Smartphone, 
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, Card, ColorBadge, DefList, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
-import { PieLista, fechaHoraCo, hoyCo, useApi, usePaginado } from '../lib/servidor';
+import { ImagenProtegida, PieLista, fechaHoraCo, hoyCo, useApi, usePaginado } from '../lib/servidor';
 import { useRouter } from '../lib/router';
 import { cx, diasEntre, fmtFecha, fmtNum } from '../lib/format';
 
@@ -19,7 +19,8 @@ interface Inspeccion {
   vehiculo: { placa: string; color: string; tipo: string }; conductor: { nombre: string }; auxiliar: { nombre: string } | null; ruta: { codigo: string } | null; _count: { respuestas: number };
 }
 interface InspeccionDetalle extends Omit<Inspeccion, '_count'> {
-  respuestas: { resultado: 'OK' | 'NO_OK' | 'NA'; observacion: string | null; elemento: { grupo: string; nombre: string; critico: boolean } }[];
+  firmaUrl: string | null;
+  respuestas: { resultado: 'OK' | 'NO_OK' | 'NA'; observacion: string | null; fotoUrl: string | null; elemento: { grupo: string; nombre: string; critico: boolean } }[];
 }
 const UNIDAD: Record<string, string> = { KG: 'kg', TON: 't', M3: 'm³', GAL: 'gal', L: 'L', UND: 'und' };
 const TIPOS = ['Furgón', 'Furgón RESPEL', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta', 'Tractocamión'];
@@ -112,14 +113,18 @@ function DetalleInspeccion({ id }: { id: string }) {
           <ul className="mt-1 list-disc pl-5">{fallas.map((x) => <li key={x.elemento.nombre}>{x.elemento.nombre}{x.elemento.critico ? ' (crítico: la ruta no sale)' : ''}{x.observacion ? `: ${x.observacion}` : ''}</li>)}</ul>
         </div>
       )}
+      {p.firmaUrl && <div><p className="mb-1 text-[12px] font-semibold uppercase tracking-[0.04em] text-muted">Firma del conductor</p><ImagenProtegida clave={p.firmaUrl} alt="Firma del conductor" className="h-20 w-56 rounded-lg border border-line bg-white object-contain" /></div>}
       {grupos.map((g) => (
         <div key={g}>
           <p className="mb-1 text-[12px] font-semibold uppercase tracking-[0.04em] text-muted">{g}</p>
           <ul className="divide-y divide-line rounded-lg border border-line text-[13px]">
             {p.respuestas.filter((x) => x.elemento.grupo === g).map((x) => (
-              <li key={x.elemento.nombre} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                <span className="min-w-0">{x.elemento.nombre}{x.elemento.critico && <span className="ml-1.5 text-[11px] text-warn">crítico</span>}</span>
-                <Badge tone={x.resultado === 'OK' ? 'ok' : x.resultado === 'NO_OK' ? 'bad' : 'neutral'}>{x.resultado === 'NO_OK' ? 'No OK' : x.resultado === 'NA' ? 'No aplica' : 'OK'}</Badge>
+              <li key={x.elemento.nombre} className="flex flex-col gap-1.5 px-3 py-1.5">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="min-w-0">{x.elemento.nombre}{x.elemento.critico && <span className="ml-1.5 text-[11px] text-warn">crítico</span>}</span>
+                  <Badge tone={x.resultado === 'OK' ? 'ok' : x.resultado === 'NO_OK' ? 'bad' : 'neutral'}>{x.resultado === 'NO_OK' ? 'No OK' : x.resultado === 'NA' ? 'No aplica' : 'OK'}</Badge>
+                </span>
+                {x.fotoUrl && <ImagenProtegida clave={x.fotoUrl} alt={`Foto de ${x.elemento.nombre}`} className="h-32 w-44 rounded-lg border border-line object-cover" />}
               </li>
             ))}
           </ul>

@@ -19,6 +19,7 @@ import { Jornada, Prisma, PerfilPortal } from '@prisma/client';
 import type { Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { AVISO_CLIENTE_INACTIVO } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos } from '../common/archivos';
@@ -28,6 +29,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AuthService, hashClave } from '../auth/auth.service';
 import { ManifiestosModule, ManifiestosService } from '../manifiestos/manifiestos.module';
 import { ImportacionModule, ImportacionService } from '../importacion/importacion.module';
+import { CertificadoComercialModule, CertificadoComercialService } from '../clientes/certificado-comercial.module';
 import { certificadosRetenidos, mensajePendientePago } from '../actas/cartera';
 
 type Tx = Prisma.TransactionClient;
@@ -55,13 +57,14 @@ const Cancelar = z.object({ motivo: z.string().trim().min(5, 'Cuéntenos el moti
 const ROL_PORTAL = 'Cliente (portal)';
 /** Causal con la que queda una solicitud que cancela el propio cliente (se crea la primera vez que se usa). */
 const CAUSAL_PORTAL = { codigo: 'CAU-PORTAL', nombre: 'Cancelada por el cliente desde el portal' };
-type Documento = 'acta' | 'manifiesto';
+type Documento = 'acta' | 'manifiesto' | 'comercial';
 
 @Injectable()
 export class PortalService {
   private readonly claveDescargas: string;
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly auth: AuthService, private readonly archivos: Archivos,
-    private readonly manifiestos: ManifiestosService, private readonly importacion: ImportacionService, private readonly jwt: JwtService, cfg: ConfigService<Config, true>) {
+    private readonly manifiestos: ManifiestosService, private readonly importacion: ImportacionService, private readonly jwt: JwtService, cfg: ConfigService<Config, true>,
+    private readonly comercial: CertificadoComercialService) {
     // Clave propia de los enlaces de descarga (distinta de la de las sesiones)
     this.claveDescargas = createHash('sha256').update(`${cfg.get('JWT_SECRET', { infer: true })}:descargas-portal`).digest('base64url');
   }
@@ -89,15 +92,25 @@ export class PortalService {
    */
   private dentroDeSusSedes(mias: string[], suyas: string[]) { return !mias.length || (suyas.length > 0 && suyas.every((s) => mias.includes(s))); }
 
+  /**
+   * Cliente inactivo (gerencia, 19-11-2026): sigue consultando y descargando, pero no pide servicios ni carga
+   * declaraciones. El aviso es amable y nunca muestra la nota interna de la oficina.
+   */
+  private async exigirActivo(tx: Tx, a: Actor) {
+    const c = await tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { activo: true, motivoInactivacion: true } });
+    if (!c.activo) throw new ForbiddenException({ mensaje: AVISO_CLIENTE_INACTIVO[c.motivoInactivacion ?? 'OTRO'], codigo: 'CLIENTE_INACTIVO' });
+  }
+
   async yo(a: Actor) {
     return this.conCliente(a, async (tx) => {
-      const [cliente, sedes, permitidas, u] = await Promise.all([
-        tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { id: true, razonSocial: true, nit: true, dv: true, tipo: true, activo: true } }),
+      const [{ motivoInactivacion, ...cliente }, sedes, permitidas, u] = await Promise.all([
+        tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { id: true, razonSocial: true, nit: true, dv: true, tipo: true, activo: true, motivoInactivacion: true } }),
         tx.sucursal.findMany({ where: { clienteId: a.clienteId, activa: true }, orderBy: [{ esPrincipal: 'desc' }, { nombre: 'asc' }], select: { id: true, codigo: true, nombre: true, municipio: { select: { nombre: true } } } }),
         this.sedes(tx, a),
         tx.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { nombre: true, email: true, perfilPortal: true } }),
       ]);
-      return { usuario: u, cliente, perfil: u.perfilPortal, sedes: permitidas.length ? sedes.filter((s) => permitidas.includes(s.id)) : sedes, restringido: permitidas.length > 0 };
+      return { usuario: u, cliente, perfil: u.perfilPortal, sedes: permitidas.length ? sedes.filter((s) => permitidas.includes(s.id)) : sedes, restringido: permitidas.length > 0,
+        aviso: cliente.activo ? null : AVISO_CLIENTE_INACTIVO[motivoInactivacion ?? 'OTRO'] };
     });
   }
 
@@ -293,9 +306,10 @@ export class PortalService {
    */
   async cargueDeclaraciones(a: Actor, plantilla: string, file: Express.Multer.File | undefined, delimitador: string | undefined, confirmar: boolean, acepta: boolean) {
     this.soloAdmin(a);
-    const cliente = await this.conCliente(a, async (tx) => ({
-      ...(await tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { id: true, nit: true } })), sedes: await this.sedes(tx, a),
-    }));
+    const cliente = await this.conCliente(a, async (tx) => {
+      await this.exigirActivo(tx, a);
+      return { ...(await tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { id: true, nit: true } })), sedes: await this.sedes(tx, a) };
+    });
     if (!confirmar) {
       const { plantilla: _p, ids: _i, nombres: _n, hash: _h, ...r } = await this.importacion.validarPortal(a, plantilla, cliente, file, delimitador);
       return r;
@@ -340,6 +354,7 @@ export class PortalService {
     const ids = b.items.map((i) => i.declaracionId);
     if (new Set(ids).size !== ids.length) throw new BadRequestException({ mensaje: 'Cada residuo o servicio va una sola vez en la solicitud.' });
     return this.conCliente(a, async (tx) => {
+      await this.exigirActivo(tx, a);
       const sedes = await this.sedes(tx, a);
       const sede = (!sedes.length || sedes.includes(b.sucursalId))
         ? await tx.sucursal.findFirst({ where: { id: b.sucursalId, clienteId: a.clienteId, activa: true }, select: { id: true, nombre: true } }) : null;
@@ -402,12 +417,29 @@ export class PortalService {
     return { url: `/descargas/${token}`, vence: new Date(Date.now() + 5 * 60_000).toISOString() };
   }
 
+  /**
+   * Certificación comercial con Terra Viva (gerencia, 19-11-2026): cualquier usuario del portal la descarga. Si ya se
+   * expidió hoy, es la misma. Un cliente inactivo no la recibe (aviso amable).
+   */
+  async certificadoComercial(a: Actor) {
+    await this.conCliente(a, (tx) => this.exigirActivo(tx, a));
+    const r = await this.comercial.expedir(a.empresaId, a.clienteId!, { id: a.id }, 'PORTAL');
+    const token = await this.jwt.signAsync({ t: 'comercial', id: r.id, sub: a.id, emp: a.empresaId, cli: a.clienteId }, { secret: this.claveDescargas, expiresIn: '5m', issuer: 'terraviva-descargas' });
+    return { numero: r.numero, url: `/descargas/${token}`, vence: new Date(Date.now() + 5 * 60_000).toISOString() };
+  }
+
   /** Sirve el PDF de un enlace firmado vigente. Vuelve a verificar el cliente, con la segunda barrera. */
   async descargar(token: string, res: Response) {
     let p: { t: Documento; id: string; sub: string; emp: string; cli: string };
     try { p = await this.jwt.verifyAsync(token, { secret: this.claveDescargas, issuer: 'terraviva-descargas' }); }
     catch { throw new ForbiddenException({ mensaje: 'El enlace de descarga venció o no es válido. Pídalo de nuevo desde el portal.' }); }
     const a: Actor = { id: p.sub, empresaId: p.emp, clienteId: p.cli, rol: ROL_PORTAL, permisos: [], nombre: 'portal' };
+    if (p.t === 'comercial') {
+      const cc = await this.conCliente(a, (tx) => tx.certificadoComercial.findFirst({ where: { id: p.id, clienteId: p.cli }, select: { numero: true, pdfUrl: true } }));
+      if (!cc) throw new NotFoundException({ mensaje: 'Documento no encontrado.' });
+      await this.audit.registrar({ id: p.sub }, 'certificado_comercial', p.id, 'DESCARGA_PORTAL');
+      return this.archivos.servir(res, cc.pdfUrl, p.emp, { nombre: `certificado-comercial-${cc.numero}.pdf` });
+    }
     const doc = await this.conCliente(a, async (tx) => {
       if (p.t !== 'acta') return tx.manifiesto.findFirst({ where: { id: p.id, clienteId: p.cli, estado: 'REALIZADO' }, select: { numero: true } });
       const acta = await tx.acta.findFirst({ where: { id: p.id, clienteId: p.cli, estado: 'EMITIDA' }, select: { numero: true, pdfUrl: true, archivoUrl: true } });
@@ -561,6 +593,7 @@ class PortalController {
   @Post('manifiestos/:id/enlace') enlaceManifiesto(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlace(a, 'manifiesto', id); }
   @Get('certificados') certificados(@ActorActual() a: Actor, @Query(new Zod(FiltroAnio)) f: z.infer<typeof FiltroAnio>) { return this.s.certificados(a, f); }
   @Post('certificados/:id/enlace') enlaceCertificado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlace(a, 'acta', id); }
+  @Post('certificado-comercial') certificadoComercial(@ActorActual() a: Actor) { return this.s.certificadoComercial(a); }
   @Get('informe') informe(@ActorActual() a: Actor, @Query(new Zod(FiltroInforme)) f: z.infer<typeof FiltroInforme>) { return this.s.informe(a, f.anio); }
   // Cargue de sus declaraciones (plantilla decl-residuos o decl-servicios del portal): revisar y confirmar
   @Post('declaraciones/cargue/:plantilla/vista-previa') @UseInterceptors(archivo)
@@ -602,5 +635,5 @@ class DescargasController {
   @Publico() @Get(':token') descargar(@Param('token') token: string, @Res() res: Response) { return this.s.descargar(token, res); }
 }
 
-@Module({ imports: [AuthModule, ManifiestosModule, ImportacionModule, JwtModule.register({})], controllers: [PortalController, UsuariosPortalOficinaController, DescargasController], providers: [PortalService] })
+@Module({ imports: [AuthModule, ManifiestosModule, ImportacionModule, CertificadoComercialModule, JwtModule.register({})], controllers: [PortalController, UsuariosPortalOficinaController, DescargasController], providers: [PortalService] })
 export class PortalModule {}

@@ -39,6 +39,13 @@ enum TipoCliente {
   GESTOR // el cliente gestiona residuos de terceros: cada sede es un generador
 }
 
+/// Por qué se inactiva un cliente (gerencia, 19-11-2026). En OTRO, la nota describe la eventualidad.
+enum MotivoInactivacion {
+  PAGOS_PENDIENTES
+  ENTREGAS_NO_AUTORIZADAS
+  OTRO
+}
+
 enum ClasificacionSede {
   RESIDENCIAL
   INDUSTRIAL
@@ -284,6 +291,7 @@ model Empresa {
   textosLegales    TextoLegal[]
 
   trabajos                Trabajo[] // cola de trabajos (ZIP, Excel)
+  certificadosComerciales CertificadoComercial[]
   @@map("empresas")
 }
 
@@ -392,6 +400,7 @@ model Usuario {
 
   @@index([empresaId])
   trabajos                Trabajo[] // lo que pidió preparar (sus descargas)
+  certificadosComerciales CertificadoComercial[] @relation("CertificadoComercialSolicitante")
   @@map("usuarios")
 }
 
@@ -434,13 +443,17 @@ model Cliente {
   dv               String?         @db.Char(1)
   razonSocial      String          @map("razon_social") @db.VarChar(200)
   tipo             TipoCliente     @default(DIRECTO)
-  sector           String?         @db.VarChar(60) // hidrocarburos, palma, salud, construcción...
+  sector           String?         @db.VarChar(60) // de la lista SECTORES (@terraviva/shared); un valor antiguo se respeta hasta editarlo
   tipoNegociacion  TipoNegociacion @default(COBRO) @map("tipo_negociacion")
   formaPago        FormaPago       @default(CONTADO) @map("forma_pago")
   emailFacturacion String?         @map("email_facturacion") @db.VarChar(150)
   representanteLegal String?       @map("representante_legal") @db.VarChar(150) // constancia de RCD (Anexo II)
   asesorId         String?         @map("asesor_id") @db.Uuid // asesor comercial (aparece en conciliaciones)
   activo           Boolean         @default(true)
+  // Inactivo siempre con su motivo y fecha (CHECK en la base); al reactivarlo se limpian y la auditoría conserva la historia
+  motivoInactivacion MotivoInactivacion? @map("motivo_inactivacion")
+  notaInactivacion   String?             @map("nota_inactivacion") @db.VarChar(500) // interna: el portal no la muestra
+  inactivadoEn       DateTime?           @map("inactivado_en") @db.Timestamptz
   camposExtra      Json            @default("{}") @map("campos_extra")
 
   empresa        Empresa        @relation(fields: [empresaId], references: [id])
@@ -452,6 +465,7 @@ model Cliente {
   actas          Acta[]
   cargues        CargueMasivo[]
   usuariosPortal Usuario[]      @relation("UsuarioPortal")
+  certificadosComerciales CertificadoComercial[]
 
   @@unique([empresaId, nit])
   @@map("clientes")
@@ -516,6 +530,7 @@ model Proveedor {
   soporteComercialFecha DateTime? @map("soporte_comercial_fecha") @db.Date
   licenciaVence         DateTime? @map("licencia_vence") @db.Date // vencida, o sin fecha y no indefinida ⇒ no cubre la disposición
   municipio             String?   @db.VarChar(80)
+  activo                Boolean   @default(true) // se trabaja hoy con él: inactivo no cubre ni se ofrece como destino (la planta propia siempre activa)
 
   empresa                  Empresa             @relation(fields: [empresaId], references: [id])
   disposicionesGestionadas DisposicionGestor[] // disposiciones que hace como gestor aliado
@@ -1464,6 +1479,30 @@ model Trabajo {
 
   @@index([usuarioId, creadoEn(sort: Desc)], map: "ix_trabajos_usuario")
   @@map("trabajos")
+}
+
+/// Certificado comercial del cliente (modelo PD-GG-F-01, dinámico). Copia fija: uno por cliente y día, no se modifica ni
+/// se borra (trigger), PDF en el almacenamiento y código QR. RLS: en el portal cada cliente ve solo los suyos.
+model CertificadoComercial {
+  id                 String   @id @default(uuid()) @db.Uuid
+  empresaId          String   @map("empresa_id") @db.Uuid
+  clienteId          String   @map("cliente_id") @db.Uuid
+  numero             String   @db.VarChar(20) // CC-2026-0001 (fn_siguiente_consecutivo, documento CERT_COMERCIAL)
+  fecha              DateTime @db.Date // día de expedición (Colombia)
+  contenido          Json // lo que dice: con esto se armó el PDF
+  pdfUrl             String   @map("pdf_url") // clave en el almacenamiento (Cloudflare R2 en producción)
+  pdfSha256          String   @map("pdf_sha256") @db.Char(64)
+  codigoVerificacion String   @unique @map("codigo_verificacion") @db.VarChar(40)
+  solicitadoPorId    String?  @map("solicitado_por_id") @db.Uuid
+  creadoEn           DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  empresa       Empresa  @relation(fields: [empresaId], references: [id])
+  cliente       Cliente  @relation(fields: [clienteId], references: [id])
+  solicitadoPor Usuario? @relation("CertificadoComercialSolicitante", fields: [solicitadoPorId], references: [id])
+
+  @@unique([empresaId, numero])
+  @@unique([clienteId, fecha])
+  @@map("certificados_comerciales")
 }
 
 enum EstadoTrabajo {

@@ -60,10 +60,11 @@ const TITULOS = {
   CONCILIACION: 'ACTA DE CONCILIACIÓN DE RESIDUOS',
 } as const;
 // Colores del modelo oficial: tabla azul, número en rojo, firma en verde
-const AZUL = '#1F5FA8', AZUL_CLARO = '#E8F0FA', VERDE = '#1E9E4A', ROJO = '#D0021B', GRIS = '#55615B', LINEA = '#9AA8B4';
-const A4: [number, number] = [595.28, 841.89];
-const M = { arriba: 122, abajo: 92, izq: 52, der: 92 };
-const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const AZUL = '#1F5FA8', AZUL_CLARO = '#E8F0FA', LINEA = '#9AA8B4';
+export const VERDE = '#1E9E4A', ROJO = '#D0021B', GRIS = '#55615B';
+export const A4: [number, number] = [595.28, 841.89];
+export const M = { arriba: 122, abajo: 92, izq: 52, der: 92 };
+export const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 /** Fechas calendario (DATE): se leen tal cual. */
 const fecha = (iso: string) => { const [a, m, d] = iso.slice(0, 10).split('-'); return `${d}/${m}/${a}`; };
@@ -82,6 +83,58 @@ function agrupar(c: ContenidoActa, conGenerador: boolean) {
     if (g) g.cantidad = Math.round((g.cantidad + l.cantidad) * 1000) / 1000; else grupos.set(k, { ...l });
   }
   return [...grupos.values()];
+}
+
+/** Datos del marco que va en todas las hojas de los documentos de Terra Viva. */
+export interface Marco {
+  numero: string; nit: string; url: string;
+  /** Cómo se llama el documento en el texto bajo el QR (por omisión, «certificado»). */
+  documento?: string;
+  certificaciones?: { norma: string; numero: string; entidad?: string }[];
+  contacto?: { direccion?: string | null; municipio?: string | null; telefono?: string | null; correo?: string | null };
+}
+
+/** Marco del modelo oficial en todas las hojas: logo con NIT, QR de verificación, sellos, onda de la marca y pie. */
+export async function marcoTerraViva(doc: PDFKit.PDFDocument, m: Marco) {
+  const W = A4[0] - M.izq - M.der, x0 = M.izq;
+  const qr = await QRCode.toBuffer(m.url, { type: 'png', errorCorrectionLevel: 'M', margin: 1, width: 300 });
+  const sellos = (m.certificaciones ?? []).filter((x) => x.numero?.trim());
+  const rango = doc.bufferedPageRange();
+  for (let i = 0; i < rango.count; i++) {
+    doc.switchToPage(rango.start + i);
+    const margen = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0; // escribir dentro del margen sin que pdfkit cree otra página
+    // Encabezado: logo con NIT y QR de verificación
+    doc.image(LOGO_TERRA_VIVA, x0, 34, { width: 178 });
+    doc.font('Helvetica').fontSize(6.5).fillColor(GRIS).text(`NIT: ${m.nit}`, x0 + 40, 92, { width: 120, lineBreak: false });
+    doc.image(qr, A4[0] - M.der - 58, 28, { width: 64 });
+    doc.font('Helvetica').fontSize(6).fillColor(GRIS).text(`Verifique la autenticidad del ${m.documento ?? 'certificado'} N.º ${m.numero}`, A4[0] - M.der - 110, 94, { width: 150, align: 'right', lineBreak: false });
+    // Sellos del sistema de gestión, en la columna derecha (texto propio: no se usan logotipos de terceros)
+    let ys = 250;
+    for (const s of sellos) {
+      const xs = A4[0] - 76;
+      doc.roundedRect(xs, ys, 56, 40, 6).fillAndStroke(AZUL_CLARO, AZUL);
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(AZUL).text(s.norma.replace(/:\d{4}$/, ''), xs + 2, ys + 9, { width: 52, align: 'center', lineBreak: true });
+      if (s.entidad) doc.font('Helvetica').fontSize(5.5).fillColor(AZUL).text(s.entidad, xs + 2, ys + 29, { width: 52, align: 'center', lineBreak: false });
+      doc.font('Helvetica').fontSize(5.5).fillColor(GRIS).text(s.numero, xs - 6, ys + 43, { width: 68, align: 'center', lineBreak: false });
+      ys += 66;
+    }
+    // Onda inferior con los colores de la marca
+    const H = A4[1], AN = A4[0];
+    doc.save();
+    doc.fillColor('#7FB8E6', 0.22).moveTo(0, H - 46).bezierCurveTo(AN * 0.28, H - 88, AN * 0.6, H - 6, AN, H - 58).lineTo(AN, H).lineTo(0, H).fill();
+    doc.fillColor('#9ED36A', 0.2).moveTo(0, H - 24).bezierCurveTo(AN * 0.35, H - 64, AN * 0.7, H + 4, AN, H - 34).lineTo(AN, H).lineTo(0, H).fill();
+    doc.fillColor('#F2D46B', 0.18).moveTo(0, H - 10).bezierCurveTo(AN * 0.4, H - 40, AN * 0.75, H + 10, AN, H - 16).lineTo(AN, H).lineTo(0, H).fill();
+    doc.restore();
+    // Pie
+    const contacto = m.contacto;
+    const lineaContacto = [contacto?.direccion, contacto?.municipio, contacto?.telefono, contacto?.correo].filter(Boolean).join(' · ');
+    doc.font('Helvetica').fontSize(6.5).fillColor(GRIS, 1);
+    if (lineaContacto) doc.text(lineaContacto, x0, H - 62, { width: W + 40, lineBreak: false });
+    doc.text(`Documento generado en TERRY-GO. Verifique su autenticidad en ${m.url}`, x0, H - 52, { width: W - 30, lineBreak: false })
+      .text(`Página ${i + 1} de ${rango.count}`, x0 + W - 60, H - 52, { width: 100, align: 'right', lineBreak: false });
+    doc.page.margins.bottom = margen;
+  }
 }
 
 export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
@@ -244,44 +297,7 @@ export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
   for (const b of c.rcd ?? []) constanciaRcd(doc, c, b, W, x0);
 
   // ---------- Encabezado, sellos, onda y pie en todas las hojas ----------
-  const qr = await QRCode.toBuffer(c.verificacion.url, { type: 'png', errorCorrectionLevel: 'M', margin: 1, width: 300 });
-  const sellos = (c.certificaciones ?? []).filter((x) => x.numero?.trim());
-  const rango = doc.bufferedPageRange();
-  for (let i = 0; i < rango.count; i++) {
-    doc.switchToPage(rango.start + i);
-    const margen = doc.page.margins.bottom;
-    doc.page.margins.bottom = 0; // escribir dentro del margen sin que pdfkit cree otra página
-    // Encabezado: logo con NIT y QR de verificación
-    doc.image(LOGO_TERRA_VIVA, x0, 34, { width: 178 });
-    doc.font('Helvetica').fontSize(6.5).fillColor(GRIS).text(`NIT: ${nitEmisor}`, x0 + 40, 92, { width: 120, lineBreak: false });
-    doc.image(qr, A4[0] - M.der - 58, 28, { width: 64 });
-    doc.font('Helvetica').fontSize(6).fillColor(GRIS).text(`Verifique la autenticidad del certificado N.º ${c.numero}`, A4[0] - M.der - 110, 94, { width: 150, align: 'right', lineBreak: false });
-    // Sellos del sistema de gestión, en la columna derecha (texto propio: no se usan logotipos de terceros)
-    let ys = 250;
-    for (const s of sellos) {
-      const xs = A4[0] - 76;
-      doc.roundedRect(xs, ys, 56, 40, 6).fillAndStroke(AZUL_CLARO, AZUL);
-      doc.font('Helvetica-Bold').fontSize(7).fillColor(AZUL).text(s.norma.replace(/:\d{4}$/, ''), xs + 2, ys + 9, { width: 52, align: 'center', lineBreak: true });
-      if (s.entidad) doc.font('Helvetica').fontSize(5.5).fillColor(AZUL).text(s.entidad, xs + 2, ys + 29, { width: 52, align: 'center', lineBreak: false });
-      doc.font('Helvetica').fontSize(5.5).fillColor(GRIS).text(s.numero, xs - 6, ys + 43, { width: 68, align: 'center', lineBreak: false });
-      ys += 66;
-    }
-    // Onda inferior con los colores de la marca
-    const H = A4[1], AN = A4[0];
-    doc.save();
-    doc.fillColor('#7FB8E6', 0.22).moveTo(0, H - 46).bezierCurveTo(AN * 0.28, H - 88, AN * 0.6, H - 6, AN, H - 58).lineTo(AN, H).lineTo(0, H).fill();
-    doc.fillColor('#9ED36A', 0.2).moveTo(0, H - 24).bezierCurveTo(AN * 0.35, H - 64, AN * 0.7, H + 4, AN, H - 34).lineTo(AN, H).lineTo(0, H).fill();
-    doc.fillColor('#F2D46B', 0.18).moveTo(0, H - 10).bezierCurveTo(AN * 0.4, H - 40, AN * 0.75, H + 10, AN, H - 16).lineTo(AN, H).lineTo(0, H).fill();
-    doc.restore();
-    // Pie
-    const contacto = c.emisor.contacto;
-    const lineaContacto = [contacto?.direccion, contacto?.municipio, contacto?.telefono, contacto?.correo].filter(Boolean).join(' · ');
-    doc.font('Helvetica').fontSize(6.5).fillColor(GRIS, 1);
-    if (lineaContacto) doc.text(lineaContacto, x0, H - 62, { width: W + 40, lineBreak: false });
-    doc.text(`Documento generado en TERRY-GO. Verifique su autenticidad en ${c.verificacion.url}`, x0, H - 52, { width: W - 30, lineBreak: false })
-      .text(`Página ${i + 1} de ${rango.count}`, x0 + W - 60, H - 52, { width: 100, align: 'right', lineBreak: false });
-    doc.page.margins.bottom = margen;
-  }
+  await marcoTerraViva(doc, { numero: c.numero, nit: nitEmisor, url: c.verificacion.url, certificaciones: c.certificaciones, contacto: c.emisor.contacto });
   doc.end();
   return listo;
 }

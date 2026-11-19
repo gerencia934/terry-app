@@ -22,7 +22,7 @@ interface Catalogos {
   metricasPrecio: (ItemBase & { abreviacion: string; factorAKg: string | null })[]; metricasDensidad: (ItemBase & { abreviacion: string })[];
   corrientesY: (ItemBase & { descripcion: string })[]; codigosA: (ItemBase & { descripcion: string })[];
 }
-interface Operacion { especificaciones: ItemBase[]; destinos: { id: string; razonSocial: string; esPropio: boolean }[]; etapas: Etapa[] }
+interface Operacion { especificaciones: ItemBase[]; destinos: { id: string; razonSocial: string; esPropio: boolean; activo?: boolean }[]; etapas: Etapa[] }
 interface Etapa { id: string; nombre: string; descripcion: string | null; color: string; orden: number; esFinal: boolean; cancela: boolean; rastreo: boolean; activo: boolean }
 interface Elemento { id: string; grupo: string; nombre: string; critico: boolean }
 interface Zona { id: string; nombre: string; color: string }
@@ -65,7 +65,9 @@ export function CatalogosServidor({ inicial }: { inicial?: string }) {
       case 'codigosA': return (c?.codigosA ?? []).map((x) => ({ clave: x.id!, codigo: x.codigo!, nombre: x.descripcion, detalle: '' }));
       case 'causales': return simple(c?.causales);
       case 'especificaciones': return simple(op.datos?.especificaciones);
-      case 'proveedores': return (op.datos?.destinos ?? []).map((d) => ({ clave: d.id, codigo: '', nombre: d.razonSocial, detalle: d.esPropio ? 'Planta propia' : 'Gestor aliado (licencia en Permisos)', etiqueta: d.esPropio ? 'Propio' : 'Aliado', tono: d.esPropio ? 'brand' as const : 'info' as const }));
+      case 'proveedores': return (op.datos?.destinos ?? []).map((d) => ({ clave: d.id, codigo: '', nombre: d.razonSocial,
+        detalle: d.esPropio ? 'Planta propia' : d.activo === false ? 'Ya no se trabaja con él (sus certificados se conservan)' : 'Gestor aliado (licencia en Permisos)',
+        etiqueta: d.esPropio ? 'Propio' : d.activo === false ? 'Inactivo' : 'Aliado', tono: d.esPropio ? 'brand' as const : d.activo === false ? 'neutral' as const : 'info' as const }));
       case 'zonas': return (zonas.datos ?? []).map((z) => ({ clave: z.id, codigo: '', nombre: z.nombre, detalle: '', color: z.color }));
       case 'chequeo': return (elementos.datos ?? []).map((e) => ({ clave: e.id, codigo: '', nombre: e.nombre, detalle: e.grupo, etiqueta: e.critico ? 'Crítico' : undefined, tono: 'warn' as const }));
       case 'etapas': return (etapas.datos ?? []).map((e) => ({ clave: e.id, codigo: String(e.orden), nombre: e.nombre, color: e.color,

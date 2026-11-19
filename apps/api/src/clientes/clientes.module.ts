@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Injectable } from '@nestjs/common';
-import { ClasificacionSede, FormaPago, Prisma, TipoCliente, TipoNegociacion } from '@prisma/client';
+import { ClasificacionSede, FormaPago, MotivoInactivacion, Prisma, TipoCliente, TipoNegociacion } from '@prisma/client';
 import { z } from 'zod';
-import { dvNit } from '@terraviva/shared';
+import { SECTORES, dvNit, sectorDe } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Municipios } from '../common/servicios';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
@@ -26,7 +26,11 @@ const Crear = Comercial.extend({ nit: z.string().regex(/^\d{6,10}$/, 'NIT sin pu
 const Editar = Comercial.partial().extend({
   activo: z.boolean().optional(),
   causalId: z.string().uuid().optional(), // al inactivar: motivo con el que se inactivan sus declaraciones
+  // Por qué se inactiva el cliente (gerencia, 19-11-2026): obligatorio al inactivar; en «otra eventualidad», con su nota
+  motivoInactivacion: z.nativeEnum(MotivoInactivacion).optional(), notaInactivacion: textoOpc(500),
 });
+/** Campos que cambian al inactivar o activar: hacerlo no exige completar el representante legal de un cliente antiguo. */
+const SOLO_ESTADO = ['activo', 'motivoInactivacion', 'notaInactivacion', 'inactivadoEn'];
 const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora HH:MM').transform((h) => new Date(`1970-01-01T${h}:00Z`));
 const horaOpc = z.union([hora, z.literal('').transform(() => null)]).nullish();
 const DatosSede = z.object({
@@ -90,11 +94,21 @@ class ClientesService {
       throw new BadRequestException({ mensaje: 'El asesor comercial no existe o está inactivo.' });
   }
 
+  /** Sector de la lista (sin importar tildes ni mayúsculas). Un valor antiguo escrito a mano se respeta mientras no se cambie. */
+  private sector(valor: string | null | undefined, actual?: string | null) {
+    if (valor === undefined || valor === null) return valor;
+    const s = sectorDe(valor);
+    if (s) return s;
+    if (actual !== undefined && valor === actual) return valor;
+    throw new BadRequestException({ mensaje: `Elija el sector de la lista: ${SECTORES.join(', ')}.` });
+  }
+
   async crear(a: Actor, b: z.infer<typeof Crear>) {
     await this.validarAsesor(a, b.asesorId);
+    const sector = this.sector(b.sector);
     if (await this.db.cliente.findUnique({ where: { empresaId_nit: { empresaId: a.empresaId, nit: b.nit } } }))
       throw new BadRequestException({ mensaje: `Ya existe un cliente con el NIT ${b.nit}.` });
-    const c = await this.db.cliente.create({ data: { ...b, empresaId: a.empresaId, dv: dvNit(b.nit) } });
+    const c = await this.db.cliente.create({ data: { ...b, sector, empresaId: a.empresaId, dv: dvNit(b.nit) } });
     await this.audit.registrar(a, 'cliente', c.id, 'CREAR', undefined, c);
     return c;
   }
@@ -102,20 +116,33 @@ class ClientesService {
   /**
    * Edita los datos comerciales. El NIT no cambia (es la identidad del cliente: para otro NIT se crea otro cliente).
    * Inactivar no borra nada: sus declaraciones activas quedan inactivas con el motivo indicado, para que no se
-   * programen más servicios (la base ya no deja autorizar ni cambiar declaraciones de un cliente inactivo).
+   * programen más servicios (la base ya no deja autorizar ni cambiar declaraciones de un cliente inactivo). Se inactiva
+   * con su motivo (pagos pendientes, entregas no autorizadas u otra eventualidad): el portal le muestra un aviso amable,
+   * le deja consultar y descargar, y no le deja pedir servicios ni cargar declaraciones.
    */
   async editar(a: Actor, id: string, b: z.infer<typeof Editar>) {
-    const { causalId, ...datos } = b;
-    await this.validarAsesor(a, datos.asesorId);
+    const { causalId, motivoInactivacion, notaInactivacion, ...resto } = b;
+    await this.validarAsesor(a, resto.asesorId);
     return this.db.$transaction(async (tx) => {
       const c = await tx.cliente.findFirst({ where: { id, empresaId: a.empresaId }, include: { sucursales: { where: { activa: true }, select: { nombre: true, generadorNit: true } } } });
       if (!c) throw new NotFoundException({ mensaje: 'Cliente no encontrado.' });
+      const datos = { ...resto, ...(resto.sector !== undefined ? { sector: this.sector(resto.sector, c.sector) } : {}) };
+      const inactivando = datos.activo === false && c.activo, activando = datos.activo === true && !c.activo;
+      // Motivo: obligatorio al inactivar; mientras siga inactivo se puede corregir; al reactivarlo se limpia
+      let estado: { motivoInactivacion?: MotivoInactivacion | null; notaInactivacion?: string | null; inactivadoEn?: Date | null } = {};
+      if (inactivando || (!c.activo && !activando && (motivoInactivacion || notaInactivacion !== undefined))) {
+        const motivo = motivoInactivacion ?? c.motivoInactivacion;
+        const nota = notaInactivacion !== undefined ? notaInactivacion : c.notaInactivacion;
+        if (!motivo) throw new BadRequestException({ mensaje: 'Indique por qué se inactiva el cliente: pagos pendientes, entregas no autorizadas u otra eventualidad.' });
+        if (motivo === 'OTRO' && (nota?.length ?? 0) < 5) throw new BadRequestException({ mensaje: 'Describa la eventualidad por la que se inactiva el cliente (mínimo 5 caracteres).' });
+        estado = { motivoInactivacion: motivo, notaInactivacion: nota ?? null, ...(inactivando ? { inactivadoEn: new Date() } : {}) };
+      } else if (activando) estado = { motivoInactivacion: null, notaInactivacion: null, inactivadoEn: null };
       if (datos.tipo === 'GESTOR' && c.tipo !== 'GESTOR') {
         const sin = c.sucursales.filter((s) => !s.generadorNit).map((s) => s.nombre);
         if (sin.length) throw new BadRequestException({ mensaje: `Para pasarlo a gestor, cada sede activa debe tener el NIT del generador. Falta en: ${sin.slice(0, 5).join(', ')}${sin.length > 5 ? '…' : ''}.` });
       }
       let inactivadas = 0;
-      if (datos.activo === false && c.activo) {
+      if (inactivando) {
         const activas = await tx.declaracion.count({ where: { clienteId: id, estado: 'AUTORIZADA', activa: true } });
         if (activas) {
           if (!causalId) throw new BadRequestException({ mensaje: `El cliente tiene ${activas} declaraciones activas: indique el motivo con que se inactivan.` });
@@ -124,14 +151,14 @@ class ClientesService {
         }
       }
       const { sucursales: _s, ...antes } = c;
-      const d = cambios(antes, datos);
+      const d = cambios(antes, { ...datos, ...estado });
       // Representante legal obligatorio: quien cambia los datos comerciales de un cliente antiguo que no lo tiene, lo completa
       // (inactivarlo o activarlo no lo exige)
-      if (Object.keys(d.despues).some((k) => k !== 'activo') && !c.representanteLegal?.trim() && !datos.representanteLegal)
+      if (Object.keys(d.despues).some((k) => !SOLO_ESTADO.includes(k)) && !c.representanteLegal?.trim() && !datos.representanteLegal)
         throw new BadRequestException({ mensaje: 'Falta el representante legal del cliente: es obligatorio. Si es persona natural, escriba su nombre.' });
       if (!d.hay) return { ...c, inactivadas };
-      const r = await tx.cliente.update({ where: { id }, data: datos });
-      await this.audit.registrar(a, 'cliente', id, datos.activo === false && c.activo ? 'INACTIVAR' : datos.activo && !c.activo ? 'ACTIVAR' : 'EDITAR', d.antes, { ...d.despues, ...(inactivadas ? { declaracionesInactivadas: inactivadas } : {}) }, tx);
+      const r = await tx.cliente.update({ where: { id }, data: { ...datos, ...estado } });
+      await this.audit.registrar(a, 'cliente', id, inactivando ? 'INACTIVAR' : activando ? 'ACTIVAR' : 'EDITAR', d.antes, { ...d.despues, ...(inactivadas ? { declaracionesInactivadas: inactivadas } : {}) }, tx);
       return { ...r, inactivadas };
     });
   }
@@ -190,11 +217,8 @@ class ClientesService {
   asesores(a: Actor) {
     return this.db.usuario.findMany({ where: { empresaId: a.empresaId, activo: true, esConductor: false, esAuxiliar: false, clienteId: null }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true, rol: { select: { nombre: true } } } });
   }
-  /** Sectores ya usados, para sugerirlos al escribir. */
-  async sectores(a: Actor) {
-    const r = await this.db.cliente.groupBy({ by: ['sector'], where: { empresaId: a.empresaId, sector: { not: null } }, _count: true, orderBy: { _count: { sector: 'desc' } }, take: 40 });
-    return r.map((x) => x.sector!).filter(Boolean);
-  }
+  /** Sectores de la lista (gerencia, 19-11-2026). */
+  sectores() { return [...SECTORES]; }
 }
 
 @Controller('clientes')
@@ -202,7 +226,7 @@ class ClientesController {
   constructor(private readonly s: ClientesService) {}
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get('asesores') asesores(@ActorActual() a: Actor) { return this.s.asesores(a); }
-  @Get('sectores') sectores(@ActorActual() a: Actor) { return this.s.sectores(a); }
+  @Get('sectores') sectores() { return this.s.sectores(); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
   @Permiso('clientes.editar') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(Crear)) b: z.infer<typeof Crear>) { return this.s.crear(a, b); }
   @Permiso('clientes.editar') @Patch(':id') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Editar)) b: z.infer<typeof Editar>) { return this.s.editar(a, id, b); }

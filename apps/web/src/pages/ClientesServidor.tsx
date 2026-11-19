@@ -1,14 +1,15 @@
 // Clientes y sedes conectados al API (fase 1c). Nada se borra: un cliente o una sede se inactiva.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowLeft, Building2, Clock, FileText, Loader2, Mail, MapPin, Pencil, Phone, Plus, Star, Upload } from 'lucide-react';
-import { dvNit } from '@terraviva/shared';
+import { ArrowLeft, BadgeCheck, Building2, Clock, FileText, Loader2, Mail, MapPin, Pencil, Phone, Plus, Star, Upload } from 'lucide-react';
+import { MOTIVOS_INACTIVACION, SECTORES, dvNit, type MotivoInactivacionCliente } from '@terraviva/shared';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, ColorBadge, DefList, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { BuscarMunicipio, type MunicipioBuscado } from '../components/BuscarMunicipio';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { PieLista, horaColumna, useApi, usePaginado } from '../lib/servidor';
 import { useRouter } from '../lib/router';
-import { cx } from '../lib/format';
+import { cx, fmtFecha } from '../lib/format';
+import { urlAbsoluta } from '../lib/trabajos';
 import { verDeclaracionesDe } from './DeclaracionesServidor';
 import { FormUsuarioPortal, ListaUsuariosPortal, type UsuarioPortal } from './portal/UsuariosPortal';
 import type { SedePortal } from './portal/PortalApp';
@@ -20,7 +21,12 @@ interface ClienteFila {
   id: string; nit: string; dv: string | null; razonSocial: string; tipo: Tipo; sector: string | null; tipoNegociacion: string; formaPago: string;
   emailFacturacion: string | null; activo: boolean; asesor: { id: string; nombre: string } | null; sucursales: SedeResumen[]; _count: { declaraciones: number };
   representanteLegal: string | null;
+  /** Por qué está inactivo (y la nota interna, que el cliente no ve). */
+  motivoInactivacion: MotivoInactivacionCliente | null; notaInactivacion: string | null; inactivadoEn: string | null;
 }
+/** «Inactivo · Pagos pendientes». */
+const estadoCliente = (c: { activo: boolean; motivoInactivacion: MotivoInactivacionCliente | null }) =>
+  (c.activo ? 'Activo' : `Inactivo${c.motivoInactivacion ? ` · ${MOTIVOS_INACTIVACION[c.motivoInactivacion]}` : ''}`);
 interface Sede {
   id: string; nombre: string; codigo: string | null; esPrincipal: boolean; activa: boolean; clasificacion: string | null; generadorNit: string | null; generadorNombre: string | null;
   direccion: string | null; municipio: MunicipioBuscado | null; zonaId: string | null; zona: Zona | null;
@@ -73,7 +79,7 @@ export function ClientesServidor() {
         {[...new Map(c.sucursales.filter((s) => s.zona).map((s) => [s.zona!.nombre, s.zona!])).values()].slice(0, 3).map((z) => <ColorBadge key={z.nombre} color={z.color}>{z.nombre}</ColorBadge>)}
       </span>), priority: 2 },
     { key: 'dec', header: 'Declaraciones activas', align: 'right', render: (c) => <span className="num">{c._count.declaraciones}</span>, priority: 2 },
-    { key: 'est', header: 'Estado', render: (c) => <Badge tone={c.activo ? 'ok' : 'neutral'}>{c.activo ? 'Activo' : 'Inactivo'}</Badge>, priority: 3 },
+    { key: 'est', header: 'Estado', render: (c) => <Badge tone={c.activo ? 'ok' : c.motivoInactivacion === 'OTRO' ? 'neutral' : 'warn'}>{estadoCliente(c)}</Badge>, priority: 3 },
   ];
   const cerrar = () => setPanel(null);
   const titulo = !panel ? '' : panel.vista === 'detalle' ? 'Cliente' : panel.vista === 'cliente' ? (panel.id ? 'Editar cliente' : 'Nuevo cliente')
@@ -125,8 +131,15 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
     <div className="flex flex-col gap-5">
       <div>
         <p className="font-display text-[18px] font-semibold leading-tight">{c.razonSocial}</p>
-        <p className="mt-1 flex flex-wrap gap-1.5"><Badge tone={c.activo ? 'ok' : 'neutral'}>{c.activo ? 'Activo' : 'Inactivo'}</Badge><Badge tone={c.tipo === 'GESTOR' ? 'info' : 'neutral'}>{c.tipo === 'GESTOR' ? 'Gestor' : 'Cliente directo'}</Badge></p>
+        <p className="mt-1 flex flex-wrap gap-1.5"><Badge tone={c.activo ? 'ok' : c.motivoInactivacion === 'OTRO' ? 'neutral' : 'warn'}>{estadoCliente(c)}</Badge><Badge tone={c.tipo === 'GESTOR' ? 'info' : 'neutral'}>{c.tipo === 'GESTOR' ? 'Gestor' : 'Cliente directo'}</Badge></p>
       </div>
+      {!c.activo && (
+        <p className="rounded-xl bg-surface-2 px-4 py-3 text-[13px]">
+          <span className="font-medium">Inactivo{c.inactivadoEn ? ` desde el ${fmtFecha(c.inactivadoEn.slice(0, 10))}` : ''}{c.motivoInactivacion ? ` por ${MOTIVOS_INACTIVACION[c.motivoInactivacion].toLowerCase()}` : ''}.</span>
+          {c.notaInactivacion && <span className="block text-muted">Nota interna: {c.notaInactivacion}</span>}
+          <span className="block text-muted">En el portal ve un aviso amable: puede consultar y descargar, pero no pedir servicios ni cargar declaraciones.</span>
+        </p>
+      )}
       <DefList items={[
         ['NIT', <span className="num">{conDv(c)}</span>], ['Sector', c.sector ?? '—'],
         ['Negociación', NEGOCIACION[c.tipoNegociacion] ?? c.tipoNegociacion], ['Forma de pago', PAGO[c.formaPago] ?? c.formaPago],
@@ -135,6 +148,7 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
       ]} />
       <div className="flex flex-wrap gap-2">
         {puedeEditar && <Button size="sm" onClick={() => abrir({ vista: 'cliente', id: c.id })}><Pencil size={14} /> Editar cliente</Button>}
+        {puedeEditar && c.activo && <BotonCertificadoComercial clienteId={c.id} />}
         <Button size="sm" variant="ghost" onClick={() => { verDeclaracionesDe({ id: c.id, razonSocial: c.razonSocial, nit: c.nit, tipo: c.tipo }); go('declaraciones'); }}><FileText size={14} /> Ver sus declaraciones</Button>
       </div>
       <div>
@@ -200,20 +214,47 @@ function TarjetaSede({ s, gestor, editar }: { s: Sede; gestor: boolean; editar?:
   );
 }
 
+/**
+ * Certificado comercial del cliente (el mismo que descarga en el portal): se expide al pedirlo o se entrega el de hoy,
+ * y se abre en otra pestaña. Si tiene facturas vencidas, sale sin la frase de cumplimiento y aquí se avisa.
+ */
+function BotonCertificadoComercial({ clienteId }: { clienteId: string }) {
+  const toast = useToast();
+  const [ocupado, setOcupado] = useState(false);
+  const pedir = async () => {
+    const w = window.open('', '_blank'); // antes de esperar, para que el navegador no la bloquee
+    setOcupado(true);
+    try {
+      const r = await api<{ numero: string; url: string; alDia: boolean }>(`/clientes/${clienteId}/certificado-comercial`, { metodo: 'POST' });
+      const destino = urlAbsoluta(r.url);
+      if (w) { w.opener = null; w.location.href = destino; } else window.location.assign(destino);
+      toast(r.alDia ? `Certificado comercial ${r.numero}.` : `Certificado comercial ${r.numero}: salió sin la frase de cumplimiento porque el cliente tiene facturas vencidas.`, r.alDia ? 'ok' : 'warn');
+    } catch (e) { w?.close(); toast(mensajeError(e, 'No se pudo expedir el certificado comercial.'), 'warn'); }
+    setOcupado(false);
+  };
+  return <Button size="sm" variant="ghost" disabled={ocupado} onClick={pedir}>{ocupado ? <Loader2 size={14} className="animate-spin" /> : <BadgeCheck size={14} />} Certificado comercial</Button>;
+}
+
 // ---------------- Formulario del cliente ----------------
 function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () => void; alGuardar: (id: string) => void }) {
   const toast = useToast();
   const actual = useApi<ClienteDetalle>(id ? `/clientes/${id}` : null);
   const asesores = useApi<{ id: string; nombre: string; rol: { nombre: string } }[]>('/clientes/asesores');
-  const sectores = useApi<string[]>('/clientes/sectores');
-  const [v, setV] = useState({ nit: '', razonSocial: '', tipo: 'DIRECTO' as Tipo, sector: '', tipoNegociacion: 'COBRO', formaPago: 'CONTADO', emailFacturacion: '', asesorId: '', representanteLegal: '', activo: true, causalId: '' });
+  const [v, setV] = useState({ nit: '', razonSocial: '', tipo: 'DIRECTO' as Tipo, sector: '', tipoNegociacion: 'COBRO', formaPago: 'CONTADO', emailFacturacion: '', asesorId: '', representanteLegal: '', activo: true, causalId: '',
+    motivoInactivacion: '' as MotivoInactivacionCliente | '', notaInactivacion: '' });
   const [enviando, setEnviando] = useState(false);
   const c = actual.datos;
   useEffect(() => {
     if (c) setV({ nit: c.nit, razonSocial: c.razonSocial, tipo: c.tipo, sector: c.sector ?? '', tipoNegociacion: c.tipoNegociacion, formaPago: c.formaPago,
-      emailFacturacion: c.emailFacturacion ?? '', asesorId: c.asesor?.id ?? '', representanteLegal: c.representanteLegal ?? '', activo: c.activo, causalId: '' });
+      emailFacturacion: c.emailFacturacion ?? '', asesorId: c.asesor?.id ?? '', representanteLegal: c.representanteLegal ?? '', activo: c.activo, causalId: '',
+      motivoInactivacion: c.motivoInactivacion ?? '', notaInactivacion: c.notaInactivacion ?? '' });
   }, [c]);
   const inactivando = !!c && c.activo && !v.activo;
+  /** Inactivar, o corregir el motivo de uno que sigue inactivo. */
+  const conMotivo = !!c && !v.activo;
+  const faltaMotivo = conMotivo && (!v.motivoInactivacion || (v.motivoInactivacion === 'OTRO' && v.notaInactivacion.trim().length < 5));
+  /** Un sector antiguo escrito a mano se muestra hasta que se elija uno de la lista. */
+  const sectorAntiguo = !!v.sector && !(SECTORES as readonly string[]).includes(v.sector);
   const causales = useApi<{ id: string; nombre: string }[]>(inactivando && c.declaracionesActivas ? '/catalogos?tipo=CAUSAL' : null);
   const set = (k: keyof typeof v) => (e: { target: { value: string } }) => setV((s) => ({ ...s, [k]: e.target.value }));
   const nitValido = /^\d{6,10}$/.test(v.nit);
@@ -225,8 +266,9 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
       ...(v.representanteLegal.trim() ? { representanteLegal: v.representanteLegal } : {}) };
     try {
       if (id) {
-        const r = await api<{ id: string; inactivadas: number }>(`/clientes/${id}`, { metodo: 'PATCH', cuerpo: { ...datos, activo: v.activo, ...(v.causalId && { causalId: v.causalId }) } });
-        toast(r.inactivadas ? `Cliente inactivo: ${r.inactivadas} declaraciones quedaron inactivas.` : 'Cliente actualizado.');
+        const r = await api<{ id: string; inactivadas: number }>(`/clientes/${id}`, { metodo: 'PATCH', cuerpo: { ...datos, activo: v.activo, ...(v.causalId && { causalId: v.causalId }),
+          ...(conMotivo ? { motivoInactivacion: v.motivoInactivacion, notaInactivacion: v.notaInactivacion } : {}) } });
+        toast(inactivando ? `Cliente inactivo${r.inactivadas ? ` y ${r.inactivadas} declaraciones inactivas` : ''}: en el portal verá un aviso y no podrá pedir servicios.` : 'Cliente actualizado.');
         alGuardar(id);
       } else {
         const r = await api<{ id: string }>('/clientes', { metodo: 'POST', cuerpo: { ...datos, nit: v.nit } });
@@ -249,8 +291,13 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
         <Field label="Tipo" id="fc-tipo" hint={v.tipo === 'GESTOR' ? 'Cada sede representa a un generador tercero (con su NIT).' : undefined}>
           <Select id="fc-tipo" value={v.tipo} onChange={set('tipo')}><option value="DIRECTO">Cliente directo (generador)</option><option value="GESTOR">Gestor</option></Select>
         </Field>
-        <Field label="Sector" id="fc-sec"><Input id="fc-sec" list="fc-sectores" value={v.sector} onChange={set('sector')} maxLength={60} placeholder="Hidrocarburos, palma, salud…" /></Field>
-        <datalist id="fc-sectores">{(sectores.datos ?? []).map((s) => <option key={s} value={s} />)}</datalist>
+        <Field label="Sector" id="fc-sec" hint={sectorAntiguo ? 'Escrito antes de la lista: elija uno de la lista.' : undefined}>
+          <Select id="fc-sec" value={v.sector} onChange={set('sector')}>
+            <option value="">Sin sector</option>
+            {sectorAntiguo && <option value={v.sector}>{v.sector} (anterior)</option>}
+            {SECTORES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </Field>
         <Field label="Negociación" id="fc-neg"><Select id="fc-neg" value={v.tipoNegociacion} onChange={set('tipoNegociacion')}>{Object.entries(NEGOCIACION).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
         <Field label="Forma de pago" id="fc-pago"><Select id="fc-pago" value={v.formaPago} onChange={set('formaPago')}>{Object.entries(PAGO).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
       </div>
@@ -262,8 +309,21 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
       {id && (
         <label className="flex items-start gap-2 rounded-lg border border-line p-3 text-[13px]">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.activo} onChange={(e) => setV((s) => ({ ...s, activo: e.target.checked, causalId: '' }))} />
-          <span><span className="font-medium">Cliente activo</span><br /><span className="text-muted">Inactivo no se borra: sus declaraciones activas quedan inactivas y ya no se le programan servicios.</span></span>
+          <span><span className="font-medium">Cliente activo</span><br /><span className="text-muted">Inactivo no se borra: sus declaraciones activas quedan inactivas y ya no se le programan servicios. En el portal puede consultar y descargar, pero no pedir servicios ni cargar declaraciones.</span></span>
         </label>
+      )}
+      {conMotivo && (
+        <div className="flex flex-col gap-3 rounded-lg border border-line p-3">
+          <Field label="¿Por qué se inactiva?" id="fc-motivo">
+            <Select id="fc-motivo" value={v.motivoInactivacion} onChange={set('motivoInactivacion')} required>
+              <option value="">Elija el motivo</option>
+              {(Object.entries(MOTIVOS_INACTIVACION) as [MotivoInactivacionCliente, string][]).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </Select>
+          </Field>
+          <Field label={v.motivoInactivacion === 'OTRO' ? 'Describa la eventualidad' : 'Nota (opcional)'} id="fc-nota" hint="Interna: el cliente no la ve. En el portal verá un aviso amable según el motivo.">
+            <textarea id="fc-nota" value={v.notaInactivacion} onChange={set('notaInactivacion')} maxLength={500} className="min-h-[70px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm" />
+          </Field>
+        </div>
       )}
       {inactivando && c!.declaracionesActivas > 0 && (
         <Field label={`Motivo para inactivar sus ${c!.declaracionesActivas} declaraciones activas`} id="fc-causal">
@@ -272,7 +332,7 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
       )}
       <div className="flex justify-end gap-2 border-t border-line pt-3">
         <Button type="button" onClick={volver}>Cancelar</Button>
-        <Button type="submit" variant={inactivando ? 'danger' : 'primary'} disabled={enviando || (!id && !nitValido) || (inactivando && c!.declaracionesActivas > 0 && !v.causalId)}>
+        <Button type="submit" variant={inactivando ? 'danger' : 'primary'} disabled={enviando || (!id && !nitValido) || (inactivando && c!.declaracionesActivas > 0 && !v.causalId) || faltaMotivo}>
           {enviando && <Loader2 size={16} className="animate-spin" />}{inactivando ? 'Inactivar cliente' : id ? 'Guardar cambios' : 'Crear cliente'}
         </Button>
       </div>

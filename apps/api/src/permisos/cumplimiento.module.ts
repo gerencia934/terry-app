@@ -27,19 +27,27 @@ const CrearPermiso = z.object({
   autoridad: z.string().trim().min(2).max(80), alcance: z.string().trim().min(10, 'Describa qué autoriza (mínimo 10 caracteres).').max(4000),
   expedicion: fechaOpc, vence: fechaOpc, estado: z.nativeEnum(EstadoPermiso).default('VIGENTE'), disposiciones: Codigos.default([]),
 });
-/** Gestor aliado nuevo (planta de un tercero) con su licencia y lo que gestiona. */
+const Nit = z.string().trim().regex(/^\d{6,10}(-\d)?$/, 'NIT sin puntos, con o sin dígito de verificación (900123456-7).');
+/** Acto que ampara al gestor; vacío = aún no se tiene (el gestor queda registrado, pero no cubre). */
+const Licencia = z.union([z.literal('').transform(() => null), z.string().trim().min(5, 'Escriba el acto que lo ampara: número, fecha y modificaciones.').max(300)]).nullish();
+/**
+ * Gestor aliado nuevo (planta de un tercero). La licencia y lo que gestiona pueden quedar para después (gerencia, 19-11-2026:
+ * «si no consigues la información de licencias, avancemos sin ella»): mientras no tenga la licencia vigente, no cubre.
+ */
 const CrearAliado = z.object({
-  nit: z.string().trim().regex(/^\d{6,10}(-\d)?$/, 'NIT sin puntos, con o sin dígito de verificación (900123456-7).'),
-  razonSocial: z.string().trim().min(3).max(200), municipio: textoOpc(80),
-  licencia: z.string().trim().min(5, 'Escriba el acto que lo ampara: número, fecha y modificaciones.').max(300), licenciaAutoridad: z.string().trim().min(2).max(80),
+  nit: Nit, razonSocial: z.string().trim().min(3).max(200), municipio: textoOpc(80),
+  licencia: Licencia, licenciaAutoridad: textoOpc(80),
   licenciaIndefinida: z.boolean().default(false), licenciaVence: fechaOpc, alcance: textoOpc(4000),
   excluyeTiposResiduo: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(20).default([]),
-  disposiciones: Codigos.min(1, 'Elija al menos un tratamiento que haga este gestor.'),
+  disposiciones: Codigos.default([]),
   soporteComercial: textoOpc(200), soporteComercialFecha: fechaOpc,
 }).refine((b) => !(b.licenciaIndefinida && b.licenciaVence), { message: 'Una licencia indefinida no lleva fecha de vencimiento.', path: ['licenciaVence'] })
-  .refine((b) => b.licenciaIndefinida || !!b.licenciaVence, { message: 'Indique hasta cuándo vale la licencia, o márquela «sin término» (vida útil del proyecto).', path: ['licenciaVence'] });
+  .refine((b) => !b.licencia || b.licenciaIndefinida || !!b.licenciaVence, { message: 'Indique hasta cuándo vale la licencia, o márquela «sin término» (vida útil del proyecto).', path: ['licenciaVence'] })
+  .refine((b) => !b.licencia || !!b.licenciaAutoridad, { message: 'Indique la autoridad que expidió la licencia.', path: ['licenciaAutoridad'] });
+/** Ficha del gestor: licencia, lo que gestiona, el NIT (si se sembró sin confirmar) y si se trabaja hoy con él. */
 const EditarAliado = z.object({
-  razonSocial: z.string().trim().min(3).max(200).optional(), municipio: textoOpc(80), disposiciones: Codigos.min(1, 'Elija al menos un tratamiento.').optional(),
+  nit: Nit.optional(), activo: z.boolean().optional(),
+  razonSocial: z.string().trim().min(3).max(200).optional(), municipio: textoOpc(80), disposiciones: Codigos.optional(),
   soporteComercial: textoOpc(200), soporteComercialFecha: fechaOpc,
   licencia: textoOpc(300), licenciaAutoridad: textoOpc(80), licenciaIndefinida: z.boolean().optional(), licenciaVence: fechaOpc, licenciaUrl: urlOpc,
   alcance: textoOpc(4000), excluyeTiposResiduo: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(20).optional(),
@@ -51,8 +59,15 @@ const DatosVehiculo = z.object({
 });
 const CrearVehiculo = DatosVehiculo.extend({ placa: z.string().transform((x) => x.replace(/[\s-]/g, '').toUpperCase()).pipe(z.string().regex(/^[A-Z]{3}\d{2}[A-Z0-9]$|^[A-Z]{2}\d{4}$|^[A-Z]\d{5}$/, 'Placa colombiana: AAA123, AAA12A, AA1234 o A12345')) });
 const EditarVehiculo = DatosVehiculo.partial().extend({ activo: z.boolean().optional() });
-/** Estado de la licencia de un gestor aliado, con la misma regla de fn_aliado_vigente (la que decide la cobertura). */
-function estadoLicencia(p: { licencia: string | null; licenciaIndefinida: boolean; licenciaVence: Date | null }) {
+/**
+ * Estado de la licencia de un gestor aliado y si hoy cubre, con la misma regla de fn_aliado_vigente (la que decide la
+ * cobertura): se trabaja con él y la licencia está registrada y vigente.
+ */
+function estadoLicencia(p: { activo: boolean; licencia: string | null; licenciaIndefinida: boolean; licenciaVence: Date | null }) {
+  const e = estadoDelActo(p);
+  return p.activo ? e : { ...e, cubre: false };
+}
+function estadoDelActo(p: { licencia: string | null; licenciaIndefinida: boolean; licenciaVence: Date | null }) {
   if (!p.licencia?.trim()) return { estado: 'SIN_LICENCIA' as const, cubre: false };
   if (p.licenciaIndefinida) return { estado: 'INDEFINIDA' as const, cubre: true };
   if (!p.licenciaVence) return { estado: 'SIN_VIGENCIA' as const, cubre: false };
@@ -108,10 +123,16 @@ class CumplimientoService {
     return this.archivos.enlace(doc, a.empresaId, { nombre: `${tipo === 'permiso' ? (x as { acto: string }).acto : `licencia ${(x as { razonSocial: string }).razonSocial}`}.pdf` });
   }
 
-  /** Gestor aliado nuevo con su licencia (si la licencia no está vigente, no cubre: no se autorizan sus disposiciones). */
+  /** ¿Otro proveedor ya tiene ese NIT (con o sin dígito de verificación)? */
+  private async nitOcupado(a: Actor, nit: string, excepto?: string) {
+    const base = nit.split('-')[0];
+    if (await this.db.proveedor.findFirst({ where: { empresaId: a.empresaId, ...(excepto ? { id: { not: excepto } } : {}), OR: [{ nit: base }, { nit: { startsWith: `${base}-` } }] } }))
+      throw new BadRequestException({ mensaje: `Ya existe un gestor o proveedor con el NIT ${nit}.` });
+  }
+
+  /** Gestor aliado nuevo, con o sin su licencia (si no está registrada y vigente, no cubre: no se autorizan sus disposiciones). */
   async crearAliado(a: Actor, b: z.infer<typeof CrearAliado>) {
-    const nit = b.nit.split('-')[0];
-    if (await this.db.proveedor.findFirst({ where: { empresaId: a.empresaId, OR: [{ nit }, { nit: b.nit }] } })) throw new BadRequestException({ mensaje: `Ya existe un gestor o proveedor con el NIT ${b.nit}.` });
+    await this.nitOcupado(a, b.nit);
     if (b.excluyeTiposResiduo.length) await this.validarTipos(a, b.excluyeTiposResiduo);
     const ds = await this.disposicionesPorCodigo(a, b.disposiciones, true);
     const { disposiciones: _d, ...datos } = b;
@@ -156,15 +177,19 @@ class CumplimientoService {
 
   /** Gestores aliados con su licencia, lo que gestionan y si hoy cubren (misma regla de la base). */
   async aliados(a: Actor) {
-    const xs = await this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esPropio: false, esDestino: true }, orderBy: { razonSocial: 'asc' },
+    const xs = await this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esPropio: false, esDestino: true }, orderBy: [{ activo: 'desc' }, { razonSocial: 'asc' }],
       include: { disposicionesGestionadas: { include: { disposicion: { select: { codigo: true, nombre: true, activo: true } } } } } });
     return xs.map((p) => ({ ...p, vigencia: estadoLicencia(p) }));
   }
 
-  /** Licencia de un gestor aliado: de esto depende autorizar declaraciones con sus disposiciones. */
+  /**
+   * Licencia de un gestor aliado: de esto depende autorizar declaraciones con sus disposiciones. Inactivarlo (ya no se
+   * trabaja con él) le quita la cobertura y lo saca de los destinos de servicios nuevos; sus certificados se conservan.
+   */
   async editarAliado(a: Actor, id: string, b: z.infer<typeof EditarAliado>) {
     const p = await this.db.proveedor.findFirst({ where: { id, empresaId: a.empresaId, esPropio: false } });
     if (!p) throw new NotFoundException({ mensaje: 'Gestor no encontrado.' });
+    if (b.nit && b.nit !== p.nit) await this.nitOcupado(a, b.nit, id);
     if (b.excluyeTiposResiduo?.length) {
       const validos = new Set((await this.db.tipoResiduo.findMany({ where: { empresaId: a.empresaId }, select: { codigo: true } })).map((t) => t.codigo.toUpperCase()));
       const malos = b.excluyeTiposResiduo.filter((c) => !validos.has(c));
@@ -183,6 +208,8 @@ class CumplimientoService {
       return tx.proveedor.update({ where: { id }, data: datos });
     });
     if (ds) await this.audit.registrar(a, 'proveedor', id, 'DISPOSICIONES', { disposiciones: antes }, { disposiciones });
+    if (b.activo !== undefined && b.activo !== p.activo) await this.audit.registrar(a, 'proveedor', id, b.activo ? 'ACTIVAR' : 'INACTIVAR', { activo: p.activo }, { activo: b.activo });
+    if (b.nit && b.nit !== p.nit) await this.audit.registrar(a, 'proveedor', id, 'NIT', { nit: p.nit }, { nit: b.nit });
     await this.audit.registrar(a, 'proveedor', id, 'LICENCIA',
       { licencia: p.licencia, licenciaAutoridad: p.licenciaAutoridad, licenciaVence: p.licenciaVence, licenciaIndefinida: p.licenciaIndefinida, excluyeTiposResiduo: p.excluyeTiposResiduo }, datos);
     return { ...r, vigencia: estadoLicencia(r) };
@@ -225,7 +252,7 @@ class CumplimientoService {
       this.db.ruta.findMany({ where: { empresaId: a.empresaId, fechaProgramada: { gte: hoy, lt: manana } }, include: { vehiculo: { select: { id: true, placa: true } } } }),
       this.db.preoperacional.findMany({ where: { fechaProgramada: { gte: hoy, lt: manana }, vehiculo: { empresaId: a.empresaId } }, select: { vehiculoId: true, aprobado: true } }),
       // Gestores aliados de disposiciones activas (respuesta A5): licencia por vencer, vencida o sin vigencia registrada
-      this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esPropio: false, disposicionesGestionadas: { some: { disposicion: { activo: true } } } },
+      this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esPropio: false, esDestino: true, activo: true },
         include: { disposicionesGestionadas: { include: { disposicion: { select: { nombre: true, activo: true } } } } } }),
       this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } }),
     ]);
@@ -234,7 +261,15 @@ class CumplimientoService {
     const cuando = (d: number) => (d < 0 ? `venció hace ${-d} días` : d === 0 ? 'vence hoy' : `vence en ${d} días`);
     obl.forEach((o) => { const f = o.proximaFecha!; out.push({ tipo: 'cumplimiento', nivel: nivel(dias(f)), titulo: `${o.permiso.acto}: obligación ${dias(f) < 0 ? `vencida hace ${-dias(f)} días` : `en ${dias(f)} días`}${o.codigo ? ` (${o.codigo})` : ''}`, detalle: o.descripcion, fecha: f.toISOString().slice(0, 10), referencia: o.id }); });
     for (const p of aliados) {
-      const que = p.disposicionesGestionadas.filter((x) => x.disposicion.activo).map((x) => x.disposicion.nombre.toLowerCase()).join(', ');
+      const activas = p.disposicionesGestionadas.filter((x) => x.disposicion.activo);
+      if (p.disposicionesGestionadas.length && !activas.length) continue; // solo gestiona tratamientos que ya no se ofrecen
+      const que = activas.map((x) => x.disposicion.nombre.toLowerCase()).join(', ');
+      const faltan = [!/^\d/.test(p.nit) && 'el NIT', !activas.length && 'qué tratamientos hace', !p.licencia?.trim() && 'la licencia'].filter(Boolean) as string[];
+      if (faltan.length) {
+        out.push({ tipo: 'cumplimiento', nivel: activas.length ? 'media' : 'info', titulo: `${p.razonSocial}: falta registrar ${faltan.join(', ').replace(/, ([^,]*)$/, ' y $1')}`,
+          detalle: activas.length ? `Mientras no tenga la licencia vigente, no cubre ${que}` : 'Complételo en Permisos › Gestores aliados: mientras tanto no cubre ningún tratamiento', referencia: p.id });
+        continue;
+      }
       if (p.licenciaIndefinida) continue;
       if (!p.licenciaVence) { out.push({ tipo: 'cumplimiento', nivel: 'media', titulo: `${p.razonSocial}: falta la vigencia de la licencia`, detalle: `Mientras no se registre, no se autorizan declaraciones de ${que}`, referencia: p.id }); continue; }
       if (p.licenciaVence <= lim60) out.push({ tipo: 'cumplimiento', nivel: nivel(dias(p.licenciaVence), 30), titulo: `${p.razonSocial}: la licencia ${cuando(dias(p.licenciaVence))}`,
@@ -302,7 +337,7 @@ class CumplimientoService {
       this.db.entidadSeguridadSocial.findMany({ where: { tipo: 'EPS', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
       this.db.especificacionAdicional.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { nombre: 'asc' } }),
       this.db.catalogoItem.findMany({ where: { empresaId: a.empresaId, tipo: 'CAUSAL', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
-      this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esDestino: true }, orderBy: [{ esPropio: 'desc' }, { razonSocial: 'asc' }], select: { id: true, razonSocial: true, esPropio: true } }),
+      this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esDestino: true }, orderBy: [{ esPropio: 'desc' }, { activo: 'desc' }, { razonSocial: 'asc' }], select: { id: true, razonSocial: true, esPropio: true, activo: true } }),
       this.db.estadoRecorrido.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { orden: 'asc' } }),
     ]);
     return { arl, eps, especificaciones, causales, destinos, etapas };

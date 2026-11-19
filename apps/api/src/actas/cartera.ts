@@ -37,3 +37,24 @@ export function mensajePendientePago(facturas: string[]) {
   const cuales = facturas.length === 1 ? `de la factura ${facturas[0]}` : `de las facturas ${facturas.slice(0, -1).join(', ')} y ${facturas[facturas.length - 1]}`;
   return `Este certificado estará disponible para descargar cuando se registre el pago ${cuales}. Si ya ${facturas.length === 1 ? 'la' : 'las'} pagó, comuníquese con Terra Viva y lo actualizamos.`;
 }
+
+/**
+ * Facturas vencidas (más los días de gracia) y sin pagar de un cliente. Vacío = está al día. Decide si el certificado
+ * comercial lleva la frase de «cumplimiento satisfactorio» (aunque la retención de certificados esté apagada: la frase
+ * debe ser cierta).
+ */
+export async function facturasVencidasCliente(db: Db, configuracion: unknown, clienteId: string): Promise<string[]> {
+  const { diasGracia } = configCartera(configuracion);
+  const filas = await db.$queryRaw<{ factura: string }[]>`
+    SELECT DISTINCT ci.factura_numero AS factura
+    FROM conciliacion_items ci
+    JOIN conciliaciones c ON c.id = ci.conciliacion_id
+    JOIN manifiestos m ON m.id = c.manifiesto_id
+    WHERE m.cliente_id = ${clienteId}::uuid
+      AND ci.factura_numero IS NOT NULL
+      AND ci.estado_pago IN ('PENDIENTE', 'ABONADA')
+      AND ci.factura_vencimiento IS NOT NULL
+      AND ci.factura_vencimiento + ${diasGracia}::int < (now() AT TIME ZONE 'America/Bogota')::date
+    ORDER BY 1`;
+  return filas.map((f) => f.factura);
+}

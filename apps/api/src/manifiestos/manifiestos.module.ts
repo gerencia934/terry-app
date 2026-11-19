@@ -84,10 +84,11 @@ export class ManifiestosService {
     return m;
   }
 
-  /** Planta o gestor que recibe: el indicado (de la empresa) o la planta propia. */
-  private async destino(tx: Tx, empresaId: string, destinoId?: string) {
+  /** Planta o gestor que recibe: el indicado (de la empresa) o la planta propia. Un aliado inactivo solo si ya era el destino. */
+  private async destino(tx: Tx, empresaId: string, destinoId?: string, actual?: string | null) {
     const d = await tx.proveedor.findFirst({ where: destinoId ? { id: destinoId, empresaId, esDestino: true } : { empresaId, esPropio: true } });
     if (!d) throw new BadRequestException({ mensaje: destinoId ? 'El destino no es una planta o gestor de su empresa.' : 'No hay planta propia registrada.' });
+    if (!d.activo && d.id !== actual) throw new BadRequestException({ mensaje: `Ya no se trabaja con ${d.razonSocial}: elija otro destino (o vuelva a activarlo en Permisos › Gestores aliados).` });
     return d.id;
   }
 
@@ -230,7 +231,7 @@ export class ManifiestosService {
       if (transporte) transporteId = transporteId
         ? (await tx.transporteTercero.update({ where: { id: transporteId }, data: transporte })).id
         : (await tx.transporteTercero.create({ data: { ...transporte, empresaId: a.empresaId } })).id;
-      const r = await tx.manifiesto.update({ where: { id }, data: { ...datos, transporteId, destinoId: destinoId ? await this.destino(tx, a.empresaId, destinoId) : undefined } });
+      const r = await tx.manifiesto.update({ where: { id }, data: { ...datos, transporteId, destinoId: destinoId ? await this.destino(tx, a.empresaId, destinoId, m.destinoId) : undefined } });
       await this.audit.registrar(a, 'manifiesto', id, 'EDITAR', undefined, b, tx);
       return r;
     });

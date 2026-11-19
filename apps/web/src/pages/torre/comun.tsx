@@ -13,7 +13,7 @@ export interface Persona { id: string; nombre: string; esConductor: boolean; esA
 export interface Zona { id: string; nombre: string; color: string }
 export interface Etapa { id: string; nombre: string; color: string; orden: number; esFinal: boolean; cancela: boolean; rastreo: boolean }
 export interface Ref { id: string; nombre: string }
-export interface Destino { id: string; razonSocial: string; esPropio: boolean }
+export interface Destino { id: string; razonSocial: string; esPropio: boolean; activo?: boolean }
 export interface Catalogos { vehiculos: Vehiculo[]; personal: Persona[]; zonas: Zona[]; etapas: Etapa[]; causales: Ref[]; destinos: Destino[]; arl: Ref[]; eps: Ref[] }
 
 export interface LineaRuta {

@@ -2,7 +2,7 @@
 // lo suyo (declaraciones, solicitudes, manifiestos, certificados e informes). Doble barrera en el servidor: el API filtra
 // por el cliente del token y la base (RLS) lo vuelve a filtrar. Aquí nada depende de datos que mande el navegador.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Award, BarChart3, FileStack, FileText, Home, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
+import { Award, BarChart3, FileStack, FileText, Home, Info, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
 import { Logo, useTheme } from '../../components/AppShell';
 import { VentanaDobleFactor } from '../../components/DobleFactor';
 import { Proteccion } from '../../components/Proteccion';
@@ -22,7 +22,11 @@ export interface YoPortal {
   /** Sedes que ve este usuario (todas las de su empresa si no está limitado). */
   sedes: SedePortal[];
   restringido: boolean;
+  /** Cliente inactivo: aviso amable según el motivo (consulta y descarga; no pide servicios ni carga declaraciones). */
+  aviso: string | null;
 }
+/** Puede pedir servicios y cargar declaraciones: perfil Administrador y cliente activo. */
+export const puedeEscribir = (yo: YoPortal) => yo.perfil === 'ADMIN' && yo.cliente.activo;
 const Ctx = createContext<YoPortal | null>(null);
 /** Quién está en el portal: su empresa, su perfil y las sedes que puede ver. */
 export const usePortal = () => useContext(Ctx)!;
@@ -143,7 +147,10 @@ function Marco({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="safe-x mx-auto max-w-[1300px] py-5 pb-24 lg:py-7">{children}</main>
+        <main className="safe-x mx-auto max-w-[1300px] py-5 pb-24 lg:py-7">
+          {yo.aviso && <p role="status" className="mb-5 flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-[13px] leading-relaxed"><Info size={17} className="mt-0.5 shrink-0 text-warn" /><span>{yo.aviso}</span></p>}
+          {children}
+        </main>
       </div>
 
       <VentanaDobleFactor open={ver2fa} onClose={() => setVer2fa(false)} />

@@ -253,7 +253,7 @@ function NuevaActa({ modo, onClose, onListo }: { modo: 'generar' | 'cargar' | nu
         )}
         <Field label="Tipo de documento" id="na-t"><Select id="na-t" value={f.tipo} onChange={(e) => setF((s) => ({ ...s, tipo: e.target.value as TipoActa }))}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
         <Field label={cargar ? 'Gestor aliado' : 'Gestor que certifica'} id="na-g" hint={cargar ? undefined : 'Vacío: la planta propia'}>
-          <Select id="na-g" value={f.destinoId} onChange={(e) => setF((s) => ({ ...s, destinoId: e.target.value }))}><option value="">{cargar ? 'Elija el gestor' : 'Planta propia'}</option>{destinos.map((x) => <option key={x.id} value={x.id}>{x.razonSocial}</option>)}</Select>
+          <Select id="na-g" value={f.destinoId} onChange={(e) => setF((s) => ({ ...s, destinoId: e.target.value }))}><option value="">{cargar ? 'Elija el gestor' : 'Planta propia'}</option>{destinos.map((x) => <option key={x.id} value={x.id}>{x.razonSocial}{x.activo === false ? ' (ya no se trabaja con él)' : ''}</option>)}</Select>
         </Field>
         {cargar && (
           <div className="flex flex-col gap-1.5">

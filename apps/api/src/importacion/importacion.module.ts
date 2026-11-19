@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
   ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm, plantillaPortal,
-  resolverCodigo, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
+  resolverCodigo, sectorDe, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Municipios } from '../common/servicios';
@@ -296,7 +296,7 @@ export class ImportacionService {
     switch (id) {
       case 'clientes': {
         const nit = digitos(d.nit);
-        const datos = { razonSocial: d.razon, representanteLegal: d.representante.trim().slice(0, 150), tipo: norm(d.tipo ?? '') === 'gestor' ? 'GESTOR' as const : 'DIRECTO' as const, sector: d.sector || null, tipoNegociacion: negociacion(d.negociacion)!, formaPago: formaPago(d.pago)!, emailFacturacion: d.email || null, dv: dvNit(nit),
+        const datos = { razonSocial: d.razon, representanteLegal: d.representante.trim().slice(0, 150), tipo: norm(d.tipo ?? '') === 'gestor' ? 'GESTOR' as const : 'DIRECTO' as const, sector: sectorDe(d.sector), tipoNegociacion: negociacion(d.negociacion)!, formaPago: formaPago(d.pago)!, emailFacturacion: d.email || null, dv: dvNit(nit),
           camposExtra: { telefono: d.telefono, asesor: d.asesor, clasificacion: d.clasificacion, tipoPersona: d.persona } };
         const ex = await tx.cliente.findUnique({ where: { empresaId_nit: { empresaId: emp, nit } } });
         if (ex) { await tx.cliente.update({ where: { id: ex.id }, data: datos }); return 'actualizadas'; }

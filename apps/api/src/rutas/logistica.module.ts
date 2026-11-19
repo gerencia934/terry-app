@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AprobacionSolicitud, ClaseSolicitud, EstadoSolicitud, Jornada, Operacion, Prisma, ResultadoChequeo } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
+import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
 
 const Rango = z.object({ desde: z.coerce.date().optional(), hasta: z.coerce.date().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
@@ -66,6 +68,9 @@ const EstadoRuta = z.object({ estadoRecorridoId: z.string().uuid(), kmInicial: z
 const Preop = z.object({
   vehiculoId: z.string().uuid(), rutaId: z.string().uuid().optional(), fechaProgramada: z.coerce.date(), km: z.number().int().nonnegative(), auxiliarId: z.string().uuid().optional(), observaciones: z.string().max(500).optional(),
   respuestas: z.array(z.object({ elementoId: z.string().uuid(), resultado: z.nativeEnum(ResultadoChequeo) })).min(1),
+  // El teléfono genera el id: si el envío se repite (sin señal), no se duplica la inspección
+  id: z.string().uuid().optional(),
+  firma: z.string().max(600_000).optional(), // firma del conductor (PNG del celular)
 });
 const Parada = z.object({
   estado: z.enum(['ATENDIDA', 'NO_ATENDIDA']), latitud: z.number().optional(), longitud: z.number().optional(), observaciones: z.string().max(500).optional(),
@@ -75,7 +80,7 @@ const rango = (f: { desde?: Date; hasta?: Date }) => (f.desde || f.hasta ? { gte
 
 @Injectable()
 class LogisticaService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos) {}
 
   async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
     const { take, skip, pagina, porPagina } = paginar(f);
@@ -100,7 +105,9 @@ class LogisticaService {
     if (lineas.some((i) => !i.sucursalId)) throw new BadRequestException({ mensaje: 'Indique la sede de cada línea.' });
     const decls = await this.db.declaracion.findMany({ where: { id: { in: lineas.map((i) => i.declaracionId) }, empresaId: a.empresaId, clienteId: b.clienteId }, include: { tarifas: { where: { vigenteDesde: { lte: b.fechaSolicitada }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: b.fechaSolicitada } }] }, take: 1, orderBy: { vigenteDesde: "desc" } } } }); // tarifa vigente en la fecha del servicio
     const precio = (id: string) => decls.find((d) => d.id === id)?.tarifas[0]?.precioUnitario;
-    if (b.destinoId && !(await this.db.proveedor.findFirst({ where: { id: b.destinoId, empresaId: a.empresaId, esDestino: true } }))) throw new BadRequestException({ mensaje: 'Destino de descarga no encontrado.' });
+    const destino = b.destinoId ? await this.db.proveedor.findFirst({ where: { id: b.destinoId, empresaId: a.empresaId, esDestino: true } }) : null;
+    if (b.destinoId && !destino) throw new BadRequestException({ mensaje: 'Destino de descarga no encontrado.' });
+    if (destino && !destino.activo) throw new BadRequestException({ mensaje: `Ya no se trabaja con ${destino.razonSocial}: elija otro destino de descarga.` });
     return this.db.$transaction(async (tx) => {
       const transporteId = b.transporte ? (await tx.transporteTercero.create({ data: { ...b.transporte, empresaId: a.empresaId } })).id : undefined;
       const s = await tx.solicitud.create({ data: {
@@ -333,15 +340,42 @@ class LogisticaService {
   }
 
   async preoperacional(a: Actor, b: z.infer<typeof Preop>) {
+    // Reenvío desde la cola sin señal: si ya llegó, se responde lo mismo
+    if (b.id) {
+      const ya = await this.db.preoperacional.findFirst({ where: { id: b.id, vehiculo: { empresaId: a.empresaId } }, include: { respuestas: { include: { elemento: true } } } });
+      if (ya) {
+        const { respuestas, ...p } = ya;
+        return { ...p, fallasCriticas: respuestas.filter((r) => r.resultado === 'NO_OK' && r.elemento.critico).map((r) => r.elemento.nombre) };
+      }
+    }
     const els = await this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, id: { in: b.respuestas.map((r) => r.elementoId) } } });
     if (els.length !== b.respuestas.length) throw new BadRequestException({ mensaje: 'Hay elementos de chequeo que no existen.' });
     const fallaCritica = b.respuestas.filter((r) => r.resultado === 'NO_OK' && els.find((e) => e.id === r.elementoId)!.critico);
+    // La firma va al almacenamiento (Cloudflare R2 en producción); en la base queda su clave
+    const firma = b.firma ? await this.archivos.guardar(a.empresaId, 'firmas', firmaDesdeDataUrl(b.firma), ['png']) : null;
     const p = await this.db.preoperacional.create({ data: {
-      vehiculoId: b.vehiculoId, rutaId: b.rutaId, conductorId: a.id, auxiliarId: b.auxiliarId, fechaProgramada: b.fechaProgramada, fechaReal: new Date(), km: b.km,
+      ...(b.id ? { id: b.id } : {}), firmaUrl: firma?.clave ?? null, vehiculoId: b.vehiculoId, rutaId: b.rutaId, conductorId: a.id, auxiliarId: b.auxiliarId, fechaProgramada: b.fechaProgramada, fechaReal: new Date(), km: b.km,
       aprobado: fallaCritica.length === 0, observaciones: b.observaciones, respuestas: { create: b.respuestas.map((r) => ({ elementoId: r.elementoId, resultado: r.resultado })) },
     } });
     await this.audit.registrar(a, 'preoperacional', p.id, p.aprobado ? 'APROBADO' : 'NO_APROBADO', undefined, { fallas: fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre) });
     return { ...p, fallasCriticas: fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre) };
+  }
+
+  /** Foto de un elemento de la inspección (sobre todo de una falla). Se guarda en el almacenamiento y reemplaza la anterior. */
+  async fotoPreop(a: Actor, id: string, elementoId: string | undefined, archivo?: Express.Multer.File) {
+    if (!archivo) throw new BadRequestException({ mensaje: 'Adjunte la foto.' });
+    if (!elementoId || !/^[0-9a-f-]{36}$/i.test(elementoId)) throw new BadRequestException({ mensaje: 'Indique el elemento de la foto.' });
+    const p = await this.db.preoperacional.findFirst({ where: { id, vehiculo: { empresaId: a.empresaId } } });
+    if (!p) throw new NotFoundException({ mensaje: 'Inspección no encontrada.' });
+    if (p.conductorId !== a.id && !a.permisos.includes('*') && !a.permisos.includes('rutas.programar'))
+      throw new ForbiddenException({ mensaje: 'Solo el conductor que hizo la inspección agrega sus fotos.' });
+    const clave = { preoperacionalId_elementoId: { preoperacionalId: id, elementoId } };
+    const r = await this.db.preopRespuesta.findUnique({ where: clave });
+    if (!r) throw new NotFoundException({ mensaje: 'Ese elemento no está en la inspección.' });
+    const g = await this.archivos.guardar(a.empresaId, 'preoperacionales', archivo.buffer, ['jpg', 'png', 'webp']);
+    await this.db.preopRespuesta.update({ where: clave, data: { fotoUrl: g.clave } });
+    await this.audit.registrar(a, 'preoperacional', id, 'FOTO', { elementoId, foto: r.fotoUrl }, { elementoId, foto: g.clave });
+    return { elementoId, fotoUrl: g.clave };
   }
 
   async parada(a: Actor, id: string, b: z.infer<typeof Parada>) {
@@ -377,6 +411,8 @@ class LogisticaController {
   @Get('preoperacionales') inspecciones(@ActorActual() a: Actor, @Query(new Zod(FiltroPreop)) f: z.infer<typeof FiltroPreop>) { return this.s.inspecciones(a, f); }
   @Get('inspecciones') listarInspecciones(@ActorActual() a: Actor, @Query(new Zod(FiltroInspecciones)) f: z.infer<typeof FiltroInspecciones>) { return this.s.listarInspecciones(a, f); }
   @Get('inspecciones/:id') inspeccion(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.inspeccion(a, id); }
+  @Permiso('rutas.operar') @Post('preoperacionales/:id/fotos') @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: 12 * 1024 * 1024, files: 1 } }))
+  fotoPreop(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body('elementoId') elementoId?: string, @UploadedFile() f?: Express.Multer.File) { return this.s.fotoPreop(a, id, elementoId, f); }
   @Permiso('rutas.operar') @Post('preoperacionales') preop(@ActorActual() a: Actor, @Body(new Zod(Preop)) b: z.infer<typeof Preop>) { return this.s.preoperacional(a, b); }
   @Permiso('rutas.operar') @Patch('paradas/:id') parada(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Parada)) b: z.infer<typeof Parada>) { return this.s.parada(a, id, b); }
 }

@@ -112,6 +112,22 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   tratamientos nuevos de aliados (TAR, BIOA, AUT, AUS, ESC). Los textos legales del certificado se apoyan en los permisos
   registrados (`{permiso:COD}`, `{permisos}`), y desde Permisos se registra un aliado nuevo o una licencia propia nueva
   con su PDF. Teléfono y correo de la planta: solo en la base (el repositorio es público). 88 pruebas de reglas y 396 e2e.
+- Fase 2b (pedido de la gerencia del 19-11-2026), hecha el mismo día:
+  - ✅ almacenamiento en Cloudflare R2 (`ALMACENAMIENTO=s3` con los nombres `R2_*`; las claves solo en `apps/api/.env`):
+    fotos y firma de la inspección del vehículo, firmas, licencias y PDF se suben al bucket privado y la base guarda su
+    clave; se descargan con enlace firmado de 5 minutos. Las pruebas automáticas usan el almacén local;
+  - ✅ gestores aliados: activos solo los de la gerencia (Veolia —Las Bateas y San Silvestre—, Conyser, Sandesol, Social
+    RAEE, Colbitumen —antes Humberto Quintero, mismo NIT—, Geoambiental, Vectors and Waste, Recitrac, Urbaser —Descont— y
+    EMAS de Veolia). Los demás quedan inactivos con su licencia: no cubren ni se ofrecen como destino de servicios nuevos,
+    y se reactivan en Permisos. Sin licencia registrada todavía: Recitrac, Geoambiental y Vectors and Waste (a este le falta
+    además el NIT; el dígito de verificación de Geoambiental es calculado);
+  - ✅ clientes: se inactivan con su motivo (pagos pendientes, entregas no autorizadas u otra eventualidad, con nota
+    interna). En el portal ven un aviso amable: consultan y descargan, pero no piden servicios ni cargan declaraciones.
+    El sector sale de una lista (Hidrocarburos, Doméstico, Industrial, Agrícola, Minero, Alimenticio y otros);
+  - ✅ certificado comercial (modelo PD-GG-F-01, dinámico): el cliente lo descarga en el portal y la oficina en la ficha.
+    Consecutivo propio CC-AAAA-0001, uno por cliente y día, PDF en R2 con QR. La frase de cumplimiento solo sale sin
+    facturas vencidas, y ya no dice que Los Pinos trata peligrosos, suelos contaminados o borras (Res. 000632, art. 6).
+  88 pruebas de reglas y 418 e2e OK.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

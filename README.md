@@ -110,7 +110,8 @@ conciliación, actas, descargue en planta, las reglas de cumplimiento de la gere
 ## App del conductor (celular, sin señal)
 
 Con `VITE_API_URL` definido, la ruta `#campo` es la app de campo conectada al API: ruta del día, inspección del
-vehículo, etapas con kilometraje, manifiestos con fotos, báscula y firma táctil, y la bandeja «Envíos».
+vehículo (con la firma del conductor y una foto por elemento, sobre todo de las fallas), etapas con kilometraje,
+manifiestos con fotos, báscula y firma táctil, y la bandeja «Envíos».
 
 - **Instalar en el celular:** abra la web publicada (con `https`) en Chrome y elija «Instalar aplicación» o «Agregar a
   pantalla de inicio». Desde ahí abre como app, incluso sin señal.

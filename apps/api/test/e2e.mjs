@@ -170,7 +170,7 @@ r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuer
 prueba('peligroso sin ficha de datos de seguridad NO se autoriza → 400', r.status === 400 && /ficha de datos de seguridad/.test(r.json.mensaje), JSON.stringify(r.json));
 await db.declaracion.update({ where: { id: aceite.id }, data: { fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf' } });
 r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
-prueba('con la FDS se autoriza: peligroso a celda de seguridad de un gestor aliado con licencia indefinida (CGS)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json));
+prueba('con la FDS se autoriza: peligroso a celda de seguridad de un gestor aliado vigente (Las Bateas o EMAS)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json));
 r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede nueva', codigo: 'C003', municipioDane: '68001' } });
 prueba('una sede nueva se suma sola a las declaraciones con alcance TODAS', r.status === 201 && (await db.declaracionSucursal.count({ where: { declaracionId: aceite.id } })) === 3, JSON.stringify(r.json));
 r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede rara', municipioDane: '99999' } });
@@ -204,9 +204,23 @@ prueba('…ni escribiendo directo en la base', bloqueoBase);
 r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'ASP')}&peligroso=true`, { token: T });
 prueba('cobertura en vivo: un peligroso no va a vertimiento a suelo', r.status === 200 && !r.json.cubierto && /peligrosidad/.test(r.json.detalle?.[0]?.soporte ?? ''), JSON.stringify(r.json).slice(0, 200));
 const hosp = idDe(cat.tiposResiduo, 'HOSP');
+// Gestores aliados con los que se trabaja hoy (gerencia, 19-11-2026); los demás quedan inactivos con su licencia
+const listaAliados = (await llamar('GET', '/gestores-aliados', { token: T })).json;
+const aliadoNit = (nit) => listaAliados.find?.((p) => p.nit === nit);
+prueba('aliados activos: solo los de la gerencia (Colbitumen antes Humberto Quintero, EMAS de Veolia, Descont de Urbaser…); CGS inactivo no cubre; los nuevos sin licencia',
+  listaAliados.filter?.((p) => p.activo).length === 11 && aliadoNit('901483038-1')?.activo === false && aliadoNit('901483038-1').vigencia.cubre === false
+  && aliadoNit('805001538-5')?.activo === true && /Colbitumen/.test(aliadoNit('900115530-1')?.razonSocial) && /Veolia/.test(aliadoNit('800249174-5')?.razonSocial)
+  && /Urbaser/.test(aliadoNit('804002433-1')?.razonSocial) && aliadoNit('900273802-6')?.vigencia.estado === 'SIN_LICENCIA' && aliadoNit('POR CONFIRMAR')?.razonSocial === 'Vectors and Waste S.A.S.',
+  JSON.stringify(listaAliados.map?.((p) => [p.razonSocial.slice(0, 20), p.activo])).slice(0, 500));
 r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
-prueba('hospitalario a celda de seguridad: lo cubre CGS (Las Bateas no recibe hospitalarios)', r.status === 200 && r.json.cubierto && /Centro de Gestión Sostenible/.test(r.json.detalle[0].soporte) && !/Veolia/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 300));
+prueba('hospitalario a celda de seguridad: CGS ya no lo cubre (no se trabaja con él) y Las Bateas no recibe hospitalarios', r.status === 200 && !r.json.cubierto
+  && /recibe este tipo/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 300));
 const cgs = await db.proveedor.findFirst({ where: { nit: '901483038-1' } });
+r = await llamar('PATCH', `/gestores-aliados/${cgs.id}`, { token: T, cuerpo: { activo: true } });
+const cobCgs = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
+prueba('…si se vuelve a trabajar con CGS, lo cubre de nuevo (no Las Bateas) y queda en la auditoría', r.status === 200 && r.json.activo === true && r.json.vigencia.cubre === true
+  && cobCgs.json.cubierto && /Centro de Gestión Sostenible/.test(cobCgs.json.detalle[0].soporte) && !/Las Bateas/.test(cobCgs.json.detalle[0].soporte)
+  && (await db.auditoria.count({ where: { entidad: 'proveedor', entidadId: cgs.id, accion: 'ACTIVAR' } })) === 1, JSON.stringify([r.json.vigencia, cobCgs.json.detalle]).slice(0, 300));
 await db.proveedor.updateMany({ where: { disposicionesGestionadas: { some: { disposicion: { codigo: 'DF' } } } }, data: { excluyeTiposResiduo: ['HOSP'] } });
 r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
 prueba('…si ningún gestor aliado vigente lo recibe, no queda cubierta', r.status === 200 && !r.json.cubierto && /recibe este tipo/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 200));
@@ -400,7 +414,7 @@ r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razon
 prueba('crear un cliente sin representante legal → 400 (es obligatorio)', r.status === 400 && /representante legal/.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Palmas del Magdalena Medio S.A.S.', representanteLegal: 'Representante Palmas', sector: 'Palma', formaPago: 'CREDITO_30', emailFacturacion: 'facturas@palmas.test', asesorId: comercial.id } });
 const cF1 = r.json;
-prueba('crear un cliente (Comercial) calcula el dígito de verificación y guarda el asesor', r.status === 201 && cF1.dv === dvNit(nitF1) && cF1.asesorId === comercial.id, JSON.stringify(r.json).slice(0, 200));
+prueba('crear un cliente (Comercial) calcula el dígito de verificación, guarda el asesor y el sector de la lista («Palma» → Agrícola)', r.status === 201 && cF1.dv === dvNit(nitF1) && cF1.asesorId === comercial.id && cF1.sector === 'Agrícola', JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Repetido S.A.S.', representanteLegal: 'Otra Persona' } });
 prueba('…y no repite un NIT', r.status === 400 && /Ya existe/.test(r.json.mensaje), JSON.stringify(r.json));
 // Cliente antiguo sin representante legal: quien cambie sus datos comerciales lo completa (inactivarlo no lo exige)
@@ -444,19 +458,32 @@ prueba('…la auditoría guarda la sede inactivada y sus vínculos', audSede?.de
 // Cliente: datos comerciales, paso a gestor e inactivación
 r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { tipo: 'GESTOR' } });
 prueba('pasar a gestor exige el NIT del generador en cada sede activa', r.status === 400 && /NIT del generador/.test(r.json.mensaje), JSON.stringify(r.json));
-r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { razonSocial: 'Palmas del Magdalena Medio S.A.S.', sector: 'Palma de aceite', formaPago: 'CREDITO_60' } });
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { sector: 'Astrología' } });
+prueba('el sector sale de la lista (Hidrocarburos, Doméstico, Industrial, Agrícola, Minero, Alimenticio…) → 400', r.status === 400 && /Elija el sector de la lista/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { razonSocial: 'Palmas del Magdalena Medio S.A.S.', sector: 'hidrocarburos', formaPago: 'CREDITO_60' } });
 const audCli = await db.auditoria.findFirst({ where: { entidad: 'cliente', entidadId: cF1.id, accion: 'EDITAR' }, orderBy: { fecha: 'desc' } });
-prueba('editar el cliente: la auditoría guarda solo lo que cambió', r.status === 200 && audCli?.antes?.formaPago === 'CREDITO_30' && audCli?.despues?.sector === 'Palma de aceite'
+prueba('editar el cliente: la auditoría guarda solo lo que cambió', r.status === 200 && audCli?.antes?.formaPago === 'CREDITO_30' && audCli?.despues?.sector === 'Hidrocarburos'
   && !('razonSocial' in (audCli?.despues ?? {})), JSON.stringify({ antes: audCli?.antes, despues: audCli?.despues }));
 r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: thseq, cuerpo: { sector: 'Otro' } });
 prueba('sin el permiso «clientes.editar» (HSEQ) no se edita → 403', r.status === 403, String(r.status));
-r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false } });
-prueba('inactivar un cliente con declaraciones activas pide el motivo', r.status === 400 && /motivo/.test(r.json.mensaje), JSON.stringify(r.json));
+const [sinMotivo, otroSinNota] = [
+  await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false } }),
+  await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false, motivoInactivacion: 'OTRO', notaInactivacion: 'x' } }),
+];
+prueba('inactivar un cliente pide por qué (pagos pendientes, entregas no autorizadas u otra eventualidad, que se describe)', sinMotivo.status === 400 && /por qué se inactiva/.test(sinMotivo.json.mensaje)
+  && otroSinNota.status === 400 && /Describa la eventualidad/.test(otroSinNota.json.mensaje), JSON.stringify([sinMotivo.json, otroSinNota.json]));
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false, motivoInactivacion: 'ENTREGAS_NO_AUTORIZADAS' } });
+prueba('…y con declaraciones activas, el motivo con que se inactivan', r.status === 400 && /motivo con que se inactivan/.test(r.json.mensaje), JSON.stringify(r.json));
 const causalCli = await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL', nombre: 'Cliente cambió de operador' } });
-r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false, causalId: causalCli.id } });
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false, causalId: causalCli.id, motivoInactivacion: 'ENTREGAS_NO_AUTORIZADAS', notaInactivacion: 'Entregó llantas sin declarar' } });
 const declF1b = await db.declaracion.findUnique({ where: { id: declF1.id } });
-prueba('…con el motivo: el cliente y sus declaraciones activas quedan inactivos (siguen autorizadas: nada se borra)', r.status === 200 && r.json.activo === false && r.json.inactivadas === 1
+const audInact = await db.auditoria.findFirst({ where: { entidad: 'cliente', entidadId: cF1.id, accion: 'INACTIVAR' } });
+prueba('…con los motivos: el cliente (por entregas no autorizadas) y sus declaraciones activas quedan inactivos (siguen autorizadas: nada se borra)', r.status === 200 && r.json.activo === false && r.json.inactivadas === 1
+  && r.json.motivoInactivacion === 'ENTREGAS_NO_AUTORIZADAS' && !!r.json.inactivadoEn && audInact?.despues?.motivoInactivacion === 'ENTREGAS_NO_AUTORIZADAS'
   && declF1b.activa === false && declF1b.estado === 'AUTORIZADA' && declF1b.causalId === causalCli.id, JSON.stringify(r.json).slice(0, 200));
+let sinMotivoBase = false;
+try { await db.cliente.update({ where: { id: cF1.id }, data: { motivoInactivacion: null } }); } catch (e) { sinMotivoBase = /clientes_motivo_inactivacion/.test(String(e)); }
+prueba('…ni escribiendo directo en la base queda un cliente inactivo sin motivo', sinMotivoBase);
 const [activosF1, inactivosF1] = await Promise.all([llamar('GET', '/clientes?q=Palmas&activo=true', { token: T }), llamar('GET', '/clientes?q=901234&activo=false', { token: T })]);
 prueba('el listado filtra por estado y busca por NIT', activosF1.json.total === 0 && inactivosF1.json.total === 1 && inactivosF1.json.filas[0].sucursales.length === 3, JSON.stringify(inactivosF1.json).slice(0, 200));
 r = await llamar('POST', `/clientes/${cF1.id}/sucursales`, { token: tcom, cuerpo: { nombre: 'Otra sede' } });
@@ -570,6 +597,20 @@ prueba('…se sube el PDF de su licencia y se ve con enlace firmado', r.status =
 r = await llamar('PATCH', `/gestores-aliados/${nuevoAliado.id}`, { token: thseq, cuerpo: { disposiciones: ['INCH', 'POS'] } });
 const gestiona = (await db.disposicionGestor.findMany({ where: { proveedorId: nuevoAliado.id }, include: { disposicion: true } })).map((x) => x.disposicion.codigo).sort();
 prueba('…y se cambia lo que gestiona', r.status === 200 && JSON.stringify(gestiona) === JSON.stringify(['INCH', 'POS']), JSON.stringify(gestiona));
+// Gerencia: «si no consigues la información de licencias de alguna, avancemos sin ella»
+r = await llamar('POST', '/gestores-aliados', { token: thseq, cuerpo: { nit: '901777666-2', razonSocial: 'Aliado Sin Licencia S.A.S.', disposiciones: ['TAR'] } });
+const sinLic = r.json;
+prueba('gestor aliado sin licencia todavía: se registra, pero no cubre', r.status === 201 && sinLic.vigencia?.estado === 'SIN_LICENCIA' && sinLic.vigencia.cubre === false, JSON.stringify(r.json).slice(0, 200));
+const nitRepetido = await llamar('PATCH', `/gestores-aliados/${sinLic.id}`, { token: thseq, cuerpo: { nit: '901999888' } });
+const nitNuevo = await llamar('PATCH', `/gestores-aliados/${sinLic.id}`, { token: thseq, cuerpo: { nit: '901777666-3' } });
+prueba('…su NIT se corrige, sin repetir el de otro gestor', nitRepetido.status === 400 && /Ya existe/.test(nitRepetido.json.mensaje) && nitNuevo.status === 200 && nitNuevo.json.nit === '901777666-3',
+  `${nitRepetido.status} ${nitNuevo.status}`);
+r = await llamar('PATCH', `/gestores-aliados/${nuevoAliado.id}`, { token: thseq, cuerpo: { activo: false } });
+const [enBase] = await db.$queryRaw`SELECT fn_aliado_vigente(${nuevoAliado.id}::uuid) AS v`;
+const destinosOp = (await llamar('GET', '/catalogos/operacion', { token: T })).json.destinos;
+prueba('inactivar un gestor (ya no se trabaja con él): deja de cubrir, también en la base, y en los destinos sale marcado', r.status === 200 && r.json.activo === false
+  && r.json.vigencia.cubre === false && enBase.v === false && destinosOp.find((d) => d.id === nuevoAliado.id)?.activo === false
+  && (await db.auditoria.count({ where: { entidad: 'proveedor', entidadId: nuevoAliado.id, accion: 'INACTIVAR' } })) === 1, JSON.stringify([r.json.vigencia, enBase]));
 r = await llamar('POST', '/permisos-ambientales', { token: thseq, cuerpo: { acto: 'Resolución DGL No. 000999 de 2027', autoridad: 'CAS', estado: 'EN_TRAMITE',
   alcance: 'Licencia de prueba: celda de seguridad y autoclave (en trámite)', disposiciones: ['DF'] } });
 const permisoNuevo = r.json;
@@ -602,6 +643,22 @@ r = await llamar('POST', '/preoperacionales', { token: T, cuerpo: { vehiculoId: 
 prueba('preoperacional completo queda aprobado', r.status === 201 && r.json.aprobado === true);
 r = await llamar('PATCH', `/rutas/${ruta.id}/estado`, { token: T, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 184501 } });
 prueba('con preoperacional aprobado la ruta sale', r.status === 200);
+// Inspección desde el celular: con el id que genera el teléfono (si se reenvía sin señal no se duplica), la firma del conductor y una foto
+const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const idPreop = randomUUID();
+const preopCel = { id: idPreop, firma: `data:image/png;base64,${PNG_1X1}`, vehiculoId: veh.id, rutaId: ruta.id, fechaProgramada: '2026-11-20', km: 184502,
+  respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) };
+const envio1 = await llamar('POST', '/preoperacionales', { token: T, cuerpo: preopCel });
+const envio2 = await llamar('POST', '/preoperacionales', { token: T, cuerpo: preopCel });
+prueba('inspección desde el celular: con la firma del conductor, y si se reenvía (sin señal) no se duplica', envio1.status === 201 && envio1.json.id === idPreop && !!envio1.json.firmaUrl
+  && envio2.json.id === idPreop && (await db.preoperacional.count({ where: { id: idPreop } })) === 1, JSON.stringify([envio1.status, envio2.status, envio1.json.firmaUrl]));
+const fotoForm = (elementoId) => { const fo = new FormData(); fo.append('elementoId', elementoId); fo.append('archivo', new Blob([Buffer.from(PNG_1X1, 'base64')]), 'foto.png'); return fo; };
+r = await llamar('POST', `/preoperacionales/${idPreop}/fotos`, { token: T, form: fotoForm(critico.id) });
+const conFoto = await llamar('GET', `/inspecciones/${idPreop}`, { token: T });
+prueba('…la foto se guarda en el almacenamiento y la oficina la ve en el detalle, con la firma', r.status === 201 && !!r.json.fotoUrl
+  && conFoto.json.respuestas?.some((x) => x.fotoUrl === r.json.fotoUrl) && conFoto.json.firmaUrl === envio1.json.firmaUrl, JSON.stringify(r.json));
+const noEsta = await llamar('POST', `/preoperacionales/${idPreop}/fotos`, { token: T, form: fotoForm(randomUUID()) });
+prueba('…una foto de un elemento que no está en la inspección → 404', noEsta.status === 404, String(noEsta.status));
 const veh2 = await db.vehiculo.findUnique({ where: { placa: 'DXY545' } });
 const sol2 = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-21', items: [{ declaracionId: lodo.id, cantidadEstimada: 100 }] } })).json;
 const ruta2 = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-C${Date.now() % 100000}`, fechaProgramada: '2026-11-21', vehiculoId: veh2.id, conductorId: yo.id, solicitudes: [sol2.id] } })).json;
@@ -613,7 +670,7 @@ prueba('alertas responde con obligaciones de permisos', r.status === 200 && r.js
 console.log('\n4b. Inspecciones y flota (fase 1c)');
 r = await llamar('GET', `/inspecciones?desde=2026-11-01&hasta=2026-11-30&vehiculoId=${veh.id}`, { token: T });
 const noAprobada = r.json.filas?.find((p) => p.aprobado === false);
-prueba('inspecciones (oficina): por rango y vehículo, con el resumen de aprobadas y no aprobadas', r.status === 200 && r.json.total === 2 && r.json.resumen?.aprobadas === 1
+prueba('inspecciones (oficina): por rango y vehículo, con el resumen de aprobadas y no aprobadas (la del celular, aprobada)', r.status === 200 && r.json.total === 3 && r.json.resumen?.aprobadas === 2
   && r.json.resumen.noAprobadas === 1 && noAprobada?._count.respuestas === 1 && !!noAprobada.conductor?.nombre, JSON.stringify(r.json).slice(0, 300));
 r = await llamar('GET', `/inspecciones/${noAprobada.id}`, { token: T });
 prueba('…el detalle trae cada ítem con su grupo y el crítico no aprobado', r.status === 200 && r.json.respuestas.length === elementos.json.length
@@ -941,6 +998,10 @@ r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE
   transporte: { empresaTransportadora: 'Limpieza y Logística E2E', nit: '901234567', placa: 'LPM847', tipoVehiculo: 'Vacuum', conductorNombre: 'Conductor del cliente', conductorDocumento: '91000111', conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id },
   items: [{ declaracionId: aceite.id, sucursalId: suc.id, cantidad: 5 }] } });
 prueba('Los Pinos no recibe un residuo peligroso (Res. 000632, art. 6) → 409', r.status === 409 && /no puede recibir/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+const bioger = await db.proveedor.findFirst({ where: { nit: '806006669-8' } });
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'CARGUE', clienteId: suc.clienteId, destinoId: bioger.id, fechaServicio: '2026-11-29', vehiculoId: veh.id, conductorId: yo.id,
+  items: [{ declaracionId: aceite.id, sucursalId: suc.id, cantidad: 40 }] } });
+prueba('un gestor con el que ya no se trabaja (BIOGER) no se ofrece como destino de un servicio nuevo → 400', r.status === 400 && /Ya no se trabaja con BIOGER/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
 const gestorCgs = await db.proveedor.findFirst({ where: { nit: '901483038-1' } });
 r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'CARGUE', clienteId: suc.clienteId, destinoId: gestorCgs.id, fechaServicio: '2026-11-29', vehiculoId: veh.id, conductorId: yo.id,
   items: [{ declaracionId: aceite.id, sucursalId: suc.id, cantidad: 40 }] } });
@@ -1347,6 +1408,60 @@ const pedido2 = r.json;
 await llamar('PATCH', `/solicitudes/${pedido2.id}/aprobacion`, { token: T8, cuerpo: { aprobacion: 'APROBADA' } });
 r = await llamar('POST', `/portal/solicitudes/${pedido2.id}/cancelar`, { token: tPA, cuerpo: { motivo: 'Cambio de planes' } });
 prueba('…pero si Terra Viva ya lo confirmó, no lo cancela desde el portal', r.status === 400 && /confirm/.test(r.json.mensaje), JSON.stringify(r.json));
+// Cliente inactivo (gerencia, 19-11-2026): aviso amable; sigue consultando, pero no pide servicios ni carga declaraciones
+r = await llamar('PATCH', `/clientes/${clienteB.id}`, { token: T8, cuerpo: { activo: false, motivoInactivacion: 'PAGOS_PENDIENTES', notaInactivacion: 'Nota interna de cartera' } });
+const [yoB, pideB, cargaB, consultaB] = await Promise.all([
+  llamar('GET', '/portal/yo', { token: tAdminB }),
+  llamar('POST', '/portal/solicitudes', { token: tAdminB, cuerpo: { sucursalId: sedeB.id, fechaSolicitada: fechaEn(4), items: [{ declaracionId: declB.id, cantidadEstimada: 1 }] } }),
+  llamar('POST', '/portal/declaraciones/cargue/decl-residuos/vista-previa', { token: tAdminB, form: formPortal(csvCliente) }),
+  llamar('GET', '/portal/solicitudes', { token: tAdminB }),
+]);
+prueba('cliente inactivo por pagos pendientes: el portal le da un aviso amable (sin la nota interna), le deja consultar y no le deja pedir servicios ni cargar declaraciones',
+  r.status === 200 && yoB.json.cliente?.activo === false && /pagos pendientes/.test(yoB.json.aviso ?? '') && !JSON.stringify(yoB.json).includes('Nota interna')
+  && pideB.status === 403 && pideB.json.codigo === 'CLIENTE_INACTIVO' && cargaB.status === 403 && consultaB.status === 200,
+  JSON.stringify([r.status, yoB.json.aviso, pideB.status, pideB.json.codigo, cargaB.status, consultaB.status]));
+r = await llamar('PATCH', `/clientes/${clienteB.id}`, { token: T8, cuerpo: { activo: true } });
+const clienteBdespues = await db.cliente.findUnique({ where: { id: clienteB.id } });
+const yoBdespues = await llamar('GET', '/portal/yo', { token: tAdminB });
+prueba('…al reactivarlo se limpia el motivo y el aviso (la auditoría conserva la historia)', r.status === 200 && clienteBdespues.activo && clienteBdespues.motivoInactivacion === null
+  && clienteBdespues.inactivadoEn === null && yoBdespues.json.aviso === null
+  && (await db.auditoria.count({ where: { entidad: 'cliente', entidadId: clienteB.id, accion: { in: ['INACTIVAR', 'ACTIVAR'] } } })) === 2, JSON.stringify(r.json).slice(0, 200));
+// Certificación comercial con Terra Viva (gerencia, 19-11-2026): el modelo PD-GG-F-01, dinámico, descargable desde el portal
+r = await llamar('POST', '/portal/certificado-comercial', { token: tPA });
+const ccPortal = r.json;
+const pdfCc = await fetch(API + (ccPortal.url ?? ''));
+const bufCc = Buffer.from(await pdfCc.arrayBuffer());
+const ccA = await db.certificadoComercial.findFirst({ where: { clienteId: clienteA.id } });
+prueba('certificación comercial: el cliente la descarga desde el portal (consecutivo CC, PDF guardado con su huella)', r.status === 201 && /^CC-\d{4}-0001$/.test(ccPortal.numero ?? '')
+  && pdfCc.status === 200 && bufCc.subarray(0, 4).toString() === '%PDF' && createHash('sha256').update(bufCc).digest('hex') === ccA?.pdfSha256,
+  JSON.stringify([r.status, ccPortal.numero, pdfCc.status, ccA?.numero]));
+const nombresAliados = (await db.proveedor.findMany({ where: { esPropio: false }, select: { razonSocial: true } })).map((p) => p.razonSocial);
+prueba('…con lo que tiene autorizado, sin nombrar a los gestores aliados, y con una factura vencida sale sin la frase de cumplimiento',
+  ccA?.contenido?.alDia === false && ccA.contenido.cliente.razonSocial === clienteA.razonSocial && ccA.contenido.servicios.length > 0 && !ccA.contenido.general
+  && !nombresAliados.some((n) => JSON.stringify(ccA.contenido).includes(n)), JSON.stringify(ccA?.contenido).slice(0, 400));
+const otraVez = await llamar('POST', '/portal/certificado-comercial', { token: tPA });
+const oficinaCc = await llamar('POST', `/clientes/${clienteA.id}/certificado-comercial`, { token: T8 });
+prueba('…si se pide otra vez el mismo día (en el portal o en la oficina) es el mismo certificado, y la oficina sabe que salió sin la frase',
+  otraVez.json.numero === ccPortal.numero && oficinaCc.status === 200 && oficinaCc.json.numero === ccPortal.numero && oficinaCc.json.alDia === false && !!oficinaCc.json.url
+  && (await db.certificadoComercial.count({ where: { clienteId: clienteA.id } })) === 1,
+  JSON.stringify([otraVez.json.numero, oficinaCc.status, oficinaCc.json.numero]));
+r = await llamar('GET', `/clientes/${clienteA.id}/certificados-comerciales`, { token: T8 });
+prueba('…la ficha del cliente guarda su historial (quién lo pidió y si fue desde el portal)', r.status === 200 && r.json.length === 1 && r.json[0].numero === ccPortal.numero
+  && r.json[0].desdePortal === true && r.json[0].alDia === false, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/portal/certificado-comercial', { token: tAdminB });
+const ccB = await db.certificadoComercial.findFirst({ where: { clienteId: clienteB.id } });
+const ccConsultaB = await llamar('POST', '/portal/certificado-comercial', { token: tPB });
+prueba('…un cliente al día lleva la frase de cumplimiento; sin servicios autorizados, describe lo que Terra Viva le ofrece; el número sigue; un usuario de consulta también la descarga',
+  r.status === 201 && ccConsultaB.status === 201 && ccConsultaB.json.numero === ccB?.numero && ccB?.contenido?.alDia === true && ccB.contenido.general === true && ccB.contenido.permisos.some((p) => /000632/.test(p)) && /-0002$/.test(ccB.numero),
+  JSON.stringify([r.status, ccB?.numero, ccB?.contenido?.alDia, ccB?.contenido?.permisos]));
+r = await llamar('POST', `/clientes/${cF1.id}/certificado-comercial`, { token: T8 });
+prueba('…a un cliente inactivo no se le expide: la relación comercial no está vigente', r.status === 403 && r.json.codigo === 'CLIENTE_INACTIVO', JSON.stringify(r.json));
+r = await llamar('GET', `/verificar/${ccB.codigoVerificacion}`);
+prueba('…el QR lo verifica como certificado comercial, sin datos del cliente', r.status === 200 && r.json.valido === true && r.json.documento === 'Certificado comercial'
+  && r.json.numero === ccB.numero && !JSON.stringify(r.json).includes(clienteB.razonSocial), JSON.stringify(r.json));
+let ccFijo = false;
+try { await db.certificadoComercial.update({ where: { id: ccB.id }, data: { numero: 'CC-OTRO' } }); } catch (e) { ccFijo = /no se modifica ni se borra/.test(String(e)); }
+prueba('…y es una copia fija: ni escribiendo directo en la base se cambia', ccFijo);
 
 console.log('\n10. Verificación en dos pasos (requisitos de producción §4)');
 // Códigos de una app de autenticación (RFC 6238, como Google Authenticator): HMAC-SHA1 de pasos de 30 segundos

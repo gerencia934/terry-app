@@ -19,12 +19,14 @@ interface Config {
   dobleFactorObligatorio?: boolean;
   /** Portal: los certificados con facturas vencidas y sin pagar se descargan al registrar el pago (sí, si falta). */
   cartera?: { retenerCertificados?: boolean; diasGracia?: number };
+  /** Certificado comercial: cargo con que firma el representante legal (por omisión, Gerente General) y correo bajo la firma. */
+  certificadoComercial?: { cargo?: string; correo?: string };
 }
-interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
+interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
 interface Texto { id: string; codigo: string; version: number; titulo: string; texto: string; disposiciones: string[]; orden: number; revisado: boolean; vigenteDesde: string }
 interface GrupoTexto { codigo: string; vigente: Texto | null; historial: { id: string; version: number; vigenteDesde: string; activo: boolean; revisado: boolean; creadoPor: { nombre: string } | null }[] }
-const DOCUMENTO = { MANIFIESTO: 'Manifiestos (y recibos)', ACTA: 'Certificados', INSPECCION: 'Inspecciones vehiculares' };
+const DOCUMENTO = { MANIFIESTO: 'Manifiestos (y recibos)', ACTA: 'Certificados', INSPECCION: 'Inspecciones vehiculares', CERT_COMERCIAL: 'Certificados comerciales' };
 const area = 'min-h-[120px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
 export function EmpresaServidor() {
@@ -97,6 +99,11 @@ export function EmpresaServidor() {
             <Field label="Ciudad de firma" id="em-ci" hint="Sale en «Lugar y fecha»"><Input id="em-ci" disabled={!edita} value={c.ciudadFirma ?? ''} onChange={(e) => setC((s) => ({ ...s, ciudadFirma: e.target.value }))} /></Field>
             <Field label="Representante legal" id="em-rl"><Input id="em-rl" disabled={!edita} value={c.representanteLegal ?? ''} onChange={(e) => setC((s) => ({ ...s, representanteLegal: e.target.value }))} /></Field>
             <Field label="Cargo de quien firma" id="em-ca"><Input id="em-ca" disabled={!edita} value={c.cargoFirmante ?? ''} onChange={(e) => setC((s) => ({ ...s, cargoFirmante: e.target.value }))} /></Field>
+          </div>
+          <p className="mb-2 mt-4 text-[13px] font-semibold">Certificado comercial <span className="font-normal text-muted">(lo firma el representante legal; el cliente lo descarga en el portal)</span></p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Cargo de quien firma" id="em-cc-ca" hint="Si lo deja vacío: Gerente General"><Input id="em-cc-ca" disabled={!edita} placeholder="Gerente General" value={c.certificadoComercial?.cargo ?? ''} onChange={(e) => setC((s) => ({ ...s, certificadoComercial: { ...s.certificadoComercial, cargo: e.target.value } }))} /></Field>
+            <Field label="Correo bajo la firma" id="em-cc-co" hint="Opcional"><Input id="em-cc-co" type="email" disabled={!edita} value={c.certificadoComercial?.correo ?? ''} onChange={(e) => setC((s) => ({ ...s, certificadoComercial: { ...s.certificadoComercial, correo: e.target.value } }))} /></Field>
           </div>
           <p className="mb-2 mt-4 text-[13px] font-semibold">Contacto de la planta <span className="font-normal text-muted">(sale al pie del certificado y en la constancia de RCD)</span></p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -8,6 +8,7 @@ import { ComunModule } from './common/servicios';
 import { FiltroErrores, TECHO_IP } from './common/http';
 import { AuthModule } from './auth/auth.module';
 import { ClientesModule } from './clientes/clientes.module';
+import { CertificadoComercialModule } from './clientes/certificado-comercial.module';
 import { DeclaracionesModule } from './declaraciones/declaraciones.module';
 import { LogisticaModule } from './rutas/logistica.module';
 import { CumplimientoModule } from './permisos/cumplimiento.module';
@@ -37,7 +38,7 @@ import { PortalModule } from './portal/portal.module';
       }),
     }),
     PrismaModule, ComunModule, ArchivosModule, TrabajosModule, AuthModule,
-    ClientesModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
+    ClientesModule, CertificadoComercialModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
     ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule,
   ],
   providers: [

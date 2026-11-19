@@ -21,7 +21,7 @@ interface Permiso {
   obligaciones: Obligacion[]; disposiciones: { disposicion: { codigo: string; nombre: string; activo: boolean } }[];
 }
 interface Aliado {
-  id: string; nit: string; razonSocial: string; licencia: string | null; licenciaAutoridad: string | null; licenciaIndefinida: boolean; licenciaVence: string | null;
+  id: string; nit: string; razonSocial: string; activo: boolean; licencia: string | null; licenciaAutoridad: string | null; licenciaIndefinida: boolean; licenciaVence: string | null;
   licenciaUrl: string | null; alcance: string | null; excluyeTiposResiduo: string[]; municipio: string | null;
   disposicionesGestionadas: { disposicion: { codigo: string; nombre: string; activo: boolean } }[];
   vigencia: { estado: 'SIN_LICENCIA' | 'INDEFINIDA' | 'SIN_VIGENCIA' | 'VENCIDA' | 'POR_VENCER' | 'VIGENTE'; cubre: boolean; dias?: number };
@@ -185,29 +185,23 @@ export function PermisosServidor() {
 
       {vista === 'aliados' && (aliados.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{aliados.error}</p> : !aliados.datos ? <p className="p-6 text-center text-muted">Cargando…</p> : (
         <>
-          {aliados.datos.some((x) => !x.vigencia.cubre && x.disposicionesGestionadas.some((d) => d.disposicion.activo)) && (
-            <p className="mb-3 flex items-start gap-2 rounded-xl bg-warn/10 px-4 py-2.5 text-[13px] text-warn"><AlertTriangle size={16} className="mt-px shrink-0" />Hay gestores sin licencia vigente registrada: mientras tanto no se autorizan declaraciones de lo que gestionan. Registre la vigencia de la licencia (fecha o indefinida).</p>
+          {aliados.datos.some((x) => x.activo && !x.vigencia.cubre && x.disposicionesGestionadas.some((d) => d.disposicion.activo)) && (
+            <p className="mb-3 flex items-start gap-2 rounded-xl bg-warn/10 px-4 py-2.5 text-[13px] text-warn"><AlertTriangle size={16} className="mt-px shrink-0" />Hay gestores con los que se trabaja sin licencia vigente registrada: mientras tanto no se autorizan declaraciones de lo que gestionan. Registre la licencia y su vigencia (fecha o indefinida).</p>
           )}
-          <ResponsiveTable rows={aliados.datos} rowKey={(x) => x.id} onRowClick={puede ? (x) => setPanel({ tipo: 'aliado', a: x }) : undefined}
-            cardTitle={(x) => x.razonSocial} cardBadge={(x) => <Badge tone={LICENCIA[x.vigencia.estado][1]}>{LICENCIA[x.vigencia.estado][0]}</Badge>}
-            cardMeta={(x) => `${x.disposicionesGestionadas.map((d) => d.disposicion.codigo).join(', ')} · ${x.licenciaVence ? `vence ${fechaCorta(x.licenciaVence)}` : x.licenciaIndefinida ? 'indefinida' : 'sin vigencia'}`}
-            columns={[
-              { key: 'rs', header: 'Gestor', render: (x) => <span className="flex flex-col"><span className="font-medium">{x.razonSocial}</span><span className="num text-[12px] text-muted">NIT {x.nit}</span></span>, priority: 3 },
-              { key: 'g', header: 'Gestiona', render: (x) => <span className="flex flex-wrap gap-1">{x.disposicionesGestionadas.map((d) => <Badge key={d.disposicion.codigo} tone={d.disposicion.activo ? 'brand' : 'neutral'}>{d.disposicion.codigo}</Badge>)}</span>, priority: 3 },
-              { key: 'l', header: 'Licencia', render: (x) => <span className="block max-w-[260px] text-[13px]">{x.licencia ?? '—'}{x.licenciaAutoridad ? <span className="text-muted"> · {x.licenciaAutoridad}</span> : null}</span>, priority: 2 },
-              { key: 'v', header: 'Vigencia', render: (x) => (
-                <span className="flex flex-col gap-0.5">
-                  <Badge tone={LICENCIA[x.vigencia.estado][1]}>{LICENCIA[x.vigencia.estado][0]}</Badge>
-                  <span className="text-[12px] text-muted">{x.licenciaVence ? `hasta ${fechaCorta(x.licenciaVence)}` : x.licenciaIndefinida ? 'sin término' : 'no cubre'}</span>
-                </span>), priority: 3 },
-              { key: 'e', header: 'No recibe', render: (x) => (x.excluyeTiposResiduo.length ? x.excluyeTiposResiduo.join(', ') : '—'), priority: 1 },
-            ]} />
+          <TablaAliados filas={aliados.datos.filter((x) => x.activo)} abrir={puede ? (x) => setPanel({ tipo: 'aliado', a: x }) : undefined} />
+          {aliados.datos.some((x) => !x.activo) && (
+            <details className="mt-4 rounded-xl border border-line">
+              <summary className="cursor-pointer px-4 py-2.5 text-[13px] font-medium">Gestores con los que ya no se trabaja ({aliados.datos.filter((x) => !x.activo).length})</summary>
+              <p className="px-4 pb-2 text-[12px] text-muted">No cubren tratamientos ni se ofrecen como destino de servicios nuevos. Se conservan con su licencia porque los certificados antiguos los citan; ábralos para volver a activarlos.</p>
+              <div className="px-2 pb-2"><TablaAliados filas={aliados.datos.filter((x) => !x.activo)} abrir={puede ? (x) => setPanel({ tipo: 'aliado', a: x }) : undefined} /></div>
+            </details>
+          )}
           {!puede && <p className="mt-2 text-[12px] text-muted">Para registrar la licencia de un gestor se necesita el permiso «permisos.gestionar» (HSEQ o Administración).</p>}
         </>
       ))}
 
       <Sheet open={!!panel} onClose={() => setPanel(null)} title={!panel ? '' : panel.tipo === 'cumplir' ? 'Registrar cumplimiento' : panel.tipo === 'historial' ? 'Historial de cumplimiento' : panel.tipo === 'permiso' ? 'Vigencia y documento del permiso'
-        : panel.tipo === 'nuevoPermiso' ? 'Permiso o licencia propia' : panel.tipo === 'nuevoAliado' ? 'Gestor aliado nuevo' : 'Licencia del gestor aliado'}>
+        : panel.tipo === 'nuevoPermiso' ? 'Permiso o licencia propia' : panel.tipo === 'nuevoAliado' ? 'Gestor aliado nuevo' : 'Gestor aliado'}>
         {panel?.tipo === 'cumplir' && <FormCumplir o={panel.o} acto={panel.acto} listo={listo} />}
         {panel?.tipo === 'historial' && <HistorialObligacion o={panel.o} acto={panel.acto} />}
         {panel?.tipo === 'permiso' && <FormPermiso p={panel.p} listo={listo} />}
@@ -301,32 +295,63 @@ function FormPermiso({ p, listo }: { p: Permiso; listo: () => void }) {
   );
 }
 
+const sinNit = (nit: string) => !/^\d/.test(nit);
+/** Gestores aliados: lo que gestionan, su licencia y si hoy cubren. Los inactivos se ven en gris. */
+function TablaAliados({ filas, abrir }: { filas: Aliado[]; abrir?: (x: Aliado) => void }) {
+  const estado = (x: Aliado): [string, Tone] => (x.activo ? LICENCIA[x.vigencia.estado] : [LICENCIA[x.vigencia.estado][0], 'neutral']);
+  const vigencia = (x: Aliado) => (x.licenciaVence ? `hasta ${fechaCorta(x.licenciaVence)}` : x.licenciaIndefinida ? 'sin término' : x.licencia ? 'sin vigencia' : 'sin licencia');
+  return (
+    <ResponsiveTable rows={filas} rowKey={(x) => x.id} onRowClick={abrir}
+      cardTitle={(x) => x.razonSocial} cardBadge={(x) => <Badge tone={estado(x)[1]}>{estado(x)[0]}</Badge>}
+      cardMeta={(x) => `${x.disposicionesGestionadas.map((d) => d.disposicion.codigo).join(', ') || 'tratamientos por registrar'} · ${vigencia(x)}`}
+      columns={[
+        { key: 'rs', header: 'Gestor', render: (x) => <span className="flex flex-col"><span className="font-medium">{x.razonSocial}</span>{sinNit(x.nit) ? <span className="text-[12px] text-warn">Falta el NIT</span> : <span className="num text-[12px] text-muted">NIT {x.nit}</span>}</span>, priority: 3 },
+        { key: 'g', header: 'Gestiona', render: (x) => (x.disposicionesGestionadas.length
+          ? <span className="flex flex-wrap gap-1">{x.disposicionesGestionadas.map((d) => <Badge key={d.disposicion.codigo} tone={d.disposicion.activo && x.activo ? 'brand' : 'neutral'}>{d.disposicion.codigo}</Badge>)}</span>
+          : <span className="text-[13px] text-warn">Por registrar</span>), priority: 3 },
+        { key: 'l', header: 'Licencia', render: (x) => <span className="block max-w-[260px] text-[13px]">{x.licencia ?? <span className="text-warn">Por registrar</span>}{x.licenciaAutoridad ? <span className="text-muted"> · {x.licenciaAutoridad}</span> : null}</span>, priority: 2 },
+        { key: 'v', header: 'Vigencia', render: (x) => (
+          <span className="flex flex-col gap-0.5">
+            <Badge tone={estado(x)[1]}>{estado(x)[0]}</Badge>
+            <span className="text-[12px] text-muted">{x.activo ? (x.vigencia.cubre ? vigencia(x) : 'no cubre') : 'no se trabaja con él'}</span>
+          </span>), priority: 3 },
+        { key: 'e', header: 'No recibe', render: (x) => (x.excluyeTiposResiduo.length ? x.excluyeTiposResiduo.join(', ') : '—'), priority: 1 },
+      ]} />
+  );
+}
+
 function FormAliado({ x, listo }: { x: Aliado; listo: () => void }) {
   const toast = useToast();
   const tipos = useApi<{ tiposResiduo: { codigo: string; nombre: string }[]; disposiciones: DisposicionCat[] }>('/declaraciones/catalogos');
   const guardado = !!x.licenciaUrl && !/^https?:/.test(x.licenciaUrl);
-  const [v, setV] = useState({ razonSocial: x.razonSocial, municipio: x.municipio ?? '', licencia: x.licencia ?? '', licenciaAutoridad: x.licenciaAutoridad ?? '', licenciaIndefinida: x.licenciaIndefinida,
+  const [v, setV] = useState({ nit: sinNit(x.nit) ? '' : x.nit, activo: x.activo, razonSocial: x.razonSocial, municipio: x.municipio ?? '', licencia: x.licencia ?? '', licenciaAutoridad: x.licenciaAutoridad ?? '', licenciaIndefinida: x.licenciaIndefinida,
     licenciaVence: x.licenciaVence?.slice(0, 10) ?? '', licenciaUrl: guardado ? '' : x.licenciaUrl ?? '', excluyeTiposResiduo: x.excluyeTiposResiduo, disposiciones: x.disposicionesGestionadas.map((d) => d.disposicion.codigo) });
   const [archivo, setArchivo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
   const guardar = async (e: FormEvent) => {
     e.preventDefault(); setEnviando(true);
     try {
-      const { licenciaUrl, ...resto } = v;
-      const r = await api<{ vigencia: Aliado['vigencia'] }>(`/gestores-aliados/${x.id}`, { metodo: 'PATCH', cuerpo: { ...resto, ...(guardado && !licenciaUrl ? {} : { licenciaUrl }), licenciaVence: v.licenciaIndefinida ? '' : v.licenciaVence } });
+      const { licenciaUrl, nit, ...resto } = v;
+      const r = await api<{ vigencia: Aliado['vigencia'] }>(`/gestores-aliados/${x.id}`, { metodo: 'PATCH', cuerpo: { ...resto, ...(nit.trim() && nit.trim() !== x.nit ? { nit: nit.trim() } : {}),
+        ...(guardado && !licenciaUrl ? {} : { licenciaUrl }), licenciaVence: v.licenciaIndefinida ? '' : v.licenciaVence } });
       if (archivo) await subirPdf(`/gestores-aliados/${x.id}/licencia`, archivo);
-      toast(r.vigencia.cubre ? `Licencia guardada: ${x.razonSocial} cubre sus disposiciones.` : `Licencia guardada, pero ${x.razonSocial} todavía no cubre: falta una vigencia actual.`, r.vigencia.cubre ? undefined : 'warn');
+      toast(!v.activo ? `${v.razonSocial} quedó como gestor con el que ya no se trabaja: no cubre ni se ofrece como destino de servicios nuevos.`
+        : r.vigencia.cubre ? `Guardado: ${v.razonSocial} cubre lo que gestiona.` : `Guardado, pero ${v.razonSocial} todavía no cubre: falta registrar la licencia con una vigencia actual.`,
+        v.activo && !r.vigencia.cubre ? 'warn' : undefined);
       listo();
     } catch (err) { toast(mensajeError(err, 'No se pudo guardar.'), 'warn'); }
     setEnviando(false);
   };
   return (
     <form onSubmit={guardar} className="flex flex-col gap-4">
-      <p className="text-[13px] text-muted">NIT {x.nit}{x.licenciaUrl && <> · <button type="button" className="font-medium text-brand underline" onClick={() => verDocumento(`/gestores-aliados/${x.id}/licencia`).catch(() => undefined)}>ver la licencia</button></>}</p>
+      <label className="flex items-start gap-2.5 rounded-lg bg-surface-2 p-3 text-[13px]"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.activo} onChange={(e) => setV((s) => ({ ...s, activo: e.target.checked }))} />
+        <span><span className="font-medium">Trabajamos con este gestor</span><span className="block text-muted">Si lo desmarca, deja de cubrir tratamientos y de ofrecerse como destino de servicios nuevos. Su licencia y los certificados antiguos se conservan.</span></span></label>
+      {x.licenciaUrl && <p className="text-[13px]"><button type="button" className="font-medium text-brand underline" onClick={() => verDocumento(`/gestores-aliados/${x.id}/licencia`).catch(() => undefined)}>Ver la licencia</button></p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Razón social" id="ga-r"><Input id="ga-r" value={v.razonSocial} maxLength={200} onChange={(e) => setV((s) => ({ ...s, razonSocial: e.target.value }))} /></Field>
+        <Field label="NIT" id="ga-n" hint={sinNit(x.nit) ? 'Escríbalo sin puntos, con el dígito de verificación (900123456-7).' : undefined}><Input id="ga-n" value={v.nit} placeholder={sinNit(x.nit) ? 'Por confirmar' : undefined} maxLength={15} onChange={(e) => setV((s) => ({ ...s, nit: e.target.value }))} /></Field>
         <Field label="Municipio de la planta" id="ga-m"><Input id="ga-m" value={v.municipio} maxLength={80} onChange={(e) => setV((s) => ({ ...s, municipio: e.target.value }))} /></Field>
       </div>
+      <Field label="Razón social" id="ga-r"><Input id="ga-r" value={v.razonSocial} maxLength={200} onChange={(e) => setV((s) => ({ ...s, razonSocial: e.target.value }))} /></Field>
       <ElegirDisposiciones opciones={(tipos.datos?.disposiciones ?? []).filter((d) => !d.propia)} elegidas={v.disposiciones} onChange={(c) => setV((s) => ({ ...s, disposiciones: c }))} />
       <Field label="Licencia (acto, número y fecha)" id="ga-l"><Input id="ga-l" value={v.licencia} maxLength={300} onChange={(e) => setV((s) => ({ ...s, licencia: e.target.value }))} /></Field>
       <Field label="Autoridad que la expidió" id="ga-a"><Input id="ga-a" value={v.licenciaAutoridad} maxLength={80} onChange={(e) => setV((s) => ({ ...s, licenciaAutoridad: e.target.value }))} placeholder="CDMB, Corpocesar, CAR…" /></Field>
@@ -342,7 +367,7 @@ function FormAliado({ x, listo }: { x: Aliado; listo: () => void }) {
             onChange={(e) => setV((s) => ({ ...s, excluyeTiposResiduo: e.target.checked ? [...s.excluyeTiposResiduo, t.codigo] : s.excluyeTiposResiduo.filter((c) => c !== t.codigo) }))} />{t.nombre}</label>))}
         </div>
       </fieldset>
-      <div className="flex justify-end border-t border-line pt-3"><Button type="submit" variant="primary" disabled={enviando}>{enviando && <Loader2 size={16} className="animate-spin" />}Guardar licencia</Button></div>
+      <div className="flex justify-end border-t border-line pt-3"><Button type="submit" variant="primary" disabled={enviando}>{enviando && <Loader2 size={16} className="animate-spin" />}Guardar</Button></div>
     </form>
   );
 }
@@ -398,19 +423,21 @@ function FormNuevoAliado({ listo }: { listo: () => void }) {
     try {
       const r = await api<{ id: string; vigencia: Aliado['vigencia'] }>('/gestores-aliados', { cuerpo: { ...v, licenciaVence: v.licenciaIndefinida ? '' : v.licenciaVence } });
       if (archivo) await subirPdf(`/gestores-aliados/${r.id}/licencia`, archivo);
-      toast(r.vigencia.cubre ? `${v.razonSocial} quedó registrado y cubre lo que gestiona.` : `${v.razonSocial} quedó registrado, pero aún no cubre: falta una vigencia actual.`, r.vigencia.cubre ? 'ok' : 'warn'); listo();
+      toast(r.vigencia.cubre ? `${v.razonSocial} quedó registrado y cubre lo que gestiona.` : v.licencia.trim() ? `${v.razonSocial} quedó registrado, pero aún no cubre: falta una vigencia actual.`
+        : `${v.razonSocial} quedó registrado sin licencia: no cubre ningún tratamiento hasta que la registre.`, r.vigencia.cubre ? 'ok' : 'warn'); listo();
     } catch (err) { toast(mensajeError(err, 'No se pudo registrar.'), 'warn'); }
     setEnviando(false);
   };
   return (
     <form onSubmit={guardar} className="flex flex-col gap-4">
+      <p className="text-[13px] text-muted">Si aún no tiene la licencia o no sabe qué tratamientos hace, regístrelo sin ellos: queda en la lista, pero no cubre ninguna declaración hasta que registre su licencia con la vigencia.</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="NIT" id="na-n"><Input id="na-n" value={v.nit} onChange={set('nit')} maxLength={15} required placeholder="900123456-7" /></Field>
         <Field label="Municipio de la planta" id="na-m"><Input id="na-m" value={v.municipio} onChange={set('municipio')} maxLength={80} /></Field>
       </div>
       <Field label="Razón social" id="na-r"><Input id="na-r" value={v.razonSocial} onChange={set('razonSocial')} maxLength={200} required /></Field>
-      <Field label="Licencia (acto, número, fecha y modificaciones)" id="na-l"><Input id="na-l" value={v.licencia} onChange={set('licencia')} maxLength={300} required /></Field>
-      <Field label="Autoridad que la expidió" id="na-a"><Input id="na-a" value={v.licenciaAutoridad} onChange={set('licenciaAutoridad')} maxLength={80} required placeholder="CDMB, Corpocesar, ANLA…" /></Field>
+      <Field label="Licencia (acto, número, fecha y modificaciones)" id="na-l"><Input id="na-l" value={v.licencia} onChange={set('licencia')} maxLength={300} placeholder="Opcional: puede registrarla después" /></Field>
+      <Field label="Autoridad que la expidió" id="na-a"><Input id="na-a" value={v.licenciaAutoridad} onChange={set('licenciaAutoridad')} maxLength={80} placeholder="CDMB, Corpocesar, ANLA…" /></Field>
       <label className="flex items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.licenciaIndefinida} onChange={(e) => setV((s) => ({ ...s, licenciaIndefinida: e.target.checked, licenciaVence: e.target.checked ? '' : s.licenciaVence }))} />
         <span>Licencia sin término (vida útil del proyecto)</span></label>
       {!v.licenciaIndefinida && <Field label="Vence" id="na-v" hint="Sin esta fecha (o «sin término») el gestor no cubre."><Input id="na-v" type="date" value={v.licenciaVence} onChange={set('licenciaVence')} /></Field>}

@@ -250,6 +250,14 @@ export function CampoInspeccionServidor() {
   const [km, setKm] = useState('');
   const [obs, setObs] = useState('');
   const [enviando, setEnviando] = useState(false);
+  // Fotos por elemento (sobre todo de las fallas) y firma del conductor: se suben al almacenamiento, también sin señal
+  const [fotos, setFotos] = useState<Record<string, { blob: Blob; url: string }>>({});
+  const [firma, setFirma] = useState('');
+  const tomarFoto = async (elementoId: string, archivo?: File) => {
+    if (!archivo) return;
+    try { const blob = await comprimirFoto(archivo); setFotos((s) => ({ ...s, [elementoId]: { blob, url: URL.createObjectURL(blob) } })); }
+    catch { toast('No se pudo leer la foto.', 'warn'); }
+  };
   if (!p || !ruta) return <CampoLayout title="Inspección" back><p className="mt-6 text-center text-muted">Primero descargue la ruta del día.</p></CampoLayout>;
   if (!ruta.vehiculoId) return <CampoLayout title="Inspección" back><p className="mt-6 text-center text-muted">La ruta aún no tiene vehículo asignado.</p></CampoLayout>;
   const grupos = [...new Set(p.elementos.map((e) => e.grupo))];
@@ -257,9 +265,17 @@ export function CampoInspeccionServidor() {
   const criticasMal = p.elementos.filter((e) => e.critico && res[e.id] === 'NO_OK');
   const enviarInspeccion = async () => {
     setEnviando(true);
-    const cuerpo = { vehiculoId: ruta.vehiculoId, rutaId: ruta.id, fechaProgramada: hoy(), km: Number(km), observaciones: obs || undefined, respuestas: p.elementos.map((e) => ({ elementoId: e.id, resultado: res[e.id] })) };
+    const id = crypto.randomUUID(); // el mismo id en cada reintento: la inspección no se duplica
+    const cuerpo = { id, firma, vehiculoId: ruta.vehiculoId, rutaId: ruta.id, fechaProgramada: hoy(), km: Number(km), observaciones: obs || undefined, respuestas: p.elementos.map((e) => ({ elementoId: e.id, resultado: res[e.id] })) };
     try {
       const r = await enviar<{ id: string; numero: string; aprobado: boolean; fallasCriticas: string[] }>({ grupo: `ruta:${ruta.id}`, descripcion: `Inspección del vehículo ${ruta.vehiculo?.placa ?? ''}`, metodo: 'POST', ruta: '/preoperacionales', cuerpo });
+      // Las fotos van después, en orden y en la misma cola (si no hay señal, esperan a la inspección)
+      let n = 0;
+      for (const [elementoId, f] of Object.entries(fotos)) {
+        const el = p.elementos.find((x) => x.id === elementoId);
+        await encolar({ grupo: `ruta:${ruta.id}`, descripcion: `Foto de la inspección · ${el?.nombre ?? ''}`, metodo: 'POST', ruta: `/preoperacionales/${id}/fotos`,
+          form: { campos: { elementoId }, archivo: f.blob, nombre: `inspeccion-${id.slice(0, 8)}-${++n}.jpg` } });
+      }
       const aprobado = r.respuesta ? r.respuesta.aprobado : !criticasMal.length;
       if (r.respuesta) cambiar((x) => ({ ...x, inspecciones: [...x.inspecciones, { id: r.respuesta!.id, numero: r.respuesta!.numero, vehiculoId: ruta.vehiculoId!, aprobado }] }));
       else if (aprobado) cambiar((x) => ({ ...x, inspecciones: [...x.inspecciones, { id: 'local', numero: '(por enviar)', vehiculoId: ruta.vehiculoId!, aprobado: true }] }));
@@ -277,12 +293,18 @@ export function CampoInspeccionServidor() {
             {p.elementos.filter((e) => e.grupo === g).map((e) => (
               <li key={e.id} className="rounded-xl bg-surface p-3 ring-1 ring-line">
                 <p className="text-[14px] font-medium">{e.nombre}{e.critico && <span className="ml-2"><Badge tone="bad">Crítico</Badge></span>}</p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
+                <div className="mt-2 grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
                   {([['OK', 'Bien'], ['NO_OK', 'Falla'], ['NA', 'No aplica']] as [Res, string][]).map(([v, l]) => (
                     <button key={v} onClick={() => setRes((s) => ({ ...s, [e.id]: v }))} className={cx('h-11 rounded-lg text-[14px] font-semibold ring-1',
                       res[e.id] === v ? (v === 'OK' ? 'bg-ok text-white ring-ok' : v === 'NO_OK' ? 'bg-bad text-white ring-bad' : 'bg-muted text-white ring-muted') : 'ring-line')}>{l}</button>
                   ))}
+                  <label className={cx('flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg ring-1', fotos[e.id] ? 'bg-brand-soft text-brand-ink ring-brand' : res[e.id] === 'NO_OK' ? 'text-bad ring-bad' : 'text-muted ring-line')}
+                    aria-label={`Foto de ${e.nombre}`} title="Tomar una foto">
+                    <Camera size={18} /><input type="file" accept="image/*" capture="environment" className="hidden" onChange={(ev) => tomarFoto(e.id, ev.target.files?.[0])} />
+                  </label>
                 </div>
+                {fotos[e.id] && <img src={fotos[e.id].url} alt={`Foto de ${e.nombre}`} className="mt-2 h-24 w-32 rounded-lg object-cover" />}
+                {res[e.id] === 'NO_OK' && !fotos[e.id] && <p className="mt-1.5 text-[12px] text-bad">Tome una foto de la falla.</p>}
               </li>
             ))}
           </ul>
@@ -292,7 +314,8 @@ export function CampoInspeccionServidor() {
         <Field label="Kilometraje actual" id="km-i"><Input id="km-i" inputMode="numeric" value={km} onChange={(e) => setKm(e.target.value.replace(/\D/g, ''))} /></Field>
         <Field label="Observaciones" id="obs-i"><Input id="obs-i" value={obs} maxLength={500} onChange={(e) => setObs(e.target.value)} /></Field>
         {criticasMal.length > 0 && <p className="rounded-xl bg-bad/10 p-3 text-[13px] text-bad">Falla crítica: {criticasMal.map((e) => e.nombre).join(', ')}. La inspección quedará no aprobada.</p>}
-        <Button variant="primary" className="h-12 rounded-xl" disabled={!!faltan || !km || enviando} onClick={enviarInspeccion}>{faltan ? `Faltan ${faltan} elementos` : enviando ? 'Enviando…' : 'Enviar inspección'}</Button>
+        <div><p className="mb-1.5 text-[13px] font-medium">Firma del conductor</p><Firma valor={firma} onChange={setFirma} /></div>
+        <Button variant="primary" className="h-12 rounded-xl" disabled={!!faltan || !km || !firma || enviando} onClick={enviarInspeccion}>{faltan ? `Faltan ${faltan} elementos` : !firma ? 'Falta su firma' : enviando ? 'Enviando…' : 'Enviar inspección'}</Button>
       </div>
     </CampoLayout>
   );

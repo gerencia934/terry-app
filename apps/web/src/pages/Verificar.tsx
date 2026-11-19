@@ -7,7 +7,7 @@ import { codigoVerificacion } from '../lib/router';
 import { cx } from '../lib/format';
 
 interface Respuesta {
-  valido: boolean; estado?: 'EMITIDA' | 'ANULADA'; numero?: string; emitidaEn?: string | null; emisor?: { razonSocial: string }; mensaje: string;
+  valido: boolean; estado?: 'EMITIDA' | 'ANULADA'; documento?: string; numero?: string; emitidaEn?: string | null; emisor?: { razonSocial: string }; mensaje: string;
 }
 const CODIGO = /^[0-9a-f]{24}$/;
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -75,6 +75,7 @@ export default function Verificar() {
               </div>
               {res.numero && (
                 <DefList items={[
+                  ...(res.documento ? [['Documento', res.documento] as [string, string]] : []),
                   ['Número', <span className="num font-semibold">{res.numero}</span>],
                   ['Emitido', res.emitidaEn ? fechaHora(res.emitidaEn) : '—'],
                   ['Emisor', res.emisor?.razonSocial ?? '—'],

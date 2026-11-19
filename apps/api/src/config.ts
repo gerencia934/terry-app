@@ -33,6 +33,9 @@ const Esquema = z.object({
   S3_RUTA_EN_URL: sinVacio(z.enum(['true', 'false']).default('false')).transform((v) => v === 'true'), // MinIO: true
   S3_ACCESS_KEY_ID: z.string().trim().default(''), // vacío = credenciales del entorno (rol del servidor)
   S3_SECRET_ACCESS_KEY: z.string().trim().default(''),
+  // Cloudflare R2 con sus propios nombres (equivalen a los S3_*): bucket, cuenta (arma la dirección si falta R2_ENDPOINT) y claves
+  R2_BUCKET_NAME: z.string().trim().default(''), R2_ACCOUNT_ID: z.string().trim().default(''), R2_ENDPOINT: z.string().trim().default(''),
+  R2_ACCESS_KEY_ID: z.string().trim().default(''), R2_SECRET_ACCESS_KEY: z.string().trim().default(''),
   // Cola de trabajos (ZIP, Excel): esta copia del API los procesa (en producción puede haber una copia solo para eso)
   TRABAJOS_PROCESAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   TRABAJOS_SIMULTANEOS: sinVacio(z.coerce.number().int().min(1).max(8).default(2)),
@@ -54,7 +57,16 @@ export function validarConfig(env: Record<string, unknown>): Config {
     const msg = r.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Configuración inválida. Revise el archivo .env:\n${msg}`);
   }
-  if (r.data.ALMACENAMIENTO === 's3' && !r.data.S3_BUCKET) throw new Error('ALMACENAMIENTO=s3 necesita S3_BUCKET (y S3_ENDPOINT si no es AWS).');
+  // Cloudflare R2: sus nombres llenan los S3_* que falten (la dirección sale de la cuenta si no viene escrita)
+  const d = r.data;
+  if (d.R2_BUCKET_NAME && !d.S3_BUCKET) {
+    d.S3_BUCKET = d.R2_BUCKET_NAME;
+    d.S3_ENDPOINT ||= d.R2_ENDPOINT.replace(/\/+$/, '') || (d.R2_ACCOUNT_ID ? `https://${d.R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : '');
+    d.S3_ACCESS_KEY_ID ||= d.R2_ACCESS_KEY_ID; d.S3_SECRET_ACCESS_KEY ||= d.R2_SECRET_ACCESS_KEY;
+    if (d.S3_REGION === 'us-east-1') d.S3_REGION = 'auto';
+  }
+  if (d.ALMACENAMIENTO === 's3' && !d.S3_BUCKET) throw new Error('ALMACENAMIENTO=s3 necesita S3_BUCKET o R2_BUCKET_NAME (y la dirección si no es AWS).');
+  if (d.ALMACENAMIENTO === 's3' && !d.S3_ENDPOINT && d.R2_ACCOUNT_ID) throw new Error('Cloudflare R2 necesita R2_ENDPOINT o R2_ACCOUNT_ID.');
   if (!r.data.POLITICA_DATOS_VERSION || !r.data.POLITICA_DATOS_URL) {
     if (r.data.NODE_ENV === 'production')
       throw new Error('Falta la política de tratamiento de datos (Ley 1581): defina POLITICA_DATOS_URL y POLITICA_DATOS_VERSION. Sin ella nadie puede entrar.');

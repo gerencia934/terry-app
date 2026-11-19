@@ -222,7 +222,7 @@ class ActasService {
       const f = l.conciliacion.manifiesto.fechaServicio;
       const vigente = (p: Proveedor) => !!p.licencia?.trim() && (p.licenciaIndefinida || (!!p.licenciaVence && p.licenciaVence >= f));
       const candidatos = d.gestores.map((g) => g.proveedor);
-      return candidatos.find((p) => p.id === l.conciliacion.manifiesto.destinoId && vigente(p)) ?? candidatos.find(vigente) ?? null;
+      return candidatos.find((p) => p.id === l.conciliacion.manifiesto.destinoId && vigente(p)) ?? candidatos.find((p) => p.activo && vigente(p)) ?? candidatos.find(vigente) ?? null;
     };
     const soporte = (l: LineaActa) => {
       const d = l.disposicion ?? l.manifiestoItem.disposicion;
@@ -461,6 +461,12 @@ class ActasService {
   /** Verificación pública del QR: solo lo mínimo, nunca datos del cliente. */
   async verificar(codigo: string) {
     const x = await this.db.acta.findUnique({ where: { codigoVerificacion: codigo }, include: { empresa: { select: { razonSocial: true, nit: true } } } });
+    if (!x) {
+      // Certificado comercial: tampoco muestra datos del cliente; refleja la relación a la fecha en que se expidió
+      const cc = await this.db.certificadoComercial.findUnique({ where: { codigoVerificacion: codigo }, include: { empresa: { select: { razonSocial: true } } } });
+      if (cc) return { valido: true, estado: 'EMITIDA' as const, documento: 'Certificado comercial', numero: cc.numero, emitidaEn: cc.creadoEn, emisor: { razonSocial: cc.empresa.razonSocial },
+        mensaje: 'Documento auténtico: refleja la relación comercial a la fecha de su expedición.' };
+    }
     if (!x || x.estado === 'BORRADOR') throw new NotFoundException({ valido: false, mensaje: 'No existe un documento emitido con ese código.' });
     return {
       valido: x.estado === 'EMITIDA', estado: x.estado, numero: x.numero, emitidaEn: x.emitidaEn, emisor: { razonSocial: x.empresa.razonSocial },

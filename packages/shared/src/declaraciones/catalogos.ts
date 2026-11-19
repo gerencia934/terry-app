@@ -239,13 +239,20 @@ export const PERMISOS_CAS: PermisoCatalogo[] = [
 
 /**
  * Gestores aliados (respuesta A5 de la gerencia). Sin `vence` ni `indefinida`, la vigencia «no consta» y la disposición
- * queda sin cobertura hasta registrarla. Lúmina (posconsumo de bombillas) no se registra: su NIT no consta.
+ * queda sin cobertura hasta registrarla. `activo: false`: ya no se trabaja con él (gerencia, 19-11-2026: los activos son
+ * Veolia, Conyser, Sandesol, Social RAEE, Colbitumen, Geoambiental, Vectors and Waste, Recitrac, Urbaser y EMAS); no cubre
+ * ni se ofrece como destino de servicios nuevos, pero se conserva con su licencia y sus certificados.
  */
 export interface GestorAliado {
   nit: string; razonSocial: string; municipio?: string; disposiciones: string[];
-  licencia: string; autoridad: string; vence?: string; indefinida?: boolean; alcance: string; excluyeTiposResiduo?: string[];
+  /** Acto que lo ampara y quién lo expidió. Sin licencia el aliado queda registrado, pero no cubre ningún tratamiento. */
+  licencia?: string; autoridad?: string; vence?: string; indefinida?: boolean; alcance: string; excluyeTiposResiduo?: string[];
   /** Último soporte de la relación comercial (certificación, contrato o convenio) y su fecha. */
   soporteComercial?: string; soporteComercialFecha?: string;
+  /** false: ya no se trabaja con él. Lo marca la siembra hasta que alguien lo cambie en la aplicación (queda en la auditoría). */
+  activo?: boolean;
+  /** Nombres con que se sembró antes: si aún tiene uno de ellos, la siembra lo actualiza. */
+  nombresAnteriores?: string[];
 }
 export const GESTORES_ALIADOS: GestorAliado[] = [
   // ---- Uso común (carpeta «1. LICENCIAS DE USO COMUN») ----
@@ -253,7 +260,7 @@ export const GESTORES_ALIADOS: GestorAliado[] = [
     licencia: 'Res. 858 del 10-06-2011 (Corpocesar), modificada por la Res. 0877 del 21-07-2015; cesión parcial a Tecniamsa (hoy Veolia SI) de la celda de seguridad y la planta de biorremediación por la Res. 1741 del 26-12-2018', autoridad: 'Corpocesar',
     vence: '2027-01-03', alcance: 'Celda de seguridad para RESPEL industriales (autorizada hasta el 03-01-2027, Res. 0877 y 1741) y planta de biorremediación de residuos petroleros. No recibe hospitalarios, explosivos ni patógenos (Res. 1741)',
     excluyeTiposResiduo: ['HOSP'], soporteComercial: 'Certificación comercial', soporteComercialFecha: '2026-03-31' },
-  { nit: '901483038-1', razonSocial: 'Centro de Gestión Sostenible S.A.S. E.S.P. (CGS)', municipio: 'Mosquera', disposiciones: ['DF'],
+  { nit: '901483038-1', activo: false, razonSocial: 'Centro de Gestión Sostenible S.A.S. E.S.P. (CGS)', municipio: 'Mosquera', disposiciones: ['DF'],
     licencia: 'Res. DGEN 20217000362 del 26-08-2021 (CAR), cesión parcial a CGS de la licencia otorgada por la Res. 0869 del 09-09-2004, modificada por las Res. 2966 del 20-10-2006 y 1561 del 24-05-2010', autoridad: 'CAR Cundinamarca',
     indefinida: true, alcance: 'Celda de seguridad (predio Belbal, Mosquera) para los RESPEL del art. 1 de la Res. 2966 de 2006 y lodos con características domésticas y especiales. Vida útil del proyecto. Su licencia de 2024 (CGS2, Res. DJUR 50247000048) es de otro predio y aún no se usa',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2024-12-13' },
@@ -265,55 +272,55 @@ export const GESTORES_ALIADOS: GestorAliado[] = [
     licencia: 'Res. 0144 del 09-02-2000 (CDMB), modificada por las Res. 1194 del 13-12-2004 (industriales especiales), 0477 del 17-04-2012 (desactivación de alta eficiencia) y 0851 del 09-10-2017 (excedentes industriales, posconsumo e incineración)', autoridad: 'CDMB',
     indefinida: true, alcance: 'Incineración de hospitalarios, industriales especiales y peligrosos; desactivación de alta eficiencia de infecciosos; excedentes industriales y posconsumo (RAEE, luminarias, pilas, envases de plaguicidas, aceites lubricantes usados, medicamentos). No incinera PVC, Y18, Y34 ni Y35, ni plásticos sin caracterización. Vida útil del proyecto (Res. 0144, art. 10)',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2026-02-24' },
-  { nit: '800105650-1', razonSocial: 'Empresa de Servicios Públicos de Aguachica E.S.P. (ESPA)', municipio: 'Aguachica', disposiciones: ['TAR'],
+  { nit: '800105650-1', activo: false, razonSocial: 'Empresa de Servicios Públicos de Aguachica E.S.P. (ESPA)', municipio: 'Aguachica', disposiciones: ['TAR'],
     licencia: 'Res. 095 del 28-05-1996 (Corpocesar): licencia ambiental del municipio de Aguachica para construir y operar sus plantas de tratamiento de aguas residuales, que opera la ESPA', autoridad: 'Corpocesar',
     indefinida: true, alcance: 'Tratamiento de aguas residuales domésticas en las PTAR de Aguachica. La licencia no menciona de forma expresa la recepción de aguas de terceros (baños portátiles, pozos sépticos): confírmelo con la ESPA',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2023-01-11' },
-  { nit: '900607351-1', razonSocial: 'Soluxionar S.A.S.', municipio: 'Sabana de Torres', disposiciones: ['BIOA', 'TAR'],
+  { nit: '900607351-1', activo: false, razonSocial: 'Soluxionar S.A.S.', municipio: 'Sabana de Torres', disposiciones: ['BIOA', 'TAR'],
     licencia: 'Res. DGL 00000101 del 03-02-2014 (CAS): almacenamiento, tratamiento, recuperación y disposición final de RESPEL en el predio Sion, con permiso de vertimientos', autoridad: 'CAS',
     indefinida: true, alcance: 'Tratamiento y recuperación de RESPEL (biorremediación) y de aguas, por 30 años prorrogables. El contrato con Terra Viva rigió del 03-04-2023 al 02-04-2024: confirme que la relación sigue',
     soporteComercial: 'Contrato PR-001-2023', soporteComercialFecha: '2023-04-03' },
-  { nit: '804002433-1', razonSocial: 'Descont S.A.S. E.S.P.', municipio: 'Girón', disposiciones: ['AUT'],
+  { nit: '804002433-1', razonSocial: 'Descont S.A.S. E.S.P. (grupo Urbaser)', nombresAnteriores: ['Descont S.A.S. E.S.P.'], municipio: 'Girón', disposiciones: ['AUT'],
     licencia: 'Res. 0426 del 21-05-1999 (CDMB), modificada por las Res. 0667 del 03-08-2004, 0134 del 02-02-2005 (esterilización en autoclave) y 1179 del 27-10-2006 (residuos con mercurio)', autoridad: 'CDMB',
     indefinida: true, alcance: 'Desactivación de hospitalarios en autoclave y gestión de residuos con mercurio. No incinera en sus instalaciones (Res. 0426). Vida útil del proyecto',
     soporteComercial: 'Contrato', soporteComercialFecha: '2025-04-21' },
   // Sin vigencia registrada a propósito: no cubren hasta que se confirme (plan de manejo y sistema posconsumo sin término claro)
-  { nit: '804015104-1', razonSocial: 'Crudesan S.A.', municipio: 'Bucaramanga', disposiciones: ['AUS'],
+  { nit: '804015104-1', activo: false, razonSocial: 'Crudesan S.A.', municipio: 'Bucaramanga', disposiciones: ['AUS'],
     licencia: 'Plan de manejo ambiental aprobado por la Res. 0163 del 03-03-2003 (CDMB) y cedido por la Res. 0077 del 20-01-2006; autorización del Ministerio de Minas y Energía, Res. 124047 del 29-03-2006', autoridad: 'CDMB',
     alcance: 'Recuperación de aceites usados y crudos con residuos aceitosos. Es un plan de manejo, no una licencia: confirme su vigencia (y el soporte comercial) antes de usarlo' },
-  { nit: '900699445-6', razonSocial: 'Corporación Posconsumo de Iluminación (LÚMINA)', municipio: 'Bogotá D.C.', disposiciones: ['POS'],
+  { nit: '900699445-6', activo: false, razonSocial: 'Corporación Posconsumo de Iluminación (LÚMINA)', municipio: 'Bogotá D.C.', disposiciones: ['POS'],
     licencia: 'Sistema posconsumo de bombillas aprobado por la Res. 307 del 07-05-2012 (ANLA), modificada por las Res. 28 de 2013, 1343 de 2014 y 01134 del 30-09-2016', autoridad: 'ANLA',
     alcance: 'Sistema posconsumo de bombillas (no es una planta). Confirme la vigencia del sistema y el soporte comercial antes de usarlo' },
   // ---- Uso no común (carpeta «2. LICENCIAS DE USO NO COMUN») ----
   { nit: '900812833-8', razonSocial: 'Social RAEE S.A.S.', municipio: 'Girón', disposiciones: ['DES'],
     licencia: 'Res. 000756 del 14-09-2016 (CDMB, exp. LA-0008-2015): reparación, almacenamiento, desensamble, trituración y molienda de RAEE', autoridad: 'CDMB', indefinida: true,
     alcance: 'Desensamble y aprovechamiento de RAEE. No hace ningún tratamiento térmico (art. 4). Vida útil del proyecto. Sin soporte comercial en la carpeta' },
-  { nit: '806006669-8', razonSocial: 'BIOGER S.A.S. E.S.P. (Parque Ambiental Bioger)', municipio: 'Cartagena', disposiciones: ['RS', 'DF', 'INCH', 'AUT', 'BIOA', 'ESC'],
+  { nit: '806006669-8', activo: false, razonSocial: 'BIOGER S.A.S. E.S.P. (Parque Ambiental Bioger)', municipio: 'Cartagena', disposiciones: ['RS', 'DF', 'INCH', 'AUT', 'BIOA', 'ESC'],
     licencia: 'Res. 0616 del 27-07-2004 (CARDIQUE), modificada por las Res. 0803 del 25-07-2012, 0120 del 12-02-2014, 0398 del 02-04-2020 y 1642 del 16-11-2022; gestor de RCD por la Res. 0529 del 24-06-2020', autoridad: 'CARDIQUE',
     indefinida: true, alcance: 'Relleno sanitario, celdas de seguridad, incineración, desactivación y biorremediación en Pasacaballos (Cartagena). No recibe residuos con PCB (Res. 1642 de 2022). Vida útil del proyecto',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2020-10-13' },
-  { nit: '900565947-9', razonSocial: 'BIOINTECH GREEN S.A.S. (proyecto Guayacán)', municipio: 'Aguazul', disposiciones: ['BIOA', 'TAR'],
+  { nit: '900565947-9', activo: false, razonSocial: 'BIOINTECH GREEN S.A.S. (proyecto Guayacán)', municipio: 'Aguazul', disposiciones: ['BIOA', 'TAR'],
     licencia: 'Res. 500.41-14-0050 del 16-01-2014 (CORPORINOQUIA, exp. 500.29.13-040): tratamiento biológico de residuos sólidos y líquidos peligrosos de la industria petrolera, con concesión de aguas y vertimiento por aspersión', autoridad: 'CORPORINOQUIA',
     indefinida: true, alcance: 'Biorremediación de residuos de la industria petrolera y tratamiento de sus aguas, en Aguazul (Casanare). No transporta residuos. Vida útil del proyecto',
     soporteComercial: 'Convenio', soporteComercialFecha: '2018-10-25' },
-  { nit: '800249174-5', razonSocial: 'Empresa Metropolitana de Aseo S.A. E.S.P. (EMAS)', municipio: 'Galapa', disposiciones: ['INCH', 'DF'],
+  { nit: '800249174-5', razonSocial: 'Empresa Metropolitana de Aseo S.A. E.S.P. (EMAS, grupo Veolia)', nombresAnteriores: ['Empresa Metropolitana de Aseo S.A. E.S.P. (EMAS)'], municipio: 'Galapa', disposiciones: ['INCH', 'DF'],
     licencia: 'Res. 00462 del 26-08-2009 (CRA): planta incineradora y celdas de seguridad para residuos sólidos peligrosos, km 39 vía Barranquilla - Tubará', autoridad: 'CRA',
     indefinida: true, alcance: 'Incineración y celdas de seguridad para RESPEL en Galapa (Atlántico), por la duración de la actividad. Sin soporte comercial en la carpeta' },
-  { nit: '800143273-1', razonSocial: 'Montajes y Construcciones Fermar Ltda. (planta El Lomaral)', municipio: 'Barrancabermeja', disposiciones: ['BIOA'],
+  { nit: '800143273-1', activo: false, razonSocial: 'Montajes y Construcciones Fermar Ltda. (planta El Lomaral)', municipio: 'Barrancabermeja', disposiciones: ['BIOA'],
     licencia: 'Res. DGL 00001288 del 30-12-2014 (CAS): planta de tratamiento de lodos contaminados «El Lomaral», corregimiento El Centro', autoridad: 'CAS',
     vence: '2034-12-30', alcance: 'Tratamiento de lodos contaminados. Licencia por 20 años desde su ejecutoria (fecha que no consta: aquí se cuenta desde la expedición). Sin soporte comercial en la carpeta' },
-  { nit: '900115530-1', razonSocial: 'Humberto Quintero O. y Cía. S.C.A.', municipio: 'Barrancabermeja', disposiciones: ['AUS'],
+  { nit: '900115530-1', razonSocial: 'Colombiana de Bitumen S.A.S. (Colbitumen)', nombresAnteriores: ['Humberto Quintero O. y Cía. S.C.A.'], municipio: 'Barrancabermeja', disposiciones: ['AUS'],
     licencia: 'Res. DGL 00001197 del 14-12-2017 (CAS, exp. 1007-017-2014): tratamiento, aprovechamiento y recuperación de aceites de motor residuales, predio El Altico, corregimiento La Fortuna', autoridad: 'CAS',
-    indefinida: true, alcance: 'Recuperación de aceites de motor usados en Barrancabermeja. El acto no fija término',
+    indefinida: true, alcance: 'Recuperación de aceites de motor usados en Barrancabermeja. Antes Humberto Quintero O. y Cía. S.C.A. (mismo NIT: la licencia se expidió con ese nombre). El acto no fija término',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2022-11-22' },
-  { nit: '900642911-4', razonSocial: 'SOLAM S.A.S.', municipio: 'Río de Oro', disposiciones: ['BIOA', 'TAR'],
+  { nit: '900642911-4', activo: false, razonSocial: 'SOLAM S.A.S.', municipio: 'Río de Oro', disposiciones: ['BIOA', 'TAR'],
     licencia: 'Res. 2166 del 26-12-2014 (Corpocesar): almacenamiento, tratamiento, aprovechamiento y disposición final de residuos de hidrocarburos (landfarming o compostaje) y tratamiento de las aguas que recibe', autoridad: 'Corpocesar',
     indefinida: true, alcance: 'Biorremediación de residuos con hidrocarburos y tratamiento de sus aguas en Río de Oro (Cesar). No incinera (exigiría permiso de emisiones). Vida útil del proyecto',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2019-05-10' },
-  { nit: '900962813-3', razonSocial: 'Tratamientos y Rellenos Ambientales de Colombia S.A.S. E.S.P. (TRACOL)', municipio: 'Mosquera', disposiciones: ['INCH', 'DF'],
+  { nit: '900962813-3', activo: false, razonSocial: 'Tratamientos y Rellenos Ambientales de Colombia S.A.S. E.S.P. (TRACOL)', municipio: 'Mosquera', disposiciones: ['INCH', 'DF'],
     licencia: 'Res. 0989 del 26-05-2015 (CAR), cedida por la Res. 1821 del 14-07-2017: incineración de RESPEL y hospitalarios y celdas de seguridad', autoridad: 'CAR Cundinamarca',
     indefinida: true, alcance: 'Incineración (3 hornos) y 4 celdas de seguridad en Mosquera. En celda no recibe inflamables, explosivos, infecciosos ni residuos con más del 30 % de humedad. Sin soporte comercial ni prueba de que la planta opere: confírmelo' },
-  { nit: '807005020-8', razonSocial: 'Aseo Urbano S.A.S. E.S.P. (relleno de ordinarios de Aguachica)', municipio: 'Aguachica', disposiciones: ['RS'],
+  { nit: '807005020-8', activo: false, razonSocial: 'Aseo Urbano S.A.S. E.S.P. (relleno de ordinarios de Aguachica)', municipio: 'Aguachica', disposiciones: ['RS'],
     licencia: 'Res. 858 del 10-06-2011 (Corpocesar), modificada por la Res. 0877 del 21-07-2015 (celda de ordinarios hasta el 03-01-2027); conserva el relleno de ordinarios según la Res. 1741 del 26-12-2018', autoridad: 'Corpocesar',
     vence: '2027-01-03', alcance: 'Relleno sanitario de ordinarios de Aguachica. No recibe hospitalarios ni llantas. También opera el relleno Guayabal de Cúcuta (Corponor, Res. 0976 de 2000 renovada por la Res. 0450 de 2006). Sin soporte comercial en la carpeta',
     excluyeTiposResiduo: ['HOSP'] },
@@ -321,18 +328,25 @@ export const GESTORES_ALIADOS: GestorAliado[] = [
     licencia: 'Res. DGL 00001053 del 27-09-2010 (CAS), cedida por las Res. DGL 001089 de 2015 y 00000749 de 2017, con alcance aclarado por la Res. DGL 00001215 del 15-12-2017 (landfarming, desorción térmica, incineración y aguas industriales)', autoridad: 'CAS',
     indefinida: true, alcance: 'Landfarming, aguas industriales y, en su segunda fase (sin constancia de que opere), desorción térmica e incineración. El acto no fija término',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2023-02-14' },
-  { nit: '900335484-4', razonSocial: 'Soluciones Ecológicas de Colombia ECOSOL S.A.S. E.S.P.', municipio: 'Galapa', disposiciones: ['INCH', 'DF', 'AUT'],
+  { nit: '900335484-4', activo: false, razonSocial: 'Soluciones Ecológicas de Colombia ECOSOL S.A.S. E.S.P.', municipio: 'Galapa', disposiciones: ['INCH', 'DF', 'AUT'],
     licencia: 'Res. 000303 del 23-09-2003 (CRA), modificada por la Res. 000001 del 11-01-2007, y Res. 00440 del 09-11-2007 (relleno de seguridad), cedidas a ECOSOL por la Res. 000183 de 2010', autoridad: 'CRA',
     indefinida: true, alcance: 'Incineración, esterilización y relleno de seguridad en Galapa (Atlántico). En incineración no recibe volátiles, inflamables, radiactivos ni residuos con metales pesados. Vida útil del proyecto',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2023-03-01' },
-  { nit: '900299496-8', razonSocial: 'Invercon G&G Ltda. (escombrera La Esterlina II)', municipio: 'Yondó', disposiciones: ['ESC'],
+  { nit: '900299496-8', activo: false, razonSocial: 'Invercon G&G Ltda. (escombrera La Esterlina II)', municipio: 'Yondó', disposiciones: ['ESC'],
     licencia: 'Res. SPTDT 011 del 14-03-2024 (Alcaldía de Yondó): prórroga hasta el 31-12-2027 de la licencia de funcionamiento como gestor de RCD (Res. 122 de 2019); inscrito ante Corantioquia (constancia 160ZF-CON2209-3072)', autoridad: 'Alcaldía de Yondó y Corantioquia',
     vence: '2027-12-31', alcance: 'Escombrera de RCD en Yondó (Antioquia). No recibe RCD mezclados con basuras, líquidos, tóxicos, peligrosos ni hidrocarburos',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2023-03-15' },
-  { nit: '900111586-5', razonSocial: 'Proyectos e Inversiones El Parque S.A. (escombrera El Parque)', municipio: 'Bucaramanga', disposiciones: ['ESC'],
+  { nit: '900111586-5', activo: false, razonSocial: 'Proyectos e Inversiones El Parque S.A. (escombrera El Parque)', municipio: 'Bucaramanga', disposiciones: ['ESC'],
     licencia: 'Gestor de RCD inscrito en la CDMB como sitio de disposición final (oficio CDMB_4841 del 20-04-2022); ampliación de la fase II del botadero aprobada por el oficio CDMB rad. 11877 del 05-08-2013', autoridad: 'CDMB',
     indefinida: true, alcance: 'Escombrera El Parque (Bucaramanga): disposición final de RCD; no los almacena ni los aprovecha. La inscripción no fija término',
     soporteComercial: 'Certificación comercial', soporteComercialFecha: '2024-02-09' },
+  // ---- Aliados nuevos (gerencia, 19-11-2026). Sin su licencia registrada no cubren: se completa al recibirla ----
+  { nit: '900273802-6', razonSocial: 'RECITRAC S.A.S.', disposiciones: ['TAR'],
+    alcance: 'Transporte y disposición de aguas residuales domésticas (prefactura del 16-09-2026). Falta registrar su licencia o permiso y la autoridad que lo expidió' },
+  { nit: '800093661-9', razonSocial: 'Geoambiental S.A.S.', disposiciones: [],
+    alcance: 'Falta registrar qué tratamientos hace y su licencia. El dígito de verificación del NIT es calculado: confírmelo con su RUT' },
+  { nit: 'POR CONFIRMAR', razonSocial: 'Vectors and Waste S.A.S.', disposiciones: ['TAR'],
+    alcance: 'Succión con equipo vactor, transporte y disposición de aguas residuales domésticas y aceitosas. Faltan su NIT y su licencia' },
 ];
 
 /**

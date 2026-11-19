@@ -93,7 +93,8 @@ export class DeclaracionesService {
     }) : [];
     if (!disps.length) return { cubierto: false, mensaje: 'La declaración no tiene disposición o manejo.', detalle: [] };
     const h = hoy();
-    const aliadoVigente = (p: Proveedor) => !!p.licencia?.trim() && (p.licenciaIndefinida || (!!p.licenciaVence && p.licenciaVence >= h));
+    // Misma regla de fn_aliado_vigente: se trabaja hoy con él y su licencia está registrada y vigente
+    const aliadoVigente = (p: Proveedor) => p.activo && !!p.licencia?.trim() && (p.licenciaIndefinida || (!!p.licenciaVence && p.licenciaVence >= h));
     const detalle = disps.map((d) => {
       const no = (soporte: string) => ({ codigo: d.codigo, nombre: d.nombre, cubierta: false, soporte });
       const si = (soporte: string) => ({ codigo: d.codigo, nombre: d.nombre, cubierta: true, soporte });
@@ -106,7 +107,8 @@ export class DeclaracionesService {
         const vigentes = d.gestores.map((g) => g.proveedor).filter(aliadoVigente);
         const aceptan = ctx?.tipoResiduoCodigo ? vigentes.filter((p) => !p.excluyeTiposResiduo.includes(ctx.tipoResiduoCodigo!)) : vigentes;
         if (aceptan.length) return si(aceptan.map((p) => `${p.razonSocial} (${p.licencia}; ${p.licenciaIndefinida ? 'vigencia indefinida' : `hasta ${p.licenciaVence!.toISOString().slice(0, 10)}`})`).join(' · '));
-        return no(!d.gestores.length ? 'No hay gestor aliado registrado' : vigentes.length ? 'Ningún gestor aliado vigente recibe este tipo de residuo'
+        return no(!d.gestores.length ? 'No hay gestor aliado registrado' : !d.gestores.some((g) => g.proveedor.activo) ? 'Ya no se trabaja con ninguno de sus gestores aliados'
+          : vigentes.length ? 'Ningún gestor aliado vigente recibe este tipo de residuo'
           : 'Ningún gestor aliado tiene la licencia registrada y vigente (falta la vigencia o venció)');
       }
       const permiso = d.permisos.map((x) => x.permiso).find((p) => p.empresaId === empresaId && ['VIGENTE', 'POR_VENCER'].includes(p.estado) && (!p.vence || p.vence >= h));

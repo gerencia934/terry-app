@@ -119,17 +119,24 @@ async function main() {
   // disposición. Completa solo lo vacío: lo que se registre después en la aplicación se respeta.
   for (const g of GESTORES_ALIADOS) {
     let p = await db.proveedor.findFirst({ where: { empresaId: E, nit: g.nit } });
+    // Sin NIT confirmado se busca por el nombre: así, cuando se registre el NIT en la aplicación, no se crea otro
+    if (!p && !/^\d/.test(g.nit)) p = await db.proveedor.findFirst({ where: { empresaId: E, razonSocial: g.razonSocial } });
     const vigencia = { licenciaVence: g.vence ? new Date(g.vence) : null, licenciaIndefinida: !!g.indefinida };
     if (!p) p = await db.proveedor.create({ data: { empresaId: E, nit: g.nit, razonSocial: g.razonSocial, municipio: g.municipio ?? null, esDestino: true, esPropio: false,
-      licencia: g.licencia, licenciaAutoridad: g.autoridad, alcance: g.alcance, excluyeTiposResiduo: g.excluyeTiposResiduo ?? [], ...vigencia,
+      activo: g.activo !== false, licencia: g.licencia ?? null, licenciaAutoridad: g.autoridad ?? null, alcance: g.alcance, excluyeTiposResiduo: g.excluyeTiposResiduo ?? [], ...vigencia,
       soporteComercial: g.soporteComercial ?? null, soporteComercialFecha: g.soporteComercialFecha ? new Date(g.soporteComercialFecha) : null } });
     else p = await db.proveedor.update({ where: { id: p.id }, data: {
-      licencia: p.licencia || g.licencia, licenciaAutoridad: p.licenciaAutoridad || g.autoridad, alcance: p.alcance || g.alcance,
+      ...(g.nombresAnteriores?.includes(p.razonSocial) ? { razonSocial: g.razonSocial } : {}),
+      licencia: p.licencia || g.licencia || null, licenciaAutoridad: p.licenciaAutoridad || g.autoridad || null, alcance: p.alcance || g.alcance,
       excluyeTiposResiduo: p.excluyeTiposResiduo.length ? p.excluyeTiposResiduo : g.excluyeTiposResiduo ?? [],
       ...(p.licenciaVence || p.licenciaIndefinida ? {} : vigencia),
       municipio: p.municipio || g.municipio || null, soporteComercial: p.soporteComercial || g.soporteComercial || null,
       soporteComercialFecha: p.soporteComercialFecha ?? (g.soporteComercialFecha ? new Date(g.soporteComercialFecha) : null),
     } });
+    // Con quién se trabaja hoy: lo marca el catálogo mientras nadie lo haya cambiado en la aplicación (queda en la auditoría)
+    if (p.activo !== (g.activo !== false)
+      && !(await db.auditoria.count({ where: { entidad: 'proveedor', entidadId: p.id, accion: { in: ['ACTIVAR', 'INACTIVAR'] } } })))
+      p = await db.proveedor.update({ where: { id: p.id }, data: { activo: g.activo !== false } });
     for (const codigo of g.disposiciones) {
       const d = await db.disposicion.findUniqueOrThrow({ where: { empresaId_codigo: { empresaId: E, codigo } } });
       await db.disposicionGestor.upsert({ where: { disposicionId_proveedorId: { disposicionId: d.id, proveedorId: p.id } }, update: {}, create: { disposicionId: d.id, proveedorId: p.id } });

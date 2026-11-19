@@ -187,6 +187,8 @@ base.
   - CodeQL deja de ser gratis (exige la licencia «GitHub Code Security»);
   - las pruebas y Dependabot siguen funcionando.
 - **PDF en cola y descargas con enlace firmado.** Hechos el 19-11-2026 (cola de trabajos en PostgreSQL y almacenamiento
-  local o S3 con enlaces firmados de 5 minutos).
+  local o S3 con enlaces firmados de 5 minutos). Ese mismo día quedó conectado Cloudflare R2: se verificó subir, leer,
+  descargar con el enlace firmado, que sin firma niega el acceso (bucket privado) y borrar. Falta el bloqueo de objeto
+  (WORM) para la retención de 10 años.
 
 La historia de cada fase está en `docs/CONTEXTO_PROYECTO.md`.

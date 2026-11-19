@@ -1,7 +1,7 @@
 // Portal de clientes: consulta y descarga de lo suyo. Los PDF se abren con un enlace firmado de 5 minutos que el API
 // entrega solo después de verificar que el documento es de la empresa (y de las sedes) del usuario.
 import { useState, type ReactNode } from 'react';
-import { Award, BarChart3, CalendarDays, Clock, Download, ExternalLink, FileStack, FileText, Loader2, MapPin, Plus, ShieldCheck, Truck, Upload, type LucideIcon } from 'lucide-react';
+import { Award, BadgeCheck, BarChart3, CalendarDays, Clock, Download, ExternalLink, FileStack, FileText, Loader2, MapPin, Plus, ShieldCheck, Truck, Upload, type LucideIcon } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../../components/data';
 import { Badge, Button, Card, DefList, EstadoBadge, Field, Input, Kpi, PageHeader, Select, Sheet, useToast } from '../../components/ui';
 import { API_URL, api } from '../../lib/api';
@@ -9,7 +9,7 @@ import { PieLista, cant, fechaHoraCo, hoyCo, msg, useApi, usePaginado } from '..
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtNum } from '../../lib/format';
 import { descargar } from '../../cargues/descargar';
-import { nitConDv, usePortal } from './PortalApp';
+import { nitConDv, puedeEscribir, usePortal } from './PortalApp';
 import { CancelarSolicitud, CargueDeclaraciones, PedirServicio, pedirAlEntrar } from './Escritura';
 
 /** Pide el enlace firmado (5 minutos) y abre el PDF en otra pestaña. La pestaña se abre antes de esperar para que el navegador no la bloquee. */
@@ -75,8 +75,9 @@ export function PortalInicio() {
         </Card>
         <Card title="Accesos rápidos">
           <div className="flex flex-col gap-2">
-            {yo.perfil === 'ADMIN' && <Acceso icon={Truck} titulo="Pedir un servicio" texto="Una recolección en sus sedes" onClick={() => { pedirAlEntrar.valor = true; go('portal-solicitudes'); }} />}
+            {puedeEscribir(yo) && <Acceso icon={Truck} titulo="Pedir un servicio" texto="Una recolección en sus sedes" onClick={() => { pedirAlEntrar.valor = true; go('portal-solicitudes'); }} />}
             <Acceso icon={Award} titulo="Descargar certificados" texto="De tratamiento, disposición final y aprovechamiento" onClick={() => go('portal-certificados')} />
+            {yo.cliente.activo && <AccesoCertificacionComercial />}
             <Acceso icon={FileStack} titulo="Ver manifiestos" texto="Cada recolección, con lo pesado en planta" onClick={() => go('portal-manifiestos')} />
             <Acceso icon={BarChart3} titulo="Informe del año" texto="Lo gestionado por residuo y por mes, en Excel" onClick={() => go('portal-informes')} />
           </div>
@@ -84,6 +85,12 @@ export function PortalInicio() {
       </div>
     </>
   );
+}
+/** Certificación comercial con Terra Viva: se expide al pedirla (si ya se expidió hoy, es la misma). */
+function AccesoCertificacionComercial() {
+  const toast = useToast();
+  return <Acceso icon={BadgeCheck} titulo="Certificación comercial" texto="Constancia de su relación comercial con Terra Viva"
+    onClick={() => { abrirDocumento('/portal/certificado-comercial').catch((x) => toast(msg(x, 'No se pudo abrir la certificación comercial.'), 'warn')); }} />;
 }
 function Acceso({ icon: Icono, titulo, texto, onClick }: { icon: LucideIcon; titulo: string; texto: string; onClick: () => void }) {
   return (
@@ -139,7 +146,7 @@ export function PortalDeclaraciones() {
   return (
     <>
       <PageHeader title="Declaraciones" subtitle="Los residuos y servicios que su empresa tiene declarados con Terra Viva. Una declaración autorizada y activa es la que se puede pedir y recoger; las que usted carga quedan en revisión."
-        actions={yo.perfil === 'ADMIN' ? <Button variant="primary" onClick={() => setCargar(true)}><Upload size={16} /> Cargar declaraciones</Button> : undefined} />
+        actions={puedeEscribir(yo) ? <Button variant="primary" onClick={() => setCargar(true)}><Upload size={16} /> Cargar declaraciones</Button> : undefined} />
       <FilterBar active={Number(!!f.q) + Number(!!f.estado) + Number(!!f.tipo)} onClear={() => { setF(vacio); setTexto(''); }}>
         <Field label="Buscar" id="pd-q"><Input id="pd-q" value={texto} onChange={(e) => setTexto(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setF((s) => ({ ...s, q: texto.trim() }))}
           onBlur={() => setF((s) => ({ ...s, q: texto.trim() }))} placeholder="Nombre o su código · Enter" /></Field>
@@ -221,9 +228,10 @@ const origen = (s: SolFila) => (s.clase === 'PRE' ? 'Recurrente' : s.operacion =
 export function PortalSolicitudes() {
   const yo = usePortal();
   const admin = yo.perfil === 'ADMIN';
+  const escribe = puedeEscribir(yo);
   const lista = usePaginado<SolFila>('/portal/solicitudes');
   const [sel, setSel] = useState<SolFila | null>(null);
-  const [pedir, setPedir] = useState(() => { const v = pedirAlEntrar.valor && admin; pedirAlEntrar.valor = false; return v; });
+  const [pedir, setPedir] = useState(() => { const v = pedirAlEntrar.valor && escribe; pedirAlEntrar.valor = false; return v; });
   const residuos = (s: SolFila) => { const n = s.items.map((i) => i.declaracion.nombre); return n.length > 2 ? `${n.slice(0, 2).join(', ')} y ${n.length - 2} más` : n.join(', ') || '—'; };
   const cols: Column<SolFila>[] = [
     { key: 'n', header: 'N.º', render: (s) => <span className="num font-medium">{s.numero}</span>, priority: 3 },
@@ -237,7 +245,7 @@ export function PortalSolicitudes() {
   return (
     <>
       <PageHeader title="Solicitudes de servicio" subtitle="Las recolecciones pedidas para su empresa y en qué van. Lo que usted pide queda «por confirmar» hasta que Terra Viva lo apruebe y lo programe; las recurrentes salen de la frecuencia de cada declaración."
-        actions={admin ? <Button variant="primary" onClick={() => setPedir(true)}><Plus size={16} /> Pedir un servicio</Button> : undefined} />
+        actions={escribe ? <Button variant="primary" onClick={() => setPedir(true)}><Plus size={16} /> Pedir un servicio</Button> : undefined} />
       {lista.error ? <Aviso texto={lista.error} /> : !lista.filas ? <Cargando />
         : <ResponsiveTable rows={lista.filas} columns={cols} rowKey={(s) => s.id} onRowClick={setSel} cardTitle={(s) => <span>Solicitud <span className="num">{s.numero}</span></span>}
             cardBadge={(s) => <EstadoSol s={s} />} cardMeta={residuos}
@@ -357,6 +365,7 @@ const TIPO_ACTA = { DISPOSICION: 'Tratamiento y disposición final', APROVECHAMI
 const enlaceVerificacion = (codigo: string) => `${location.origin}${location.pathname}#verificar/${codigo}`;
 
 export function PortalCertificados() {
+  const yo = usePortal();
   const actual = anioActual();
   const [anio, setAnio] = useState('');
   const [sel, setSel] = useState<ActaFila | null>(null);
@@ -372,7 +381,8 @@ export function PortalCertificados() {
   ];
   return (
     <>
-      <PageHeader title="Certificados" subtitle="Los certificados emitidos por Terra Viva para su empresa. Cada uno trae un código QR para que un tercero verifique que es auténtico." />
+      <PageHeader title="Certificados" subtitle="Los certificados emitidos por Terra Viva para su empresa. Cada uno trae un código QR para que un tercero verifique que es auténtico."
+        actions={yo.cliente.activo ? <BotonPdf ruta="/portal/certificado-comercial" etiqueta="Certificación comercial" /> : undefined} />
       <FilterBar active={Number(!!anio)} onClear={() => setAnio('')}>
         <Field label="Año" id="pc-a"><Select id="pc-a" value={anio} onChange={(e) => setAnio(e.target.value)}><option value="">Todos</option>{Array.from({ length: 6 }, (_, i) => actual - i).map((y) => <option key={y} value={y}>{y}</option>)}</Select></Field>
       </FilterBar>
