@@ -144,22 +144,25 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
         {!c.sucursales.length && <p className="text-[13px] text-muted">Sin sedes. Agregue al menos una: las declaraciones y los servicios se programan por sede.</p>}
         <ul className="flex flex-col gap-2">{c.sucursales.map((s) => <TarjetaSede key={s.id} s={s} gestor={c.tipo === 'GESTOR'} editar={puedeEditar ? () => abrir({ vista: 'sede', clienteId: c.id, sedeId: s.id }) : undefined} />)}</ul>
       </div>
-      <SeccionPortal c={c} puedeEditar={puedeEditar} abrir={abrir} />
+      {puedeEditar && <SeccionPortal c={c} abrir={abrir} />}
     </div>
   );
 }
 
-/** Quién del cliente entra al portal. La oficina da el primer acceso; después el administrador del cliente invita a los demás. */
-function SeccionPortal({ c, puedeEditar, abrir }: { c: ClienteDetalle; puedeEditar: boolean; abrir: (p: Panel) => void }) {
+/**
+ * Quién del cliente entra al portal (solo para quien administra clientes: son datos personales). La oficina da el primer
+ * acceso; después el administrador del cliente invita a los demás.
+ */
+function SeccionPortal({ c, abrir }: { c: ClienteDetalle; abrir: (p: Panel) => void }) {
   const lista = useApi<UsuarioPortal[]>(`/clientes/${c.id}/usuarios-portal`);
   const sedes: SedePortal[] = c.sucursales.filter((s) => s.activa).map((s) => ({ id: s.id, codigo: s.codigo, nombre: s.nombre, municipio: s.municipio ? { nombre: s.municipio.nombre } : null }));
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="text-[15px] font-semibold">Portal de clientes</h3>
-        {puedeEditar && c.activo && <Button size="sm" onClick={() => abrir({ vista: 'portal', clienteId: c.id, sedes, primero: !lista.datos?.some((u) => u.activo && u.perfilPortal === 'ADMIN') })}><Plus size={14} /> Dar acceso</Button>}
+        {c.activo && <Button size="sm" onClick={() => abrir({ vista: 'portal', clienteId: c.id, sedes, primero: !lista.datos?.some((u) => u.activo && u.perfilPortal === 'ADMIN') })}><Plus size={14} /> Dar acceso</Button>}
       </div>
-      <ListaUsuariosPortal lista={lista} abrir={puedeEditar ? (u) => abrir({ vista: 'portal', clienteId: c.id, sedes, usuario: u }) : undefined}
+      <ListaUsuariosPortal lista={lista} abrir={(u) => abrir({ vista: 'portal', clienteId: c.id, sedes, usuario: u })}
         vacio="Este cliente aún no entra al portal. Dé acceso a su primer administrador: él invita después a las demás personas de su empresa." />
     </div>
   );

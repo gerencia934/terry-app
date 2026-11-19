@@ -37,8 +37,11 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      # Base desechable del contenedor de pruebas (no es una credencial real)
-      DATABASE_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_ci
+      # Bases desechables del contenedor de pruebas (no son credenciales reales). El API y las pruebas usan un usuario
+      # SIN superusuario ni BYPASSRLS, como en producción: PostgreSQL deja que un superusuario se salte la seguridad por
+      # filas (RLS), que es la segunda barrera del portal de clientes. El de la imagen (terraviva) solo crea ese usuario.
+      DATABASE_URL: postgresql://terraviva_app:terraviva_app@localhost:5432/terraviva_app
+      ADMIN_DB_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_ci
       TZ: America/Bogota
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +77,13 @@ jobs:
           npm run validate -w @terraviva/db
           npm run generate -w @terraviva/db
 
+      - name: Usuario de la base sin privilegios especiales (la RLS aplica, como en producción)
+        run: |
+          psql "$ADMIN_DB_URL" -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE terraviva_app LOGIN PASSWORD 'terraviva_app' NOSUPERUSER NOBYPASSRLS NOCREATEROLE" \
+            -c "CREATE DATABASE terraviva_app OWNER terraviva_app" \
+            -c "CREATE DATABASE terraviva_reglas OWNER terraviva_app"
+
       - name: Migrar y sembrar la base
         run: |
           npm run db:migrate
@@ -101,9 +111,8 @@ jobs:
 
       - name: Pruebas de las reglas de la base (en una base aparte)
         env:
-          DATABASE_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_reglas
+          DATABASE_URL: postgresql://terraviva_app:terraviva_app@localhost:5432/terraviva_reglas
         run: |
-          psql "postgresql://terraviva:terraviva@localhost:5432/terraviva_ci" -c "CREATE DATABASE terraviva_reglas"
           npm run db:migrate
           npm run db:seed
           npm run test:reglas -w @terraviva/db

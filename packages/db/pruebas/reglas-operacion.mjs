@@ -223,6 +223,8 @@ await rechaza('…ni se borra', () => db.obligacionCumplimiento.delete({ where: 
 await rechaza('…ni se borra la obligación que lo tiene', () => db.obligacionPermiso.delete({ where: { id: oblR.id } }), /Foreign key|violates|obligacion_cumplimientos/i);
 
 console.log('\n10. Portal de clientes: usuarios del cliente y barrera en la base');
+const [rolBase] = await db.$queryRaw`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`;
+prueba('la base se usa con un usuario sin superusuario ni BYPASSRLS (si no, la RLS no actúa)', !rolBase.rolsuper && !rolBase.rolbypassrls, JSON.stringify(rolBase));
 const rolPortal = await db.rol.findFirstOrThrow({ where: { empresaId: E, nombre: 'Cliente (portal)' } });
 const datosPortal = (x) => ({ empresaId: E, rolId: rolPortal.id, nombre: 'Portal reglas', documento: '9' + sufijo, email: `portal.${x}.${sufijo}@reglas.test`, passwordHash: 'x', clienteId: cliente.id, perfilPortal: 'CONSULTA' });
 await rechaza('un usuario del portal lleva su perfil (y uno de oficina no lo lleva)', () => db.usuario.create({ data: { ...datosPortal('a'), perfilPortal: null } }), /chk_usuario_portal/);

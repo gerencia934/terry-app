@@ -144,7 +144,9 @@ export class PortalService {
         tarifas: { orderBy: { vigenteDesde: 'desc' }, select: { precioUnitario: true, vigenteDesde: true, vigenteHasta: true, metrica: { select: { abreviacion: true } } } },
       } });
       if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
-      return d;
+      // La clave interna del archivo no sale del servidor: el cliente solo sabe si la ficha está en el expediente
+      const { fichaSeguridadUrl, ...resto } = d;
+      return { ...resto, tieneFichaSeguridad: !!fichaSeguridadUrl };
     });
   }
 
@@ -408,11 +410,14 @@ class PortalController {
   @Post('usuarios/:id/invitacion') reenviar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviarInvitacion(a, a.clienteId!, id); }
 }
 
-/** La oficina de Terra Viva da acceso al portal a cada cliente (su primer administrador) desde la ficha del cliente. */
+/**
+ * La oficina de Terra Viva da acceso al portal a cada cliente (su primer administrador) desde la ficha del cliente.
+ * Son datos personales (Ley 1581): los ve y gestiona solo quien administra clientes.
+ */
 @Controller('clientes/:clienteId/usuarios-portal')
 class UsuariosPortalOficinaController {
   constructor(private readonly s: PortalService) {}
-  @Get() listar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string) { return this.s.usuarios(a, c); }
+  @Permiso('clientes.editar') @Get() listar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string) { return this.s.usuarios(a, c); }
   @Permiso('clientes.editar') @Post() crear(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, c, b); }
   @Permiso('clientes.editar') @Patch(':id') editar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarUsuario)) b: z.infer<typeof EditarUsuario>) { return this.s.editarUsuario(a, c, id, b); }
   @Permiso('clientes.editar') @Post(':id/invitacion') reenviar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviarInvitacion(a, c, id); }

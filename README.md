@@ -58,6 +58,11 @@ Cámbiela después del primer ingreso (Olvidé mi contraseña).
 usuarios → declaraciones → tarifas. Las plantillas están en `docs/plantillas`. Se suben en Excel o en CSV (el separador se
 detecta solo), y un cargue de declaraciones equivocado se puede deshacer: sus declaraciones quedan anuladas, no se borran.
 
+**Usuario de la base y portal de clientes.** El usuario que crea la imagen de PostgreSQL de Docker es superusuario, y
+PostgreSQL deja que un superusuario se salte la seguridad por filas (RLS), la segunda barrera del portal de clientes. En
+su computador el API solo lo advierte al arrancar. En producción (`NODE_ENV=production`) no arranca así: debe conectarse
+con un usuario sin superusuario ni BYPASSRLS, como ya lo hacen las pruebas automáticas de GitHub.
+
 ### Sin Docker (PostgreSQL instalado en el equipo)
 
 Cree la base `terraviva`, copie `apps/api/.env.example` como `apps/api/.env` con su `DATABASE_URL` y ejecute:
@@ -74,7 +79,7 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-320 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
+322 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
 límites de peticiones, roles, aislamiento entre empresas, clientes y sedes, tarifas, permisos y gestores aliados, flota e inspecciones, usuarios (invitación, inactivar cierra sesiones), inicio, indicadores y recepción en planta, importación de Excel y CSV (también deshacer un cargue),
 declaraciones (crear, completar y editar desde el formulario de 8 secciones) y permisos ambientales,
 residuos no autorizados, inspección vehicular, tarifas, auditoría (con IP e inmutable) y la cadena operativa completa:
@@ -89,7 +94,7 @@ Reglas de la cadena operativa escritas directamente en la base (sin API), sobre 
 DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:reglas -w @terraviva/db
 ```
 
-76 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
+77 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
 conciliación, actas, descargue en planta, las reglas de cumplimiento de la gerencia, deshacer un cargue, el historial de cumplimiento de obligaciones y los usuarios del portal de clientes (perfil, sedes y RLS).
 
 **En GitHub** (`.github/`), cada cambio en `main` o en una rama `fase-*`, y cada pull request, corre solo:

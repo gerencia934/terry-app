@@ -100,7 +100,7 @@ interface DeclFila {
   sucursales: { sucursal: { id: string; codigo: string | null; nombre: string } }[]; disposiciones: { principal: boolean; disposicion: { nombre: string } }[]; precio: Precio | null;
 }
 interface DeclDetalle extends Omit<DeclFila, 'sucursales' | 'precio'> {
-  composicion: string | null; descripcionProceso: string | null; descripcionServicio: string | null; estadoFisico: string | null; fichaSeguridadUrl: string | null;
+  composicion: string | null; descripcionProceso: string | null; descripcionServicio: string | null; estadoFisico: string | null; tieneFichaSeguridad: boolean;
   observaciones: string | null; aprobadaEn: string | null; responsabilidadAceptada: boolean; aceptadaEn: string | null;
   categoria: { nombre: string } | null; tipoResiduo: { nombre: string } | null; codigoY: { codigo: string; descripcion: string } | null; codigoA: { codigo: string; descripcion: string } | null;
   tipoEmbalaje: { nombre: string } | null; sucursales: { activa: boolean; sucursal: { codigo: string | null; nombre: string } }[];
@@ -173,7 +173,7 @@ function DetalleDeclaracion({ id }: { id: string }) {
           ['Embalaje', d.tipoEmbalaje?.nombre ?? '—'],
           ...(d.esPeligroso ? [['Corriente Y / código A', [d.codigoY && `${d.codigoY.codigo} ${d.codigoY.descripcion}`, d.codigoA && `${d.codigoA.codigo} ${d.codigoA.descripcion}`].filter(Boolean).join(' · ') || '—'] as [string, ReactNode]] : []),
           ['Composición', d.composicion ?? '—'], ['Proceso que lo genera', d.descripcionProceso ?? '—'],
-          ['Ficha de datos de seguridad', d.fichaSeguridadUrl ? 'En el expediente de Terra Viva' : 'No cargada'],
+          ['Ficha de datos de seguridad', d.tieneFichaSeguridad ? 'En el expediente de Terra Viva' : 'No cargada'],
         ] as [string, ReactNode][] : [['Descripción', d.descripcionServicio ?? '—'] as [string, ReactNode]]),
         ['Frecuencia', d.frecuenciaDias ? `Cada ${d.frecuenciaDias} días${d.cantidadFrecuencia ? ` · ${cant(d.cantidadFrecuencia)} por servicio` : ''}` : 'A solicitud'],
         ['Tratamiento', d.disposiciones.map((x) => `${x.disposicion.nombre}${x.principal && d.disposiciones.length > 1 ? ' (principal)' : ''}`).join(' · ') || '—'],

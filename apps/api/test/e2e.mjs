@@ -976,7 +976,8 @@ const portalA = r.json;
 prueba('la oficina (Comercial) da acceso al portal: usuario del cliente con invitación para crear su contraseña', r.status === 201 && portalA.email === 'portal.a@cliente-a.test'
   && !!(await db.passwordReset.findFirst({ where: { usuarioId: portalA.id } })), JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', `/clientes/${clienteA.id}/usuarios-portal`, { token: thseq, cuerpo: { email: 'otro@cliente-a.test', nombre: 'Otro Usuario', documento: '52111333' } });
-prueba('…sin «clientes.editar» (HSEQ) no se da acceso → 403', r.status === 403, String(r.status));
+const listaHseq = await llamar('GET', `/clientes/${clienteA.id}/usuarios-portal`, { token: thseq });
+prueba('…sin «clientes.editar» (HSEQ) no se da acceso ni se ven sus datos personales → 403', r.status === 403 && listaHseq.status === 403, `${r.status} ${listaHseq.status}`);
 await db.usuario.update({ where: { id: portalA.id }, data: { passwordHash: await hashFijo('PortalA2026!') } });
 const sesionA = await entrarPortal('portal.a@cliente-a.test', 'PortalA2026!');
 const tPA = sesionA.accessToken;
@@ -1015,6 +1016,8 @@ prueba('portal: «quién soy» trae su cliente, su perfil y sus sedes', r.status
 r = await llamar('GET', '/portal/declaraciones?porPagina=200', { token: tPA });
 prueba('…ve todas sus declaraciones (y solo las suyas)', r.status === 200 && r.json.total === declsA && r.json.filas.every((d) => d.id !== declB.id), `${r.json.total} vs ${declsA}`);
 const unaDeclA = r.json.filas[0];
+r = await llamar('GET', `/portal/declaraciones/${unaDeclA.id}`, { token: tPA });
+prueba('…su detalle, sin claves internas de archivos', r.status === 200 && r.json.id === unaDeclA.id && !('fichaSeguridadUrl' in r.json) && typeof r.json.tieneFichaSeguridad === 'boolean', JSON.stringify(Object.keys(r.json)).slice(0, 200));
 r = await llamar('GET', '/portal/manifiestos?porPagina=200', { token: tPA });
 prueba('…sus manifiestos grabados', r.status === 200 && mfsA.length > 0 && mfsA.every((m) => r.json.filas.some((x) => x.id === m.id)), `${r.json.total} vs ${mfsA.length}`);
 r = await llamar('GET', '/portal/certificados?porPagina=200', { token: tPA });
@@ -1048,7 +1051,10 @@ const [lB1, lB2, lB3, lB4, lB5] = await Promise.all([
 prueba('…y en sus listados, filtros e informes no aparece nada del cliente A', lB1.json.total === 0 && lB2.json.total === 0 && lB3.json.total === 0
   && lB4.json.every((u) => u.id !== portalA.id) && lB5.json.lineas.length === 0, JSON.stringify([lB1.json.total, lB2.json.total, lB3.json.total, lB4.json.length, lB5.json.lineas?.length]));
 
-// Barrera 2: la base de datos (RLS) no deja ver otro cliente aunque la consulta lo pida
+// Barrera 2: la base de datos (RLS) no deja ver otro cliente aunque la consulta lo pida.
+// PostgreSQL no aplica la RLS a un superusuario ni a un usuario con BYPASSRLS: la prueba (como producción) usa uno sin ellos.
+const [rolBase] = await db.$queryRaw`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`;
+prueba('la base se usa con un usuario sin superusuario ni BYPASSRLS (si no, la RLS no actúa)', !rolBase.rolsuper && !rolBase.rolbypassrls, JSON.stringify(rolBase));
 const conCliente = (clienteId, fn) => db.$transaction(async (tx) => { await tx.$executeRaw`SELECT set_config('app.cliente_id', ${clienteId}, true)`; return fn(tx); });
 const vistoPorB = await conCliente(clienteB.id, async (tx) => ({
   declsA: await tx.declaracion.count({ where: { clienteId: clienteA.id } }), mfsA: await tx.manifiesto.count({ where: { clienteId: clienteA.id } }),

@@ -69,7 +69,9 @@ sedes (`usuario_sucursales`). Consulta y descarga solo lo suyo, con doble barrer
 2. **Base de datos (RLS).** Las consultas del portal corren en una transacción con `app.cliente_id`; las políticas
    `rls_portal_cliente` (clientes, sedes, declaraciones, solicitudes, manifiestos, conciliaciones, actas, cargues,
    usuarios y sus tablas hijas, con FORCE) solo dejan ver y escribir las filas de ese cliente, aunque el API tuviera
-   un error. Sin `app.cliente_id` (personal de Terra Viva) todo se ve como antes.
+   un error. Sin `app.cliente_id` (personal de Terra Viva) todo se ve como antes. PostgreSQL no aplica la RLS a un
+   superusuario ni a un usuario con BYPASSRLS: el API debe conectarse con un usuario sin esos privilegios (en producción
+   no arranca si no, y las pruebas automáticas lo verifican). FORCE hace que aplique también al dueño de las tablas.
 
 Las descargas usan un **enlace firmado de 5 minutos** (`/descargas/<token>`, clave propia distinta de la de las
 sesiones), que el API entrega solo después de verificar que el documento es del cliente y de sus sedes; al servirlo
