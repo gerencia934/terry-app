@@ -74,6 +74,12 @@ class CumplimientoService {
     ]);
     return { arl, eps, especificaciones, causales, destinos, etapas };
   }
+  /** Conductores y auxiliares activos, para asignarlos a las rutas. */
+  personal(a: Actor) {
+    return this.db.usuario.findMany({ where: { empresaId: a.empresaId, activo: true, OR: [{ esConductor: true }, { esAuxiliar: true }] }, orderBy: { nombre: 'asc' },
+      select: { id: true, nombre: true, esConductor: true, esAuxiliar: true, licenciaVence: true, cursoMpVence: true } });
+  }
+  zonas(a: Actor) { return this.db.zona.findMany({ where: { empresaId: a.empresaId }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true, color: true } }); }
   estadosRecorrido(a: Actor) { return this.db.estadoRecorrido.findMany({ where: { empresaId: a.empresaId }, orderBy: { orden: 'asc' } }); }
   elementosChequeo(a: Actor) { return this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ grupo: 'asc' }, { nombre: 'asc' }] }); }
 }
@@ -88,6 +94,8 @@ class CumplimientoController {
   @Get('catalogos/residuos') residuos(@ActorActual() a: Actor) { return this.s.residuos(a); }
   @Get('catalogos/operacion') operacion(@ActorActual() a: Actor) { return this.s.operacion(a); }
   @Get('vehiculos') vehiculos(@ActorActual() a: Actor) { return this.s.vehiculos(a); }
+  @Get('personal') personal(@ActorActual() a: Actor) { return this.s.personal(a); }
+  @Get('zonas') zonas(@ActorActual() a: Actor) { return this.s.zonas(a); }
   @Get('estados-recorrido') estados(@ActorActual() a: Actor) { return this.s.estadosRecorrido(a); }
   @Get('elementos-chequeo') elementos(@ActorActual() a: Actor) { return this.s.elementosChequeo(a); }
 

@@ -15,6 +15,12 @@ import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
 import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor } from './pages/CampoServidor';
+import { ProgramacionServidor, ProgramacionTablaServidor, SeguimientoServidor } from './pages/torre/Programacion';
+import { ManifiestosServidor } from './pages/torre/Manifiestos';
+import { ConciliacionServidor } from './pages/torre/Conciliacion';
+import { ActasServidor } from './pages/torre/Actas';
+import { SolicitudesServidor } from './pages/torre/Solicitudes';
+import Verificar from './pages/Verificar';
 
 function Screen() {
   const { route } = useRouter();
@@ -22,6 +28,7 @@ function Screen() {
     case 'login': return <Login />;
     case 'recuperar': return <Recuperar />;
     case 'restablecer': return <Restablecer />;
+    case 'verificar': return <Verificar />; // pública: código QR de los certificados (sin sesión)
   }
   // En modo servidor, sin sesión se vuelve al ingreso.
   if (MODO_REAL && !sesionActual()) return <Login />;
@@ -39,16 +46,16 @@ function Screen() {
       case 'declaraciones': return MODO_REAL ? <DeclaracionesServidor /> : <Declaraciones />;
       case 'tarifas': return <Precios />;
       case 'exportar': return <Exportable />;
-      case 'solicitudes': return <Solicitudes />;
-      case 'por-confirmar': return <PorConfirmar />;
-      case 'programacion': return <Programacion />;
-      case 'programacion-tabla': return <ProgramacionTabla />;
-      case 'seguimiento': return <Seguimiento />;
+      case 'solicitudes': return MODO_REAL ? <SolicitudesServidor key="todas" /> : <Solicitudes />;
+      case 'por-confirmar': return MODO_REAL ? <SolicitudesServidor key="por-confirmar" porConfirmar /> : <PorConfirmar />; // key: cada vista con sus filtros
+      case 'programacion': return MODO_REAL ? <ProgramacionServidor /> : <Programacion />;
+      case 'programacion-tabla': return MODO_REAL ? <ProgramacionTablaServidor /> : <ProgramacionTabla />;
+      case 'seguimiento': return MODO_REAL ? <SeguimientoServidor /> : <Seguimiento />;
       case 'inspecciones': return <Inspecciones />;
-      case 'manifiestos': return <Manifiestos />;
-      case 'recepcion': return <Recepcion />;
+      case 'manifiestos': return MODO_REAL ? <ManifiestosServidor /> : <Manifiestos />;
+      case 'recepcion': return MODO_REAL ? <ConciliacionServidor /> : <Recepcion />;
       case 'inventario': return <Inventario />;
-      case 'certificados': return <Certificados />;
+      case 'certificados': return MODO_REAL ? <ActasServidor /> : <Certificados />;
       case 'permisos': return <Permisos />;
       case 'indicadores': return <Indicadores />;
       case 'informes': return <Informes />;

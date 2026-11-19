@@ -57,7 +57,8 @@ class ActasService {
     if (!x) throw new NotFoundException({ mensaje: 'Acta no encontrada.' });
     return x;
   }
-  private urlVerificacion(codigo: string) { return `${this.cfg.get('WEB_URL', { infer: true }).replace(/\/$/, '')}/verificar/${codigo}`; }
+  /** Enlace del QR. Va con «#» para que abra en cualquier hosting estático, sin reglas de reescritura. */
+  private urlVerificacion(codigo: string) { return `${this.cfg.get('WEB_URL', { infer: true }).replace(/\/$/, '')}/#verificar/${codigo}`; }
 
   /** Líneas de conciliaciones aprobadas del cliente que aún no están en un acta. */
   private wherePendientes(empresaId: string, clienteId: string, desde?: Date, hasta?: Date): Prisma.ConciliacionItemWhereInput {

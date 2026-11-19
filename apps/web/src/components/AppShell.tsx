@@ -26,7 +26,7 @@ export const GRUPOS: Grupo[] = [
   { id: 'campo', label: 'Campo y HSEQ', items: [
     { route: 'inspecciones', label: 'Inspecciones vehiculares', icon: ClipboardCheck }, { route: 'manifiestos', label: 'Manifiestos de transporte', icon: FileStack }] },
   { id: 'planta', label: 'Planta Los Pinos', items: [
-    { route: 'recepcion', label: 'Recepción y pesaje', icon: Scale, desc: 'Origen contra báscula' }, { route: 'inventario', label: 'Inventario', icon: Boxes },
+    { route: 'recepcion', label: 'Conciliación', icon: Scale, desc: 'Cargado contra báscula, precios y factura' }, { route: 'inventario', label: 'Inventario', icon: Boxes },
     { route: 'certificados', label: 'Certificados', icon: Award }] },
   { id: 'cumplimiento', label: 'Cumplimiento', items: [{ route: 'permisos', label: 'Permisos ambientales', icon: ShieldCheck }] },
   { id: 'analisis', label: 'Análisis', items: [{ route: 'indicadores', label: 'Indicadores', icon: BarChart3 }, { route: 'informes', label: 'Informes', icon: FileSpreadsheet }] },
@@ -36,7 +36,7 @@ export const GRUPOS: Grupo[] = [
     { route: 'catalogos', label: 'Catálogos', icon: ListTree }, { route: 'etapas', label: 'Etapas del recorrido', icon: Milestone }, { route: 'empresa', label: 'Datos de la empresa', icon: Building2 }] },
 ];
 /** Secciones que ya leen y escriben en el servidor (el resto se conecta en la fase 1b). */
-const CONECTADAS = new Set<RouteName>(['declaraciones', 'importar']);
+const CONECTADAS = new Set<RouteName>(['declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
 const TODOS = GRUPOS.flatMap((g) => g.items.map((i) => ({ ...i, grupo: g.label })));
 
 export function Logo({ className = 'h-9', onDark }: { className?: string; onDark?: boolean }) {

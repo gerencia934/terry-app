@@ -225,14 +225,20 @@ const archivoForm = (bytes, nombre, campos = {}) => { const f = new FormData(); 
 const descargar = async (ruta, token) => { const x = await fetch(API + ruta, { headers: { authorization: `Bearer ${token}` } }); return { status: x.status, tipo: x.headers.get('content-type'), buf: Buffer.from(await x.arrayBuffer()) }; };
 const ops = (await llamar('GET', '/catalogos/operacion', { token: T8 })).json;
 prueba('catálogo operativo: ARL, EPS, especificaciones, causales y destinos', ops.arl?.length >= 5 && ops.eps?.length >= 5 && ops.especificaciones?.length >= 1 && ops.destinos?.some((d) => d.esPropio));
+r = await llamar('GET', '/personal', { token: T8 });
+prueba('lista de conductores y auxiliares para programar (sin correos ni documentos)', r.status === 200 && r.json.some((u) => u.nombre === 'Conductor E2E' && u.esConductor) && !JSON.stringify(r.json).includes('@'), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', '/zonas', { token: T8 });
+prueba('lista de zonas con su color', r.status === 200 && r.json.length >= 1 && /^#[0-9A-Fa-f]{6}$/.test(r.json[0].color));
 
 r = await llamar('POST', '/solicitudes', { token: T8, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-25', items: [{ declaracionId: lodo.id, cantidadEstimada: 500, jornada: 'AM' }] } });
 const solB = r.json;
 r = await llamar('GET', '/programacion/pendientes', { token: T8 });
 prueba('la solicitud aprobada aparece en «pendientes por programar» con su contador', r.status === 200 && r.json.some((s) => s.id === solB.id && s.pendientes === 1), JSON.stringify(r.json).slice(0, 200));
-r = await llamar('POST', '/rutas', { token: T8, cuerpo: { codigo: `R-E2E-B${Date.now() % 100000}`, fechaProgramada: '2026-11-25', solicitudes: [solB.id] } });
-prueba('programar una ruta sin vehículo ni conductor («sin recursos»)', r.status === 201, JSON.stringify(r.json));
+r = await llamar('POST', '/rutas', { token: T8, cuerpo: { fechaProgramada: '2026-11-25', horaProgramada: '07:30', solicitudes: [solB.id] } });
+prueba('programar una ruta sin vehículo ni conductor («sin recursos»), con código automático y hora', r.status === 201 && /^R-20261125-\d{2}$/.test(r.json.codigo) && r.json.horaProgramada?.slice(11, 16) === '07:30', JSON.stringify(r.json));
 const rutaB = r.json;
+r = await llamar('POST', '/rutas', { token: T8, cuerpo: { codigo: rutaB.codigo, fechaProgramada: '2026-11-25', solicitudes: [solB.id] } });
+prueba('un código de ruta repetido se explica', r.status === 400 && /Ya existe una ruta/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('PATCH', `/rutas/${rutaB.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: enCamino.id } });
 prueba('…no sale sin vehículo y conductor → 409', r.status === 409 && /vehículo y conductor/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('PATCH', `/rutas/${rutaB.id}`, { token: T8, cuerpo: { vehiculoId: veh.id, conductorId: yo.id, valorFlete: 350000, horaProgramada: '07:30' } });
@@ -303,6 +309,7 @@ const actaB = r.json;
 r = await llamar('POST', `/actas/${actaB.id}/emitir`, { token: T8 });
 prueba('emitir: copia fija con soporte legal (Res. 0632-2023) y PDF', r.status === 201 && r.json.estado === 'EMITIDA' && r.json.pdfUrl && JSON.stringify(r.json.contenido).includes('0632-2023'), JSON.stringify(r.json).slice(0, 300));
 const codigo = r.json.codigoVerificacion;
+prueba('el QR lleva a la página pública de verificación', r.json.urlVerificacion?.endsWith(`/#verificar/${codigo}`), r.json.urlVerificacion);
 const pdf = await descargar(`/actas/${actaB.id}/pdf`, T8);
 prueba('el certificado se descarga en PDF', pdf.status === 200 && pdf.buf.subarray(0, 4).toString() === '%PDF' && pdf.buf.length > 3000);
 r = await llamar('GET', `/verificar/${codigo}`);
@@ -330,6 +337,31 @@ prueba('con ARL y EPS el descargue se graba', r.status === 201 && r.json.estado 
 r = await llamar('POST', `/manifiestos/${mfD.id}/anular`, { token: T8, cuerpo: { causalId: (await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL' } })).id } });
 const lineaD = await db.solicitudItem.findFirst({ where: { solicitudId: solD.id } });
 prueba('anular el descargue: sin conciliación y la línea vuelve a pendiente', r.status === 201 && !(await db.conciliacion.findUnique({ where: { manifiestoId: mfD.id } })) && lineaD.estado === 'PENDIENTE');
+
+// Torre de control (3-D): programación por línea, quitar de la ruta, descartar y actas de aliados
+r = await llamar('POST', '/solicitudes', { token: T8, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-27', items: [{ declaracionId: lodo.id, cantidadEstimada: 200 }, { declaracionId: lodo.id, cantidadEstimada: 300 }] } });
+const [l1, l2] = await db.solicitudItem.findMany({ where: { solicitudId: r.json.id }, orderBy: { cantidadEstimada: 'asc' } });
+r = await llamar('POST', '/rutas', { token: T8, cuerpo: { fechaProgramada: '2026-11-27', items: [l1.id] } });
+prueba('programar una sola línea de la solicitud', r.status === 201 && (await db.solicitudItem.findUnique({ where: { id: l2.id } })).estado === 'PENDIENTE', JSON.stringify(r.json));
+const rutaT = r.json;
+r = await llamar('POST', `/rutas/${rutaT.id}/items`, { token: T8, cuerpo: { items: [l2.id] } });
+prueba('agregar la otra línea a la ruta: misma sede, misma parada', r.status === 201 && r.json.agregadas === 1 && (await db.rutaParada.count({ where: { rutaId: rutaT.id } })) === 1, JSON.stringify(r.json));
+const riT = await db.rutaItem.findFirst({ where: { rutaId: rutaT.id, solicitudItemId: l2.id, liberado: false } });
+r = await llamar('DELETE', `/rutas/${rutaT.id}/items/${riT.id}`, { token: T8 });
+prueba('quitar una línea de la ruta: vuelve a «por programar»', r.status === 200 && (await db.solicitudItem.findUnique({ where: { id: l2.id } })).estado === 'PENDIENTE', JSON.stringify(r.json));
+const causalT = await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL' } });
+r = await llamar('PATCH', `/solicitudes/items/${l1.id}/descartar`, { token: T8, cuerpo: { causalId: causalT.id } });
+prueba('una línea programada no se descarta (primero se quita de la ruta) → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('PATCH', `/solicitudes/items/${l2.id}/descartar`, { token: T8, cuerpo: { causalId: causalT.id } });
+prueba('descartar una línea pendiente con su causal', r.status === 200 && r.json.estado === 'DESCARTADO', JSON.stringify(r.json));
+const aliado = await db.proveedor.create({ data: { empresaId: suc.empresaId ?? (await db.cliente.findUnique({ where: { id: suc.clienteId } })).empresaId, nit: '900555111', razonSocial: 'Gestor aliado E2E', esDestino: true } });
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF\n');
+const camposAliado = { clienteId: suc.clienteId, destinoId: aliado.id, tipo: 'APROVECHAMIENTO', periodoDesde: '2026-11-01', periodoHasta: '2026-11-30' };
+r = await llamar('POST', '/actas/cargar', { token: T8, form: archivoForm(Buffer.from('esto no es un PDF'), 'falso.pdf', camposAliado) });
+prueba('cargar como acta de aliado un archivo que no es PDF → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', '/actas/cargar', { token: T8, form: archivoForm(PDF, 'acta-aliado.pdf', camposAliado) });
+prueba('cargar el acta de un gestor aliado: queda emitida y descargable', r.status === 201 && r.json.origen === 'CARGADA' && r.json.estado === 'EMITIDA'
+  && (await descargar(`/actas/${r.json.id}/pdf`, T8)).buf.subarray(0, 4).toString() === '%PDF', JSON.stringify(r.json).slice(0, 200));
 
 r = await llamar('GET', '/informes/rutas/rendimiento?desde=2026-11-25&hasta=2026-11-25', { token: T8 });
 const rend = r.json.rutas?.find((x) => x.rutaId === rutaB.id);

@@ -11,6 +11,10 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icono.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./icono.svg" />
+    <script>
+      // Enlaces «…/verificar/<código>» (QR de certificados): se abren como «…/#verificar/<código>», que funciona en cualquier hosting.
+      (function () { var m = location.pathname.match(/^(.*\/)verificar\/([0-9a-fA-F]{24})\/?$/); if (m) location.replace(m[1] + '#verificar/' + m[2].toLowerCase()); })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700;800&display=swap" />

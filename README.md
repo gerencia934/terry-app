@@ -73,9 +73,10 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-95 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
+109 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
 declaraciones y permisos ambientales, residuos no autorizados, inspección vehicular, tarifas, auditoría y la cadena
-operativa completa: ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con QR e informes.
+operativa completa: programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con
+QR, actas de aliados e informes.
 
 Reglas de la cadena operativa escritas directamente en la base (sin API), sobre una base migrada y sembrada:
 
@@ -96,6 +97,23 @@ vehículo, etapas con kilometraje, manifiestos con fotos, báscula y firma táct
 - **Sin señal:** descargue la ruta del día con señal (en planta) y trabaje normal. Todo queda en el teléfono y se envía
   solo al recuperar la conexión.
 - **Detalle técnico:** `docs/operacion/MODELO_OPERACION.md`, sección 7.
+
+## Torre de control (oficina)
+
+En modo servidor, la oficina maneja la cadena completa:
+- **Logística:**
+  - **Solicitudes** y **Por confirmar:** crear, aprobar o cancelar.
+  - **Programación:** calendario de rutas y líneas aprobadas por programar.
+  - **Programación en tabla** y **Seguimiento** del día.
+- **Campo y HSEQ:** **Manifiestos**, con fotos, firma, PDF escaneado y anulación.
+- **Planta Los Pinos:**
+  - **Conciliación:** bandeja y grilla con totales en vivo, aprobación y factura.
+  - **Certificados:** emitir con QR, descargar varios en ZIP y cargar actas de aliados.
+
+**Código QR de los certificados.** Lleva a `<web>/#verificar/<código>`. Esa página es pública: cualquiera confirma si el
+documento es auténtico, sin entrar a TERRY-GO y sin ver datos del cliente. Para que el enlace del QR sea el correcto,
+ponga en `WEB_URL` (en `apps/api/.env`) la dirección pública de la web. Detalle: `docs/operacion/MODELO_OPERACION.md`,
+sección 8.
 
 ## Modo demostración
 

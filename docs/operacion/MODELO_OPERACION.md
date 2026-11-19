@@ -225,10 +225,58 @@ Se probó en el navegador en tamaño de celular contra la API: inspección, sali
 - **Rutas nuevas para la app:** `GET preoperacionales?vehiculoId&fecha` (inspección del día del vehículo) y
   `PATCH manifiestos/:id/items/:itemId` (corregir la cantidad recogida en campo).
 
-## 8. Lo que sigue
+## 8. Fase 3-D: torre de control (hecha, 18-11-2026)
 
-- **3-D · Torre de control (escritorio):**
-  - calendario de rutas y programación por línea;
-  - bandeja y grilla de conciliación;
-  - actas con descarga masiva;
-  - página pública de verificación del QR.
+La oficina maneja toda la cadena desde el computador, y las pantallas también se adaptan al celular. Está en
+`apps/web/src/pages/torre/` y `apps/web/src/pages/Verificar.tsx`.
+
+Se probó en el navegador contra la API, de punta a punta:
+1. crear y aprobar una solicitud;
+2. programar dos líneas en una ruta nueva y quitar una;
+3. asignar vehículo y conductor a una ruta que no los tenía;
+4. abrir el manifiesto y ver uno ya grabado, con su firma;
+5. conciliar con una diferencia del −7,7 % (pide justificación), aprobar y registrar la factura;
+6. crear y emitir el acta, y abrir su QR en la página pública.
+
+| Pantalla (menú) | Qué hace |
+|---|---|
+| **Solicitudes** | Lista por fecha, cliente, aprobación y avance. **Nueva solicitud:** cliente, fecha, residuos autorizados y activos del cliente con la sede, cantidad y jornada de cada línea, y el total estimado con la tarifa vigente. Se puede aprobar al crearla. En el detalle: aprobar, no aprobar o cancelar con causal |
+| **Por confirmar** | Solo lo que espera aprobación comercial, incluidas las recurrentes que crea TERRY-GO al grabar un manifiesto. Al aprobar pasan a «por programar» |
+| **Programación** | **Calendario del mes:** las rutas con el color del vehículo (gris si no tiene); clic en el número del día para ver todas sus rutas. **Pestaña «Por programar»:** líneas aprobadas agrupadas por solicitud, con buscador, zona y aviso de atrasadas; se programan líneas sueltas o solicitudes completas en una ruta nueva (una parada por sede) o se agregan a una ruta del mismo día; también se descarta una línea con su causal |
+| **Programación en tabla** | Las rutas por rango, con filtros de vehículo, conductor y zona, y los costos de flete en Excel |
+| **Seguimiento** | Las rutas de hoy con su etapa, salida, kilometraje y paradas atendidas. Se actualiza cada minuto |
+| **Detalle de ruta** (en las tres anteriores) | Asignar o cambiar vehículo, conductor (avisa si la licencia está vencida), auxiliar, zona, fecha, hora y flete; quitar una línea, que vuelve a «por programar»; abrir los manifiestos; ver la última ubicación GPS en el mapa |
+| **Manifiestos** | Lista por fechas, estado, tipo y número. El detalle trae las líneas con su valor, la báscula, las horas, la firma y las fotos. Desde ahí se adjunta el PDF escaneado, se anula con causal o motivo, o se va a su conciliación |
+| **Conciliación** (antes «Recepción y pesaje») | **Bandeja:** por defecto, las que están por conciliar, con totales de cobro, compra y neto. **Grilla por manifiesto:** cantidad conciliada, precio, negociación, forma de pago, justificación, orden de compra, factura y pago. La diferencia % y los totales se recalculan mientras se escribe. Acciones: igualar cantidades, guardar, aprobar, reabrir y Excel. Ya aprobada, solo cambian la factura y el pago |
+| **Certificados** | Filtros por cliente, estado, periodo y número. Se eligen varias actas y se descargan en un ZIP. **Nueva acta:** cliente, periodo y tipo; propone las líneas aprobadas sin certificar; crea el borrador, al que se le pueden quitar líneas, y al emitirlo genera el PDF con QR. Además: ver o descargar el PDF, anular, copiar el enlace de verificación y cargar el PDF del acta de un gestor aliado |
+| **Verificación pública** | Página sin sesión que abre el QR. Dice si el documento es auténtico y vigente, está anulado o no existe, con número, tipo, periodo, fecha y emisor. Nunca muestra datos del generador. El código también se puede escribir a mano |
+
+**Cambios en la API:**
+- **Listas nuevas:** `GET personal` (conductores y auxiliares activos, sin correos ni documentos) y `GET zonas`, para
+  asignar rutas.
+- **`POST rutas`:**
+  - el código es opcional: se numera solo como `R-AAAAMMDD-01`;
+  - acepta hora y observaciones;
+  - explica si el código ya existe;
+  - valida que vehículo, conductor y zona sean de la empresa (antes solo lo hacía al editar).
+- **Enlace del QR:** ahora es `…/#verificar/<código>`, que abre en cualquier hosting sin reglas de reescritura. Los
+  enlaces viejos `…/verificar/<código>` también sirven: la página los convierte.
+- **Pruebas e2e:** pasan de 98 a 109. Las nuevas cubren las listas, el código automático, programar por línea, agregar
+  y quitar líneas de una ruta, descartar y cargar actas de aliados.
+
+**Decisiones que tomé y conviene confirmar:**
+- **Nombre en el menú:** «Recepción y pesaje» pasó a llamarse **Conciliación**. Es la misma tarea (lo cargado contra la
+  báscula) y ahora incluye precios y factura.
+- **Bandeja de conciliación:** abre en las que están **en borrador**, con servicio en los últimos 60 días.
+- **Nueva acta:** propone el **mes anterior** completo y todas sus líneas aprobadas sin certificar.
+
+## 9. Lo que sigue
+
+- **Pendientes de la torre de control:**
+  - descargues en planta desde la oficina: hoy la API los soporta, pero falta el formulario de la solicitud de descarga
+    y su manifiesto;
+  - recorrido GPS completo en un mapa (hoy se ve el último punto);
+  - mover rutas arrastrándolas en el calendario.
+- **Conectar lo que aún es de ejemplo:** clientes, tarifas, inspecciones (vista de oficina), inventario, permisos,
+  indicadores y ajustes.
+- **Declaraciones, fase B:** el formulario de 8 secciones.

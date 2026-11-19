@@ -49,8 +49,11 @@ export function ColorBadge({ color, children }: { color: string; children: React
 const ESTADO_TONE: Record<string, Tone> = {
   AUTORIZADA: 'ok', PENDIENTE: 'warn', RECHAZADA: 'bad', INACTIVA: 'neutral', BORRADOR: 'info',
   PROGRAMADA: 'info', RECOLECTADA: 'ok', CANCELADA: 'bad', EMITIDO: 'info', EN_TRANSITO: 'info', RECIBIDO: 'warn', CERRADO: 'ok',
+  // Cadena operativa (servidor)
+  EN_CURSO: 'info', PROGRAMADO: 'info', REALIZADO: 'ok', DESCARTADO: 'neutral', ANULADO: 'bad', ANULADA: 'bad', APROBADA: 'ok', EMITIDA: 'ok',
+  ATENDIDA: 'ok', NO_ATENDIDA: 'bad', ABONADA: 'info', PAGADA: 'ok', NO_APROBADA: 'bad',
 };
-const ESTADO_LABEL: Record<string, string> = { EN_TRANSITO: 'En tránsito', RECIBIDO: 'Recibido en planta' };
+const ESTADO_LABEL: Record<string, string> = { EN_TRANSITO: 'En tránsito', RECIBIDO: 'Recibido en planta', EN_CURSO: 'En curso', NO_ATENDIDA: 'No atendida', NO_APROBADA: 'No aprobada' };
 export const EstadoBadge = ({ estado }: { estado: string }) => (
   <Badge tone={ESTADO_TONE[estado] ?? 'neutral'} dot>{ESTADO_LABEL[estado] ?? estado.charAt(0) + estado.slice(1).toLowerCase()}</Badge>
 );

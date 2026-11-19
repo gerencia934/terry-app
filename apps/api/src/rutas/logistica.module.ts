@@ -34,9 +34,10 @@ const EstadoSol = z.object({ estado: z.nativeEnum(EstadoSolicitud), causalCancel
 const AprobacionSol = z.object({ aprobacion: z.enum(['APROBADA', 'NO_APROBADA']), observaciones: z.string().max(2000).optional() });
 const FiltroRuta = Rango.extend({ vehiculoId: z.string().uuid().optional(), zonaId: z.string().uuid().optional(), conductorId: z.string().uuid().optional() });
 const CrearRuta = z.object({
-  codigo: z.string().min(3).max(20), fechaProgramada: z.coerce.date(), zonaId: z.string().uuid().optional(),
+  codigo: z.string().trim().toUpperCase().min(3).max(20).optional(), // sin código: R-AAAAMMDD-NN
+  fechaProgramada: z.coerce.date(), horaProgramada: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora HH:MM').optional(), zonaId: z.string().uuid().optional(),
   vehiculoId: z.string().uuid().optional(), conductorId: z.string().uuid().optional(), auxiliarId: z.string().uuid().optional(), // «sin recursos»: se asignan después
-  interna: z.boolean().default(false), valorFlete: z.number().nonnegative().optional(),
+  interna: z.boolean().default(false), valorFlete: z.number().nonnegative().optional(), observaciones: z.string().max(2000).optional(),
   // Programación por solicitud completa (sus líneas pendientes) o por líneas sueltas
   solicitudes: z.array(z.string().uuid()).default([]), items: z.array(z.string().uuid()).default([]),
 }).refine((b) => b.solicitudes.length + b.items.length > 0, { message: 'Elija al menos una solicitud o una línea.' });
@@ -148,16 +149,22 @@ class LogisticaService {
 
   /** Programa líneas de solicitud en una ruta: una parada por sede. La base valida aprobación, estado y sede de cada línea. */
   async crearRuta(a: Actor, b: z.infer<typeof CrearRuta>) {
+    if (b.codigo && (await this.db.ruta.findFirst({ where: { empresaId: a.empresaId, codigo: b.codigo } }))) throw new BadRequestException({ mensaje: `Ya existe una ruta con el código ${b.codigo}: use otro o déjelo vacío para numerarla sola.` });
     const lineas = await this.db.solicitudItem.findMany({
       where: { OR: [{ id: { in: b.items } }, { solicitudId: { in: b.solicitudes }, estado: 'PENDIENTE' }], solicitud: { empresaId: a.empresaId } },
       orderBy: [{ solicitud: { numero: 'asc' } }, { id: 'asc' }],
     });
     if (!lineas.length) throw new BadRequestException({ mensaje: 'No hay líneas pendientes por programar en lo elegido.' });
     if (b.items.some((id) => !lineas.find((l) => l.id === id))) throw new BadRequestException({ mensaje: 'Alguna línea no existe o no es de su empresa.' });
+    await this.validarRecursos(a, { vehiculo: b.vehiculoId, conductor: b.conductorId, auxiliar: b.auxiliarId, zona: b.zonaId });
+    const codigo = b.codigo ?? (await this.codigoLibre(a.empresaId, b.fechaProgramada));
     const inicial = await this.db.estadoRecorrido.findFirst({ where: { empresaId: a.empresaId, activo: true }, orderBy: { orden: 'asc' } });
     const sedes = [...new Set(lineas.map((l) => l.sucursalId))];
     return this.db.$transaction(async (tx) => {
-      const r = await tx.ruta.create({ data: { empresaId: a.empresaId, codigo: b.codigo, fechaProgramada: b.fechaProgramada, zonaId: b.zonaId, vehiculoId: b.vehiculoId, conductorId: b.conductorId, auxiliarId: b.auxiliarId, interna: b.interna, valorFlete: b.valorFlete, estadoRecorridoId: inicial?.id } });
+      const r = await tx.ruta.create({ data: {
+        empresaId: a.empresaId, codigo, fechaProgramada: b.fechaProgramada, horaProgramada: b.horaProgramada ? new Date(`1970-01-01T${b.horaProgramada}:00Z`) : undefined,
+        zonaId: b.zonaId, vehiculoId: b.vehiculoId, conductorId: b.conductorId, auxiliarId: b.auxiliarId, interna: b.interna, valorFlete: b.valorFlete, observaciones: b.observaciones, estadoRecorridoId: inicial?.id,
+      } });
       for (const [i, sucursalId] of sedes.entries()) {
         const p = await tx.rutaParada.create({ data: { rutaId: r.id, sucursalId, orden: i + 1 } });
         for (const l of lineas.filter((x) => x.sucursalId === sucursalId)) await tx.rutaItem.create({ data: { rutaId: r.id, paradaId: p.id, solicitudItemId: l.id } });
@@ -165,6 +172,20 @@ class LogisticaService {
       await this.audit.registrar(a, 'ruta', r.id, 'CREAR', undefined, { codigo: r.codigo, paradas: sedes.length, lineas: lineas.length }, tx);
       return r;
     });
+  }
+
+  /** Vehículo, conductor, auxiliar y zona deben ser de la empresa y estar activos. */
+  private async validarRecursos(a: Actor, ids: { vehiculo?: string | null; conductor?: string | null; auxiliar?: string | null; zona?: string | null }) {
+    if (ids.vehiculo && !(await this.db.vehiculo.findFirst({ where: { id: ids.vehiculo, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Vehículo no encontrado o inactivo.' });
+    for (const u of [ids.conductor, ids.auxiliar]) if (u && !(await this.db.usuario.findFirst({ where: { id: u, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Conductor o auxiliar no encontrado.' });
+    if (ids.zona && !(await this.db.zona.findFirst({ where: { id: ids.zona, empresaId: a.empresaId } }))) throw new BadRequestException({ mensaje: 'Zona no encontrada.' });
+  }
+
+  /** Código automático de la ruta: R-AAAAMMDD-NN (consecutivo del día). */
+  private async codigoLibre(empresaId: string, fecha: Date) {
+    const base = `R-${fecha.toISOString().slice(0, 10).replace(/-/g, '')}-`;
+    const usados = new Set((await this.db.ruta.findMany({ where: { empresaId, codigo: { startsWith: base } }, select: { codigo: true } })).map((r) => r.codigo));
+    for (let n = 1; ; n++) { const c = `${base}${String(n).padStart(2, '0')}`; if (!usados.has(c)) return c; }
   }
 
   private async rutaPropia(a: Actor, id: string) {
@@ -177,10 +198,7 @@ class LogisticaService {
   async editarRuta(a: Actor, id: string, b: z.infer<typeof EditarRuta>) {
     const r = await this.rutaPropia(a, id);
     if (r.estadoRecorrido?.esFinal) throw new BadRequestException({ mensaje: `La ruta ${r.codigo} ya terminó o fue cancelada.` });
-    const ids = { vehiculo: b.vehiculoId, conductor: b.conductorId, auxiliar: b.auxiliarId, zona: b.zonaId };
-    if (ids.vehiculo && !(await this.db.vehiculo.findFirst({ where: { id: ids.vehiculo, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Vehículo no encontrado o inactivo.' });
-    for (const u of [ids.conductor, ids.auxiliar]) if (u && !(await this.db.usuario.findFirst({ where: { id: u, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Conductor o auxiliar no encontrado.' });
-    if (ids.zona && !(await this.db.zona.findFirst({ where: { id: ids.zona, empresaId: a.empresaId } }))) throw new BadRequestException({ mensaje: 'Zona no encontrada.' });
+    await this.validarRecursos(a, { vehiculo: b.vehiculoId, conductor: b.conductorId, auxiliar: b.auxiliarId, zona: b.zonaId });
     const { horaProgramada, ...resto } = b;
     const act = await this.db.ruta.update({ where: { id }, data: { ...resto, horaProgramada: horaProgramada === undefined ? undefined : horaProgramada === null ? null : new Date(`1970-01-01T${horaProgramada}:00Z`) } });
     await this.audit.registrar(a, 'ruta', id, 'EDITAR', undefined, b);

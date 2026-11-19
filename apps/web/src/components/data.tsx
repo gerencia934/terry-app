@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, ChevronRight as Chevron, SlidersHorizontal, Columns3 } from 'lucide-react';
 import { Button, Sheet } from './ui';
 import { cx } from '../lib/format';
@@ -141,8 +141,13 @@ export function FilterBar({ children, active, onClear }: { children: ReactNode; 
 export interface CalEvent { id: string; date: string; label: string; sub?: string; color: string }
 const DOW = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-export function MonthCalendar({ events, initial, today, onEvent, legend }: { events: CalEvent[]; initial: string; today: string; onEvent?: (id: string) => void; legend?: { label: string; color: string }[] }) {
+export function MonthCalendar({ events, initial, today, onEvent, legend, onMonth, onDay }: {
+  events: CalEvent[]; initial: string; today: string; onEvent?: (id: string) => void; legend?: { label: string; color: string }[];
+  /** Avisa el mes visible («AAAA-MM») para cargar sus datos. */ onMonth?: (ym: string) => void;
+  /** Clic en el número del día (por ejemplo, para programar esa fecha). */ onDay?: (date: string) => void;
+}) {
   const [ym, setYm] = useState(() => { const [y, m] = initial.split('-').map(Number); return { y, m: m - 1 }; });
+  useEffect(() => { onMonth?.(`${ym.y}-${String(ym.m + 1).padStart(2, '0')}`); }, [ym.y, ym.m]); // eslint-disable-line react-hooks/exhaustive-deps
   const byDay = useMemo(() => {
     const map = new Map<string, CalEvent[]>();
     events.forEach((e) => { const a = map.get(e.date) ?? []; a.push(e); map.set(e.date, a); });
@@ -180,7 +185,9 @@ export function MonthCalendar({ events, initial, today, onEvent, legend }: { eve
             const inMonth = d >= 1 && d <= days; const date = inMonth ? iso(d) : ''; const ev = byDay.get(date) ?? [];
             return (
               <div key={i} className={cx('min-h-[104px] border-b border-r border-line p-1.5', !inMonth && 'bg-surface-2/50', i % 7 === 6 && 'border-r-0')}>
-                {inMonth && <div className={cx('num mb-1 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[12px]', date === today ? 'bg-brand font-semibold text-on-brand' : 'text-muted')}>{d}</div>}
+                {inMonth && (onDay
+                  ? <button onClick={() => onDay(date)} title="Ver o programar este día" className={cx('num mb-1 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[12px] hover:ring-2 hover:ring-brand/40', date === today ? 'bg-brand font-semibold text-on-brand' : 'text-muted')}>{d}</button>
+                  : <div className={cx('num mb-1 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[12px]', date === today ? 'bg-brand font-semibold text-on-brand' : 'text-muted')}>{d}</div>)}
                 <div className="flex flex-col gap-1">
                   {ev.slice(0, 3).map((e) => (
                     <button key={e.id} onClick={() => onEvent?.(e.id)} title={`${e.label}${e.sub ? ' · ' + e.sub : ''}`}

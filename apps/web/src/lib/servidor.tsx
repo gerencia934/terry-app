@@ -1,0 +1,75 @@
+// Utilidades de las pantallas de oficina conectadas al API (torre de control).
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, ErrorApi } from './api';
+import { cx } from './format';
+
+/** Mensaje legible de un error del API. */
+export const msg = (e: unknown, def = 'No se pudo completar.') => (e instanceof ErrorApi ? e.message : def);
+
+/** Carga un recurso del API (o nada si la ruta es null) y permite recargarlo. Ignora respuestas viejas. */
+export function useApi<T>(ruta: string | null) {
+  const [datos, setDatos] = useState<T | null>(null);
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const turno = useRef(0);
+  const recargar = useCallback(async () => {
+    if (!ruta) { setDatos(null); return; }
+    const t = ++turno.current;
+    setCargando(true); setError('');
+    try { const d = await api<T>(ruta); if (t === turno.current) setDatos(d); }
+    catch (e) { if (t === turno.current) setError(msg(e, 'No se pudo cargar.')); }
+    finally { if (t === turno.current) setCargando(false); }
+  }, [ruta]);
+  useEffect(() => { recargar(); }, [recargar]);
+  return { datos, error, cargando, recargar, setDatos };
+}
+
+/** Descarga un archivo protegido del API (PDF, Excel, ZIP) con la sesión actual. */
+export async function bajarArchivo(ruta: string, nombre: string) {
+  const blob = await api<Blob>(ruta, { blob: true });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nombre; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+}
+
+/** Abre un PDF protegido en otra pestaña. La pestaña se abre antes de esperar para que el navegador no la bloquee. */
+export async function verPdf(ruta: string) {
+  const w = window.open('', '_blank');
+  try {
+    const blob = await api<Blob>(ruta, { blob: true });
+    const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+    if (w) w.location.href = url; else window.location.assign(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (e) { w?.close(); throw e; }
+}
+
+/** Dirección local (blob:) de un archivo guardado en el servidor: fotos, firmas. */
+export function useArchivoUrl(clave: string | null | undefined) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setUrl(null);
+    if (!clave) return;
+    let vivo = true; let u: string | null = null;
+    api<Blob>(`/archivos?clave=${encodeURIComponent(clave)}`, { blob: true })
+      .then((b) => { if (!vivo) return; u = URL.createObjectURL(b); setUrl(u); })
+      .catch(() => undefined);
+    return () => { vivo = false; if (u) URL.revokeObjectURL(u); };
+  }, [clave]);
+  return url;
+}
+export function ImagenProtegida({ clave, alt, className }: { clave: string; alt: string; className?: string }) {
+  const url = useArchivoUrl(clave);
+  return url ? <img src={url} alt={alt} className={className} /> : <div className={cx('animate-pulse rounded-lg bg-surface-2', className)} aria-label={`Cargando ${alt}`} />;
+}
+
+// ---------- Fechas (siempre en hora de Colombia) ----------
+export const hoyCo = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+export const sumarDias = (iso: string, n: number) => { const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+export const finDeMes = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
+export const horaCo = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false }) : '—');
+export const fechaHoraCo = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '—');
+/** Columna TIME de la base («1970-01-01T07:30:00.000Z») → «07:30». */
+export const horaColumna = (iso: string | null | undefined) => (iso ? iso.slice(11, 16) : '');
+
+/** Número con hasta 2 decimales, o «—». */
+export const cant = (v: string | number | null | undefined) => (v === null || v === undefined || v === '' ? '—' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }));

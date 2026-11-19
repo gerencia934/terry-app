@@ -12,11 +12,19 @@ export const ROUTES = [
   'indicadores', 'informes',
   'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'catalogos', 'etapas',
   'campo', 'campo-preop', 'campo-parada', 'campo-envios',
+  'verificar', // pública: #verificar/<código del QR>
 ] as const;
 export type RouteName = (typeof ROUTES)[number];
 const VALID = new Set<string>(ROUTES);
 
-const read = (): RouteName => { const h = location.hash.replace('#', ''); return (VALID.has(h) ? h : 'login') as RouteName; };
+/** Código del QR en «#verificar/<código>» o en la ruta «/verificar/<código>». */
+export const codigoVerificacion = () =>
+  (location.hash.match(/^#verificar\/([0-9a-fA-F]+)/)?.[1] ?? location.pathname.match(/\/verificar\/([0-9a-fA-F]+)\/?$/)?.[1] ?? '').toLowerCase();
+const read = (): RouteName => {
+  const h = location.hash.replace('#', '');
+  if (h.startsWith('verificar') || /\/verificar\/[0-9a-fA-F]+\/?$/.test(location.pathname)) return 'verificar';
+  return (VALID.has(h) ? h : 'login') as RouteName;
+};
 
 const Ctx = createContext<{ route: RouteName; go: (r: RouteName) => void }>({ route: 'login', go: () => {} });
 
