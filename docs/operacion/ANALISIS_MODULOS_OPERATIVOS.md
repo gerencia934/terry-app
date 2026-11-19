@@ -1,6 +1,6 @@
 # TERRY-GO — Núcleo operativo: análisis y plan (propuesta)
 
-Estado: análisis del 19-11-2026. La fase **3-A** (modelo y reglas) ya está hecha: ver `MODELO_OPERACION.md`.
+Estado: análisis del 18-11-2026. La fase **3-A** (modelo y reglas) ya está hecha: ver `MODELO_OPERACION.md`.
 
 Este documento cruza tres fuentes:
 - la operación de Terra Viva;
@@ -97,7 +97,7 @@ Hoy la conciliación cuelga del **acta**, y se debe mover: la conciliación es *
 | | Bloque legal automático: resoluciones de la CAS según los tratamientos aplicados |
 | | Actas de gestores aliados cargadas como archivo (quién la cargó y cuándo); descarga masiva en ZIP |
 
-### 2.6 Detalles adicionales de funcionalidad (revisión de las capturas de referencia, 19-11-2026)
+### 2.6 Detalles adicionales de funcionalidad (revisión de las capturas de referencia, 18-11-2026)
 
 Solo se anota funcionalidad. El diseño, los textos y los formatos son propios de TERRY-GO.
 

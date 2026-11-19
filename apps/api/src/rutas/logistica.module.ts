@@ -54,6 +54,7 @@ const Rastreo = z.object({ puntos: z.array(z.object({
 })).min(1).max(1000) });
 const Pendientes = z.object({ clienteId: z.string().uuid().optional(), zonaId: z.string().uuid().optional(), q: z.string().max(100).optional(), limite: z.coerce.number().int().min(1).max(200).default(50) });
 const Descartar = z.object({ causalId: z.string().uuid() });
+const FiltroPreop = z.object({ vehiculoId: z.string().uuid().optional(), fecha: z.coerce.date() });
 const EstadoRuta = z.object({ estadoRecorridoId: z.string().uuid(), kmInicial: z.number().int().optional(), kmFinal: z.number().int().optional() });
 const Preop = z.object({
   vehiculoId: z.string().uuid(), rutaId: z.string().uuid().optional(), fechaProgramada: z.coerce.date(), km: z.number().int().nonnegative(), auxiliarId: z.string().uuid().optional(), observaciones: z.string().max(500).optional(),
@@ -271,6 +272,12 @@ class LogisticaService {
   }
 
   /** Preoperacional: si un elemento crítico sale NO_OK, queda «no aprobado» y la ruta no puede salir. */
+  /** Inspecciones del día de un vehículo (para la app del conductor). */
+  inspecciones(a: Actor, f: z.infer<typeof FiltroPreop>) {
+    return this.db.preoperacional.findMany({ where: { vehiculo: { empresaId: a.empresaId }, vehiculoId: f.vehiculoId, fechaProgramada: f.fecha }, orderBy: { fechaReal: 'desc' },
+      select: { id: true, numero: true, vehiculoId: true, rutaId: true, fechaProgramada: true, fechaReal: true, aprobado: true, km: true, observaciones: true } });
+  }
+
   async preoperacional(a: Actor, b: z.infer<typeof Preop>) {
     const els = await this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, id: { in: b.respuestas.map((r) => r.elementoId) } } });
     if (els.length !== b.respuestas.length) throw new BadRequestException({ mensaje: 'Hay elementos de chequeo que no existen.' });
@@ -313,6 +320,7 @@ class LogisticaController {
   @Get('rutas/:id/rastreo') verRastreo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.verRastreo(a, id); }
   @Permiso('rutas.programar') @Post('rutas') crearRuta(@ActorActual() a: Actor, @Body(new Zod(CrearRuta)) b: z.infer<typeof CrearRuta>) { return this.s.crearRuta(a, b); }
   @Permiso('rutas.operar') @Patch('rutas/:id/estado') estadoRuta(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EstadoRuta)) b: z.infer<typeof EstadoRuta>) { return this.s.estadoRuta(a, id, b); }
+  @Get('preoperacionales') inspecciones(@ActorActual() a: Actor, @Query(new Zod(FiltroPreop)) f: z.infer<typeof FiltroPreop>) { return this.s.inspecciones(a, f); }
   @Permiso('rutas.operar') @Post('preoperacionales') preop(@ActorActual() a: Actor, @Body(new Zod(Preop)) b: z.infer<typeof Preop>) { return this.s.preoperacional(a, b); }
   @Permiso('rutas.operar') @Patch('paradas/:id') parada(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Parada)) b: z.infer<typeof Parada>) { return this.s.parada(a, id, b); }
 }

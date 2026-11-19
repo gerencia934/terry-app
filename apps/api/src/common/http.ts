@@ -117,3 +117,9 @@ export const paginar = (q: { pagina?: number; porPagina?: number }) => {
   const pagina = Math.max(Number(q.pagina) || 1, 1);
   return { take: porPagina, skip: (pagina - 1) * porPagina, pagina, porPagina };
 };
+
+/**
+ * Fecha calendario de HOY en Colombia, para columnas DATE (medianoche UTC de ese día).
+ * Evita el error de tomar la fecha UTC: después de las 7 p. m. en Colombia, en UTC ya es mañana.
+ */
+export const fechaColombia = (d: Date = new Date()) => new Date(`${d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })}T00:00:00Z`);

@@ -31,7 +31,10 @@ const TITULOS = {
   CONCILIACION: 'ACTA DE CONCILIACIÓN DE RESIDUOS',
 } as const;
 const VERDE = '#0C481E', VERDE_CLARO = '#E2F1E5', GRIS = '#55615B';
+/** Fechas calendario (DATE): se leen tal cual. */
 const fecha = (iso: string) => { const [a, m, d] = iso.slice(0, 10).split('-'); return `${d}/${m}/${a}`; };
+/** Instantes (emisión): se muestran en hora de Colombia, no en UTC. */
+const fechaInstante = (iso: string) => new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' });
 const num = (v: number) => v.toLocaleString('es-CO', { maximumFractionDigits: 2 });
 
 export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
@@ -51,7 +54,7 @@ export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
   doc.fillColor(VERDE).font('Helvetica-Bold').fontSize(15).text(c.emisor.razonSocial, x0, 50, { width: ancho - 120 });
   doc.font('Helvetica').fontSize(9).fillColor(GRIS).text(`NIT ${c.emisor.nit} · Planta: ${c.destino.razonSocial}${c.destino.municipio ? ` (${c.destino.municipio})` : ''}`, { width: ancho - 120 });
   doc.moveDown(0.8).font('Helvetica-Bold').fontSize(13).fillColor('black').text(TITULOS[c.tipo], { width: ancho - 120 });
-  doc.font('Helvetica').fontSize(10).text(`N.º ${c.numero} · Emitido el ${fecha(c.emitidaEn)} · Periodo ${fecha(c.periodo.desde)} a ${fecha(c.periodo.hasta)}`, { width: ancho - 120 });
+  doc.font('Helvetica').fontSize(10).text(`N.º ${c.numero} · Emitido el ${fechaInstante(c.emitidaEn)} · Periodo ${fecha(c.periodo.desde)} a ${fecha(c.periodo.hasta)}`, { width: ancho - 120 });
   if (c.origen === 'CARGADA') doc.fontSize(8).fillColor(GRIS).text('Acta emitida por el gestor aliado; el original se conserva adjunto en TERRY-GO.', { width: ancho - 120 });
   doc.y = Math.max(doc.y, 168);
 

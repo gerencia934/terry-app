@@ -4,7 +4,7 @@
 
 export interface ItemCatalogo { codigo: string; nombre: string; descripcion?: string }
 
-/** Categorías del declarado (confirmadas por Terra Viva el 19-11-2026). */
+/** Categorías del declarado (confirmadas por Terra Viva el 18-11-2026). */
 export const CATEGORIAS: ItemCatalogo[] = [
   { codigo: 'RESPEL', nombre: 'Residuos peligrosos' },
   { codigo: 'NOPEL', nombre: 'Residuos no peligrosos' },
@@ -98,7 +98,7 @@ export const PERMISOS_CAS: { acto: string; alcance: string; disposiciones: strin
   { acto: 'Resolución 0235-2024', alcance: 'Disposición final de residuos de construcción y demolición (RCD)', disposiciones: ['RCD'], obligacion: ['Informe semestral de volúmenes recibidos en escombrera', 'semestral', '2026-12-15'] },
   { acto: 'Resolución 0632-2023', alcance: 'Vertimientos a suelo y manejo de aguas residuales industriales, domésticas y lodos', disposiciones: ['BIO', 'ASP'], obligacion: ['Caracterización del vertimiento a suelo (laboratorio acreditado IDEAM)', 'semestral', '2026-11-30'] },
   { acto: 'Auto SAA No. 0244-21', alcance: 'Plan de contingencia para transporte de hidrocarburos, derivados y residuos peligrosos', disposiciones: ['TRA'], obligacion: ['Simulacro anual del plan de contingencia', 'anual', '2026-12-05'] },
-  // ACU: lo amparan los dos actos (respuesta de Terra Viva, 19-11-2026). Basta con que uno esté vigente.
+  // ACU: lo amparan los dos actos (respuesta de Terra Viva, 18-11-2026). Basta con que uno esté vigente.
   // Registre en cada uno su fecha de vencimiento real para que la regla de cobertura lo controle.
   { acto: 'OF-311-21', alcance: 'Gestión de aceite de cocina usado', disposiciones: ['ACU'], obligacion: ['Reporte trimestral de volúmenes de ACU gestionados', 'trimestral', '2027-01-10'] },
   { acto: 'Resolución 316 de 2018', alcance: 'Aprovechamiento de aceite de cocina usado (biodiésel)', disposiciones: ['ACU'], obligacion: ['Revisar obligaciones y vigencia de la Res. 316 de 2018', 'anual', '2027-01-10'] },

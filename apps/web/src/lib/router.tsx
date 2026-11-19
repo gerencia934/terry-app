@@ -11,7 +11,7 @@ export const ROUTES = [
   'permisos',
   'indicadores', 'informes',
   'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'catalogos', 'etapas',
-  'campo', 'campo-preop', 'campo-parada',
+  'campo', 'campo-preop', 'campo-parada', 'campo-envios',
 ] as const;
 export type RouteName = (typeof ROUTES)[number];
 const VALID = new Set<string>(ROUTES);

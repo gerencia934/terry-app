@@ -33,6 +33,9 @@ const Crear = z.object({
   items: z.array(Linea).max(200).default([]),
 });
 const DesdeRuta = z.object({ rutaId: id, paradaIds: z.array(id).default([]), destinoId: id.optional() });
+const EditarLinea = z.object({
+  cantidad: z.number().positive().refine(dosDecimales, 'Máximo 2 decimales.').optional(), embalajes: z.number().int().nonnegative().nullish(), observaciones: z.string().trim().max(300).nullish(),
+});
 const Actualizar = z.object({
   destinoId: id.optional(), tipoConciliacion: z.nativeEnum(TipoConciliacion).optional(), ordenCompra: texto(40), manifiestoCliente: texto(40),
   pesoEntrada: peso.nullish(), pesoSalida: peso.nullish(), pesoNeto: peso.nullish(), horaLlegada: z.coerce.date().nullish(), horaSalida: z.coerce.date().nullish(),
@@ -195,6 +198,15 @@ export class ManifiestosService {
     return item;
   }
 
+  /** Cantidad real recogida en campo (la base lo impide si el manifiesto ya está grabado). */
+  async editarLinea(a: Actor, id: string, itemId: string, b: z.infer<typeof EditarLinea>) {
+    await this.propio(a, id);
+    const r = await this.db.manifiestoItem.updateMany({ where: { id: itemId, manifiestoId: id }, data: b });
+    if (!r.count) throw new NotFoundException({ mensaje: 'Línea no encontrada.' });
+    await this.audit.registrar(a, 'manifiesto', id, 'EDITAR_LINEA', undefined, { itemId, ...b });
+    return this.db.manifiestoItem.findUnique({ where: { id: itemId } });
+  }
+
   async quitarLinea(a: Actor, id: string, itemId: string) {
     await this.propio(a, id);
     const r = await this.db.manifiestoItem.deleteMany({ where: { id: itemId, manifiestoId: id } }); // la base impide hacerlo si ya está grabado
@@ -268,6 +280,7 @@ class ManifiestosController {
   @Permiso('manifiestos.operar') @Post('desde-ruta') desdeRuta(@ActorActual() a: Actor, @Body(new Zod(DesdeRuta)) b: z.infer<typeof DesdeRuta>) { return this.s.desdeRuta(a, b); }
   @Permiso('manifiestos.operar') @Patch(':id') actualizar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Actualizar)) b: z.infer<typeof Actualizar>) { return this.s.actualizar(a, id, b); }
   @Permiso('manifiestos.operar') @Post(':id/items') agregar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Linea)) b: z.infer<typeof Linea>) { return this.s.agregarLinea(a, id, b); }
+  @Permiso('manifiestos.operar') @Patch(':id/items/:itemId') editarLinea(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body(new Zod(EditarLinea)) b: z.infer<typeof EditarLinea>) { return this.s.editarLinea(a, id, itemId, b); }
   @Permiso('manifiestos.operar') @Delete(':id/items/:itemId') quitar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string) { return this.s.quitarLinea(a, id, itemId); }
   @Permiso('manifiestos.operar') @Post(':id/evidencias') @UseInterceptors(archivo)
   evidencia(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Evidencia)) b: z.infer<typeof Evidencia>, @UploadedFile() f?: Express.Multer.File) { return this.s.evidencia(a, id, b, f); }

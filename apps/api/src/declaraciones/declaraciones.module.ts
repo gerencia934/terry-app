@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { EsquemaDeclaracion, faltantesParaAutorizar } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
-import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
+import { ActorActual, Permiso, Zod, fechaColombia, paginar, type Actor } from '../common/http';
 
 type Tx = Prisma.TransactionClient;
 type Datos = z.infer<typeof EsquemaDeclaracion>;
@@ -26,8 +26,8 @@ const Tarifas = z.object({
 /** Cómo queda cubierta legalmente cada disposición de la declaración (misma regla que fn_disposicion_cubierta). */
 export interface Cobertura { cubierto: boolean; mensaje: string; detalle: { codigo: string; nombre: string; cubierta: boolean; soporte: string }[] }
 
-const hoy = () => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d; };
-const vigente = () => ({ vigenteDesde: { lte: new Date() }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy() } }] });
+const hoy = () => fechaColombia();
+const vigente = () => ({ vigenteDesde: { lte: hoy() }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy() } }] });
 
 /** Relaciones que se devuelven en el listado. */
 const resumen = {
@@ -128,7 +128,7 @@ export class DeclaracionesService {
       } });
       await this.hijos(t, d.id, sedes, b);
       if (b.precio) await t.tarifa.create({ data: {
-        declaracionId: d.id, precioUnitario: b.precio.precioUnitario, metricaId: b.precio.metricaId ?? null, vigenteDesde: new Date(), asignadoPorId: a.id,
+        declaracionId: d.id, precioUnitario: b.precio.precioUnitario, metricaId: b.precio.metricaId ?? null, vigenteDesde: hoy(), asignadoPorId: a.id,
         tipoNegociacion: b.precio.tipoNegociacion ?? cliente.tipoNegociacion, formaPago: b.precio.formaPago ?? cliente.formaPago,
       } });
       await this.audit.registrar(a, 'declaracion', d.id, 'CREAR', undefined, { numero: d.numero, estado: d.estado, cargueId }, t);

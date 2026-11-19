@@ -71,6 +71,9 @@ r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: T, for
 prueba('declaraciones: 2 guardadas; rechazadas la de sede inexistente y la de código de catálogo inexistente', r.status === 201 && r.json.creadas === 2 && r.json.rechazadas === 2
   && JSON.stringify(r.json.filasRechazadas).includes('BARRIL'), JSON.stringify(r.json).slice(0, 400));
 const lote = await db.cargueMasivo.findUnique({ where: { id: r.json.cargueId }, include: { _count: { select: { declaraciones: true } } } });
+const tarifaLodo = await db.tarifa.findFirst({ where: { declaracion: { codigoInterno: 'RP-018' } }, orderBy: { vigenteDesde: 'asc' } });
+prueba('la tarifa rige desde HOY en Colombia (no la fecha UTC, que de noche ya es mañana)',
+  tarifaLodo?.vigenteDesde.toISOString().slice(0, 10) === new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }), tarifaLodo?.vigenteDesde.toISOString());
 prueba('el lote queda en cargues_masivos con hash del archivo y sus declaraciones', lote?.estado === 'CONFIRMADO' && lote.archivoHash?.length === 64 && lote._count.declaraciones === 2 && lote.tipoCargue === 'DECLARACIONES');
 r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: formDe(libroDecl, 'decl.xlsx') });
 prueba('subir otra vez el mismo archivo avisa y rechaza los códigos internos ya usados', r.status === 201 && r.json.avisos.length === 1 && r.json.resumen.validas === 0, JSON.stringify(r.json).slice(0, 300));
@@ -248,6 +251,10 @@ prueba('manifiesto de cargue desde la ruta, con consecutivo', r.status === 201 &
 const mfB = r.json[0];
 r = await llamar('GET', `/manifiestos/${mfB.id}`, { token: T8 });
 prueba('la línea trae precio de la tarifa, disposición principal y métrica', r.status === 200 && r.json.items.length === 1 && Number(r.json.items[0].precioUnitario) === 780 && r.json.items[0].disposicion?.codigo === 'BIO' && r.json.items[0].metrica?.abreviacion === 'kg', JSON.stringify(r.json.items?.[0]).slice(0, 300));
+r = await llamar('PATCH', `/manifiestos/${mfB.id}/items/${r.json.items[0].id}`, { token: T8, cuerpo: { embalajes: 4 } });
+prueba('en campo se corrige la línea (embalajes)', r.status === 200 && r.json.embalajes === 4, JSON.stringify(r.json));
+r = await llamar('GET', `/preoperacionales?vehiculoId=${veh.id}&fecha=2026-11-25`, { token: T8 });
+prueba('la app consulta la inspección del día del vehículo', r.status === 200 && r.json.some((p) => p.aprobado && /^INS-\d{4}-\d{5}$/.test(p.numero)), JSON.stringify(r.json).slice(0, 200));
 for (const n of [1, 2]) r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from(PNG, 'base64'), `foto${n}.png`, { tipo: 'FOTO' }) });
 prueba('dos fotos de evidencia', r.status === 201);
 r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from(PNG, 'base64'), 'foto3.png', { tipo: 'FOTO' }) });

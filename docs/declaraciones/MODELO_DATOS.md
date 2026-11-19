@@ -1,6 +1,6 @@
 # Módulo Declaraciones — Modelo de datos (Fase A)
 
-Estado: **aprobado y adoptado** (19-11-2026). La API, la importación de Excel y la web ya lo usan; 52 pruebas e2e OK.
+Estado: **aprobado y adoptado** (18-11-2026). La API, la importación de Excel y la web ya lo usan; 52 pruebas e2e OK.
 
 | Dónde | Contenido |
 |---|---|
@@ -11,7 +11,7 @@ Estado: **aprobado y adoptado** (19-11-2026). La API, la importación de Excel y
 | `packages/shared/src/declaraciones/catalogos.ts` | Catálogos con los datos reales de Terra Viva (los usan el seed, las plantillas y la demo) |
 | `packages/shared/src/declaraciones/esquema.ts` | Validación zod del formulario de 8 secciones (API y web) |
 
-## Decisiones sobre las preguntas abiertas (19-11-2026)
+## Decisiones sobre las preguntas abiertas (18-11-2026)
 
 | # | Pregunta | Decisión |
 |---|---|---|

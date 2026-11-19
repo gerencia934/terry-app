@@ -2,7 +2,7 @@ import { Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Query
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
-import { ActorActual, Permiso, Publico, Zod, type Actor } from '../common/http';
+import { ActorActual, Permiso, Publico, Zod, fechaColombia, type Actor } from '../common/http';
 
 const dias = (f: Date) => Math.ceil((f.getTime() - Date.now()) / 86_400_000);
 export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
@@ -28,7 +28,7 @@ class CumplimientoService {
   /** Reglas de alerta. En producción las ejecuta también una tarea diaria que envía el resumen por correo. */
   async alertas(a: Actor): Promise<Alerta[]> {
     const lim30 = new Date(Date.now() + 30 * 86_400_000), lim45 = new Date(Date.now() + 45 * 86_400_000);
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0); const manana = new Date(hoy.getTime() + 86_400_000);
+    const hoy = fechaColombia(); const manana = new Date(hoy.getTime() + 86_400_000);
     const [obl, veh, per, pend, rutasHoy, preops] = await Promise.all([
       this.db.obligacionPermiso.findMany({ where: { cumplida: false, proximaFecha: { lte: lim30 }, permiso: { empresaId: a.empresaId } }, include: { permiso: true } }),
       this.db.vehiculo.findMany({ where: { empresaId: a.empresaId, activo: true, OR: [{ soatVence: { lte: lim30 } }, { rtmVence: { lte: lim30 } }, { polizaRcVence: { lte: lim30 } }] } }),

@@ -86,6 +86,17 @@ DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run t
 43 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
 conciliación, actas y descargue en planta.
 
+## App del conductor (celular, sin señal)
+
+Con `VITE_API_URL` definido, la ruta `#campo` es la app de campo conectada al API: ruta del día, inspección del
+vehículo, etapas con kilometraje, manifiestos con fotos, báscula y firma táctil, y la bandeja «Envíos».
+
+- **Instalar en el celular:** abra la web publicada (con `https`) en Chrome y elija «Instalar aplicación» o «Agregar a
+  pantalla de inicio». Desde ahí abre como app, incluso sin señal.
+- **Sin señal:** descargue la ruta del día con señal (en planta) y trabaje normal. Todo queda en el teléfono y se envía
+  solo al recuperar la conexión.
+- **Detalle técnico:** `docs/operacion/MODELO_OPERACION.md`, sección 7.
+
 ## Modo demostración
 
 Sin `VITE_API_URL`, la app usa datos de ejemplo (`apps/web/src/data/mock.ts`) y no guarda nada.

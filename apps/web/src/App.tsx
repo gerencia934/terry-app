@@ -14,6 +14,7 @@ import { Certificados, Inspecciones, Inventario, Manifiestos, Recepcion } from '
 import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
+import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor } from './pages/CampoServidor';
 
 function Screen() {
   const { route } = useRouter();
@@ -25,9 +26,11 @@ function Screen() {
   // En modo servidor, sin sesión se vuelve al ingreso.
   if (MODO_REAL && !sesionActual()) return <Login />;
   switch (route) {
-    case 'campo': return <CampoHoy />;
-    case 'campo-preop': return <CampoPreop />;
-    case 'campo-parada': return <CampoParada />;
+    // App del conductor: conectada al API (con cola sin señal) o de demostración
+    case 'campo': return MODO_REAL ? <CampoRutaServidor /> : <CampoHoy />;
+    case 'campo-preop': return MODO_REAL ? <CampoInspeccionServidor /> : <CampoPreop />;
+    case 'campo-parada': return MODO_REAL ? <CampoManifiestoServidor /> : <CampoParada />;
+    case 'campo-envios': return MODO_REAL ? <CampoEnviosServidor /> : <CampoHoy />;
   }
   const page = (() => {
     switch (route) {

@@ -1,0 +1,16 @@
+{
+  "name": "TERRY-GO · Terra Viva",
+  "short_name": "TERRY-GO",
+  "description": "Trazabilidad de residuos de Terra Viva: ruta del día, inspección, manifiestos y certificados.",
+  "lang": "es-CO",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F6F8F6",
+  "theme_color": "#1f7a3a",
+  "icons": [
+    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

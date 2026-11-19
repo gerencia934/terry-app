@@ -4,7 +4,7 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 
 ## Quién y cómo trabajar
 
-- Producto: **TERRY-GO**, nombre de la plataforma web y de la app de campo desde el 19-11-2026. «Terry» es la mascota de
+- Producto: **TERRY-GO**, nombre de la plataforma web y de la app de campo desde el 18-11-2026. «Terry» es la mascota de
   Terra Viva. La empresa sigue figurando como Terra Viva S.A.S. E.S.P. en logos, documentos legales y certificados. El
   prefijo interno de los paquetes (`@terraviva/...`) y el repositorio `terry-app` no cambian.
 - Cliente: **Terra Viva S.A.S. E.S.P.** (NIT 901.089.780-8), Sabana de Torres, Santander.
@@ -28,9 +28,10 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 |---|---|---|
 | 0 | Prototipo web, esquema y plantillas de Excel | `apps/web`, `docs/plantillas` |
 | 1 | API NestJS + Prisma + PostgreSQL. 37 pruebas e2e OK. Web conectada en ingreso, declaraciones e importación | rama `master` |
-| 3-A | **Núcleo operativo: modelo y reglas, aprobado** (20-11-2026). Cadena Solicitud → Ruta → Manifiesto → Conciliación → Acta; migración abierta | rama `fase-3-operacion` (leer `docs/operacion/MODELO_OPERACION.md`) |
-| 3-B | **API del núcleo operativo, hecha** (20-11-2026): manifiestos con firma, fotos y báscula; conciliación con totales y cartera; actas con PDF, QR y verificación pública; GPS sin señal; informes. 43 pruebas de reglas y 95 e2e OK | rama `fase-3-operacion` |
-| 2-A | **Modelo de datos de Declaraciones: aprobado y adoptado** (19-11-2026). 50 tablas, 3 migraciones, reglas en la base, catálogos reales en `packages/shared`, API e importación ajustadas; 52 pruebas e2e OK | rama `fase-2-declaraciones` (leer `docs/declaraciones/MODELO_DATOS.md`) |
+| 3-A | **Núcleo operativo: modelo y reglas, aprobado** (18-11-2026). Cadena Solicitud → Ruta → Manifiesto → Conciliación → Acta; migración abierta | rama `fase-3-operacion` (leer `docs/operacion/MODELO_OPERACION.md`) |
+| 3-B | **API del núcleo operativo, hecha** (18-11-2026): manifiestos con firma, fotos y báscula; conciliación con totales y cartera; actas con PDF, QR y verificación pública; GPS sin señal; informes. 43 pruebas de reglas y 95 e2e OK | rama `fase-3-operacion` |
+| 3-C | **App del conductor (PWA sin señal), hecha** (18-11-2026): ruta del día, inspección, etapas con kilometraje, manifiesto con cámara, báscula y firma, cola de envíos y GPS en lotes. 43 pruebas de reglas y 98 e2e OK | rama `fase-3-operacion` |
+| 2-A | **Modelo de datos de Declaraciones: aprobado y adoptado** (18-11-2026). 50 tablas, 3 migraciones, reglas en la base, catálogos reales en `packages/shared`, API e importación ajustadas; 52 pruebas e2e OK | rama `fase-2-declaraciones` (leer `docs/declaraciones/MODELO_DATOS.md`) |
 
 Stack:
 - Monorepo con npm workspaces.
@@ -50,7 +51,7 @@ En el equipo de Diego (Windows, sin Docker) hay Git, Node 22 y PostgreSQL 16 ins
 Es la parametrización de residuos y servicios por cliente. Tiene un formulario de 8 secciones y un cargue masivo
 para clientes directos. Se trabaja por fases y **se espera el visto bueno del usuario entre fases**:
 
-- **A. Esquema de base de datos.** ✅ Aprobado el 19-11-2026 y adoptado.
+- **A. Esquema de base de datos.** ✅ Aprobado el 18-11-2026 y adoptado.
 - **B. Siguiente.** Árbol de componentes del formulario de 8 secciones, más el estado y la validación con react-hook-form + zod.
   - El esquema zod ya existe: `packages/shared/src/declaraciones/esquema.ts` (`EsquemaDeclaracion`).
   - La API ya existe: `POST /declaraciones` y `GET /declaraciones/catalogos`.

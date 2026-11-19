@@ -1,6 +1,6 @@
 # TERRY-GO · Fase 3-A — Modelo de datos y reglas del núcleo operativo
 
-Estado: **aprobado** (20-11-2026) y con su API hecha (fase 3-B, sección 6), en la rama `fase-3-operacion`.
+Estado: **aprobado** (18-11-2026) y con su API hecha (fase 3-B, sección 6), en la rama `fase-3-operacion`.
 
 **Verificación:**
 - **Pruebas:** pasan las 40 de reglas en la base y las 52 de punta a punta.
@@ -136,7 +136,7 @@ Ninguna pantalla, API, app sin señal ni cargue puede saltárselas. Entre parén
 6. **Cargue de solicitudes por Excel:** crea solicitudes **pendientes de aprobación**. El cargue no reemplaza la decisión
    comercial.
 
-## 6. Fase 3-B: API (hecha, 20-11-2026)
+## 6. Fase 3-B: API (hecha, 18-11-2026)
 
 Pasan 43 pruebas de reglas y 95 de punta a punta. La sección 8 de las e2e recorre toda la cadena por la API.
 
@@ -187,13 +187,46 @@ Pasan 43 pruebas de reglas y 95 de punta a punta. La sección 8 de las e2e recor
 
   Pendiente confirmar con Terra Viva (pregunta 6 del análisis).
 
-## 7. Lo que sigue
+## 7. Fase 3-C: app del conductor (hecha, 18-11-2026)
 
-- **3-C · App del conductor (celular, sin señal):**
-  - ruta del día con cambio de etapa;
-  - inspección del vehículo;
-  - manifiesto con cámara, báscula y firma táctil;
-  - cola de envío cuando vuelve la señal.
+Funciona en el celular como app instalable (PWA) y **sin señal**. Está en `apps/web/src/pages/CampoServidor.tsx` y `apps/web/src/campo/`.
+Se probó en el navegador en tamaño de celular contra la API: inspección, salida con kilometraje, manifiesto con firma
+**grabado con la API apagada** y enviado solo al volver la conexión.
+
+| Pantalla | Qué hace |
+|---|---|
+| **Mi ruta** | Ruta del día (placa, código, etapa, auxiliar); aviso si falta la inspección; botones de etapa (pide el kilometraje al salir y al terminar); paradas con cliente, sede, residuos, «Cómo llegar» y estado del manifiesto; «Abrir los manifiestos de la ruta» (con señal) |
+| **Inspección** | Elementos por grupo con botones grandes Bien / Falla / No aplica; los críticos marcados; kilometraje; resultado al instante |
+| **Manifiesto** | Cantidad y embalajes por residuo; horas con «Marcar ahora»; báscula con neto automático; ARL y EPS del conductor tercero (descargues); 2 fotos desde la cámara (comprimidas); firma con el dedo; nombre e identificación; avisa exactamente qué falta antes de grabar |
+| **Envíos** | Estado de la señal y de la cola; «Enviar ahora»; las acciones rechazadas por el servidor quedan a la vista con su motivo, para reintentar o descartar |
+
+**Cómo funciona sin señal:**
+- **Paquete del día:** con señal (normalmente en planta), la app descarga la ruta, sus manifiestos, la inspección del
+  día y las listas, y lo guarda en el teléfono.
+- **Cola en el teléfono (IndexedDB):** guarda cada acción, incluidas las fotos, y la envía **en orden** cuando hay
+  conexión (al volver la señal, cada 30 segundos o con «Enviar ahora»).
+- **Rechazo del servidor:** si rechaza algo por una regla del negocio, esa acción y las siguientes del mismo manifiesto
+  esperan a que el conductor la revise.
+- **GPS:** se toma cada ~30 segundos solo mientras la ruta está en una etapa con rastreo y se envía en lotes. La base lo
+  acepta por la hora del punto, gracias al historial de etapas.
+- **Borrador del manifiesto:** se guarda mientras se diligencia, así que cerrar la app no borra lo escrito.
+- **PWA:** manifiesto, ícono propio y *service worker*. La app abre sin señal después de la primera visita, solo en la
+  versión publicada.
+
+**Límites conocidos:**
+- El GPS solo se toma con la app abierta: el navegador no permite rastreo en segundo plano. Para eso haría falta una app
+  nativa.
+- Los manifiestos se abren con señal, porque el consecutivo lo asigna el servidor.
+
+**Errores corregidos en esta fase:**
+- **Fechas en hora de Colombia.** Varias fechas se tomaban en hora UTC, y después de las 7 p. m. en Colombia ya era el
+  día siguiente: la tarifa nueva quedaba vigente «mañana», y la fecha de emisión del certificado salía corrida. Ahora se
+  usa la fecha de Colombia (`fechaColombia()`).
+- **Rutas nuevas para la app:** `GET preoperacionales?vehiculoId&fecha` (inspección del día del vehículo) y
+  `PATCH manifiestos/:id/items/:itemId` (corregir la cantidad recogida en campo).
+
+## 8. Lo que sigue
+
 - **3-D · Torre de control (escritorio):**
   - calendario de rutas y programación por línea;
   - bandeja y grilla de conciliación;
