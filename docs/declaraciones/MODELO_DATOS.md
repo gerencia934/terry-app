@@ -223,8 +223,8 @@ DeclaracionesServidor (lista con filtros y «Cargar más»)
 - Al completar una declaración convertida de la fase 1, deja de estar marcada como tal.
 - La auditoría guarda qué columnas cambiaron (antes y después), cuántas sedes y disposiciones quedaron y el precio.
 
-Falta la fase C (CSV, cargue desde el portal del cliente y reversión de lotes) y adjuntar la FDS como archivo; hoy es un
-enlace.
+La fase C (CSV y deshacer un cargue) está en §10. Falta el cargue desde el portal del cliente, cuando exista el portal, y
+adjuntar la FDS como archivo; hoy es un enlace.
 
 ## 9. Reglas de cumplimiento de las respuestas de la gerencia (19-11-2026)
 
@@ -283,3 +283,45 @@ Las preguntas están en `docs/PREGUNTAS_GERENCIA.md`. Esto quedó en el sistema,
   - constancia de ejecutoria de la Res. 000632;
   - certificado de calibración de la báscula;
   - política de datos.
+
+## 10. Fase C: cargue desde CSV y deshacer un cargue (hecha, 19-11-2026)
+
+**CSV.** Ajustes › Importar datos acepta la plantilla en Excel (.xlsx) o en CSV. Se lee en `packages/shared`
+(`importacion/csv.ts` y `planilla.ts`), igual en la web y en el API:
+- El formato se reconoce por el contenido, no por el nombre del archivo:
+  - un .xlsx es un ZIP;
+  - un Excel antiguo (.xls) o un archivo binario se rechazan, explicando cómo guardarlo.
+- El separador se detecta solo: punto y coma, coma, tabulador o barra. Se elige el que hace coincidir más encabezados
+  con la plantilla, y con un empate gana el punto y coma, que es el de Excel en Colombia. También se respeta la línea
+  `sep=;` que agrega Excel. El usuario puede fijarlo a mano en la revisión.
+- Las codificaciones aceptadas son:
+  - el «CSV UTF-8» de Excel (con BOM);
+  - el «CSV (delimitado por comas)» de Windows (Windows-1252), con las tildes intactas;
+  - UTF-16.
+- Comillas: una celda con varios valores (`"BIO;ASP"`), con comillas o con saltos de línea va entre comillas.
+- Plantilla en CSV: `GET importacion/plantillas/:id/archivo?formato=csv`, o el botón «En CSV».
+- `cargues_masivos` guarda el formato y el separador. Un CSV sin separador no se registra (`chk_cargue_formato`).
+
+**Deshacer un cargue** (`GET importacion/cargues/:id/reversion` muestra qué pasaría, y
+`POST importacion/cargues/:id/revertir` lo hace, con un motivo obligatorio):
+- **Alcance.** Solo los cargues de declaraciones. Los de clientes, sedes, precios, vehículos, usuarios y solicitudes
+  crean o actualizan registros: se corrigen con otro cargue o en su pantalla.
+- **Nada se borra.** Sus declaraciones quedan en el estado nuevo **ANULADA**:
+  - inactivas y como constancia;
+  - fuera del listado, salvo con el filtro «Anulada», que dice de qué cargue vienen y por qué se deshizo.
+- **Código libre.** El código interno de una anulada queda libre para volver a cargar el archivo corregido. El índice
+  único es parcial: `ux_decl_codigo_interno`, con `WHERE estado <> 'ANULADA'`.
+- **En uso.** No se deshace si alguna declaración ya está en una solicitud o un manifiesto: se inactiva desde su ficha.
+- **Quién.** Lo deshace quien lo cargó, si ninguna de sus declaraciones está autorizada. Si no, quien tenga el permiso
+  `importacion.revertir`: HSEQ y Administración.
+- **Reglas en la base** (migraciones `20261124000000` y `20261124000100`):
+  - una anulada no cambia más, ni sus sedes, disposiciones, precios, riesgos o etiquetado (`trg_decl_anulada`,
+    `fn_hijo_decl_anulada`);
+  - no se anula una declaración en uso;
+  - un lote solo se deshace si está confirmado, es de declaraciones y todas sus declaraciones quedaron anuladas en la
+    misma transacción;
+  - el lote exige quién, cuándo y un motivo de al menos 10 caracteres (`chk_cargue_revertido`) y después no cambia más
+    (`trg_cargue_revertido`).
+- La auditoría guarda el lote deshecho y la anulación de cada declaración.
+
+**Pendiente:** el cargue por el propio cliente desde su portal (fase 3, cuando exista el portal).

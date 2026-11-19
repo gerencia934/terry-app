@@ -31,6 +31,7 @@ enum EstadoDeclaracion {
   PENDIENTE // enviado, esperando revisión de Terra Viva
   AUTORIZADA // aprobado: solo así se puede activar y programar
   RECHAZADA
+  ANULADA // se deshizo el cargue que la creó: inactiva, sin cambios y con su código interno libre
 }
 
 enum TipoCliente {
@@ -79,6 +80,7 @@ enum EstadoCargue {
   VALIDADO // vista previa sin guardar
   CONFIRMADO // lote guardado
   FALLIDO
+  REVERTIDO // lote deshecho: sus declaraciones quedaron anuladas (nada se borra)
 }
 
 enum TipoNegociacion {
@@ -353,6 +355,7 @@ model Usuario {
   declaracionesAprobadas  Declaracion[]           @relation("DeclAprobadaPor")
   declaracionesAceptadas  Declaracion[]           @relation("DeclAceptadaPor")
   declaracionesRevision   Declaracion[]           @relation("DeclRevisionPedidaPor")
+  carguesRevertidos       CargueMasivo[]          @relation("CargueRevertidoPor")
   declaracionesCreadas    Declaracion[]           @relation("DeclCreadaPor")
 
   @@index([empresaId])
@@ -733,7 +736,8 @@ model Declaracion {
   manifiestoItems ManifiestoItem[]
 
   @@unique([empresaId, numero])
-  @@unique([clienteId, codigoInterno]) // varios NULL permitidos
+  // Código interno único por cliente entre las no anuladas: índice parcial ux_decl_codigo_interno (migración
+  // 20261124000100_cargues_csv_reversion; Prisma no describe índices parciales).
   @@index([empresaId, tipo, estado, activa])
   @@index([clienteId])
   @@index([lineaServicioId])
@@ -1369,26 +1373,31 @@ model Auditoria {
 // CARGUES MASIVOS (plantillas de Excel)
 // ---------------------------------------------------------------------
 model CargueMasivo {
-  id          String       @id @default(uuid()) @db.Uuid
-  empresaId   String       @map("empresa_id") @db.Uuid
-  plantilla   String       @db.VarChar(40) // clientes | sucursales | decl-residuos | decl-servicios | precios | vehiculos | usuarios | solicitudes
-  clienteId   String?      @map("cliente_id") @db.Uuid // cargue de un cliente directo o gestor
-  tipoCargue  TipoCargue?  @map("tipo_cargue")
-  formato     String       @default("XLSX") @db.VarChar(4) // XLSX | CSV
-  delimitador String?      @db.Char(1) // CSV: , ; | o tabulador
-  archivo     String       @db.VarChar(200)
-  archivoHash String?      @map("archivo_hash") @db.Char(64) // SHA-256: avisa si el mismo archivo ya se cargó
-  archivoUrl  String?      @map("archivo_url") // copia del original (S3) para auditoría
-  estado      EstadoCargue @default(VALIDADO)
-  filasLeidas Int          @map("filas_leidas")
-  filasOk     Int          @map("filas_ok")
-  filasError  Int          @map("filas_error")
-  errores     Json         @default("[]") // [{fila, columna, valor, mensaje}]
-  usuarioId   String       @map("usuario_id") @db.Uuid
-  creadoEn    DateTime     @default(now()) @map("creado_en") @db.Timestamptz
+  id              String       @id @default(uuid()) @db.Uuid
+  empresaId       String       @map("empresa_id") @db.Uuid
+  plantilla       String       @db.VarChar(40) // clientes | sucursales | decl-residuos | decl-servicios | precios | vehiculos | usuarios | solicitudes
+  clienteId       String?      @map("cliente_id") @db.Uuid // cargue de un cliente directo o gestor
+  tipoCargue      TipoCargue?  @map("tipo_cargue")
+  formato         String       @default("XLSX") @db.VarChar(4) // XLSX | CSV
+  delimitador     String?      @db.Char(1) // CSV: , ; | o tabulador
+  archivo         String       @db.VarChar(200)
+  archivoHash     String?      @map("archivo_hash") @db.Char(64) // SHA-256: avisa si el mismo archivo ya se cargó
+  archivoUrl      String?      @map("archivo_url") // copia del original (S3) para auditoría
+  estado          EstadoCargue @default(VALIDADO)
+  filasLeidas     Int          @map("filas_leidas")
+  filasOk         Int          @map("filas_ok")
+  filasError      Int          @map("filas_error")
+  errores         Json         @default("[]") // [{fila, columna, valor, mensaje}]
+  usuarioId       String       @map("usuario_id") @db.Uuid
+  creadoEn        DateTime     @default(now()) @map("creado_en") @db.Timestamptz
+  // Lote deshecho (solo declaraciones): sus declaraciones quedan ANULADAS; el lote no cambia más
+  revertidoEn     DateTime?    @map("revertido_en") @db.Timestamptz
+  revertidoPorId  String?      @map("revertido_por") @db.Uuid
+  motivoReversion String?      @map("motivo_reversion") @db.VarChar(300)
 
   empresa       Empresa       @relation(fields: [empresaId], references: [id])
   cliente       Cliente?      @relation(fields: [clienteId], references: [id])
+  revertidoPor  Usuario?      @relation("CargueRevertidoPor", fields: [revertidoPorId], references: [id], onDelete: Restrict)
   declaraciones Declaracion[] // lo que creó este lote (permite revisar o revertir el lote)
 
   @@index([empresaId, creadoEn])

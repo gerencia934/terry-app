@@ -55,7 +55,8 @@ Entre a http://localhost:5173 con `gerencia@terravivasas.com` y la contraseña d
 Cámbiela después del primer ingreso (Olvidé mi contraseña).
 
 **6. Cargar sus datos reales** en Ajustes › Importar datos, en este orden: clientes → sedes → vehículos y
-usuarios → declaraciones → tarifas. Las plantillas están en `docs/plantillas`.
+usuarios → declaraciones → tarifas. Las plantillas están en `docs/plantillas`. Se suben en Excel o en CSV (el separador se
+detecta solo), y un cargue de declaraciones equivocado se puede deshacer: sus declaraciones quedan anuladas, no se borran.
 
 ### Sin Docker (PostgreSQL instalado en el equipo)
 
@@ -73,9 +74,9 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-178 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
-límites de peticiones, roles, aislamiento entre empresas, importación de Excel, declaraciones (crear, completar y editar
-desde el formulario de 8 secciones) y permisos ambientales,
+208 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
+límites de peticiones, roles, aislamiento entre empresas, importación de Excel y CSV (también deshacer un cargue),
+declaraciones (crear, completar y editar desde el formulario de 8 secciones) y permisos ambientales,
 residuos no autorizados, inspección vehicular, tarifas, auditoría (con IP e inmutable) y la cadena operativa completa:
 programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con QR y hash, actas de
 aliados e informes. Al final prueban el límite de ingresos: durante un minuto esa IP no puede volver a ingresar.
@@ -86,8 +87,8 @@ Reglas de la cadena operativa escritas directamente en la base (sin API), sobre 
 DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:reglas -w @terraviva/db
 ```
 
-53 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
-conciliación, actas y descargue en planta.
+67 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
+conciliación, actas, descargue en planta, las reglas de cumplimiento de la gerencia y deshacer un cargue.
 
 **En GitHub** (`.github/`), cada cambio en `main` o en una rama `fase-*`, y cada pull request, corre solo:
 - **Pruebas:** compila todo, migra y siembra una base nueva y corre las dos suites. También falla si una librería de

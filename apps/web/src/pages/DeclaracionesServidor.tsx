@@ -5,7 +5,7 @@ import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, 
 import { BuscarCliente } from '../components/BuscarCliente';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { useRouter } from '../lib/router';
-import { fmtCOP, fmtNum } from '../lib/format';
+import { fmtCOP, fmtFechaHora, fmtNum } from '../lib/format';
 import { usePaginado, PieLista } from '../lib/servidor';
 import { AsignacionMasiva } from './declaraciones/AsignacionMasiva';
 import { FormularioDeclaracion } from './declaraciones/FormularioDeclaracion';
@@ -19,6 +19,7 @@ interface DeclApi {
   codigoY: { codigo: string } | null; codigoA: { codigo: string } | null;
   disposiciones: { principal: boolean; disposicion: { codigo: string; nombre: string } }[];
   riesgos: { riesgo: { codigo: string } }[]; causal: { nombre: string } | null;
+  cargue: { archivo: string; revertidoEn: string | null; motivoReversion: string | null } | null;
   tarifaVigente: { precioUnitario: string; metrica: { abreviacion: string } | null } | null;
 }
 const sedes = (d: DeclApi) => d.sucursales.map((s) => s.sucursal.codigo ?? s.sucursal.nombre).join(', ') || '—';
@@ -77,7 +78,7 @@ export default function DeclaracionesServidor() {
         actions={<>{tienePermiso('declaraciones.crear') && <><Button variant="primary" onClick={() => setFormulario({})}><Plus size={16} /> Nueva declaración</Button><Button onClick={() => setAsignar(true)}><Layers size={16} /> Asignar servicios</Button></>}<Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
       <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => { setF(vacio); setTexto({ q: '', codigo: '' }); }}>
         <Field label="Cliente" id="ds-cli"><BuscarCliente id="ds-cli" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
-        <Field label="Estado" id="ds-e"><Select id="ds-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['BORRADOR', 'PENDIENTE', 'AUTORIZADA', 'RECHAZADA'].map((x) => <option key={x} value={x}>{x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
+        <Field label="Estado" id="ds-e"><Select id="ds-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['BORRADOR', 'PENDIENTE', 'AUTORIZADA', 'RECHAZADA', 'ANULADA'].map((x) => <option key={x} value={x}>{x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
         <Field label="Nombre" id="ds-q"><Input id="ds-q" value={texto.q} onChange={(e) => setTexto((s) => ({ ...s, q: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && aplicarTexto()} onBlur={aplicarTexto} placeholder="Enter para buscar" /></Field>
         <Field label="Código" id="ds-c"><Input id="ds-c" value={texto.codigo} onChange={(e) => setTexto((s) => ({ ...s, codigo: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && aplicarTexto()} onBlur={aplicarTexto} /></Field>
       </FilterBar>
@@ -90,7 +91,7 @@ export default function DeclaracionesServidor() {
       <AsignacionMasiva abierta={asignar} onClose={() => setAsignar(false)} onListo={cargar} />
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? `Declaración ${sel.numero}` : ''}
         footer={sel && (<>
-          {tienePermiso('declaraciones.crear') && <Button onClick={() => setFormulario({ id: sel.id })}><FilePen size={16} /> {sel.estado === 'BORRADOR' ? 'Completar' : 'Editar'}</Button>}
+          {sel.estado !== 'ANULADA' && tienePermiso('declaraciones.crear') && <Button onClick={() => setFormulario({ id: sel.id })}><FilePen size={16} /> {sel.estado === 'BORRADOR' ? 'Completar' : 'Editar'}</Button>}
           {sel.estado === 'PENDIENTE' && tienePermiso('declaraciones.autorizar') && <><Button onClick={() => cambiar(sel, 'RECHAZADA')}><X size={16} /> Rechazar</Button><Button variant="primary" onClick={() => cambiar(sel, 'AUTORIZADA')}><Check size={16} /> Autorizar</Button></>}
         </>)}>
         {sel && <DefList items={[['Residuo / servicio', sel.nombre], ['Código interno', sel.codigoInterno ?? '—'], ['Cliente', `${sel.cliente.razonSocial} (NIT ${sel.cliente.nit})`],
@@ -100,6 +101,7 @@ export default function DeclaracionesServidor() {
           ['Disposición', sel.disposiciones.map((x) => x.disposicion.nombre + (x.principal ? ' (principal)' : '')).join('; ') || '—'],
           ['Frecuencia', sel.frecuenciaDias ? `Cada ${sel.frecuenciaDias} días` : '—'], ['Tarifa vigente', tarifa(sel)],
           ['Estado', <EstadoBadge estado={sel.estado} />], ['Activa', sel.activa ? 'Sí' : 'No'], ...(sel.causal ? [['Causal', sel.causal.nombre]] as [string, React.ReactNode][] : []),
+          ...(sel.estado === 'ANULADA' ? [['Anulada', `Se deshizo el cargue «${sel.cargue?.archivo ?? '—'}»${sel.cargue?.revertidoEn ? ` el ${fmtFechaHora(sel.cargue.revertidoEn)}` : ''}${sel.cargue?.motivoReversion ? `: ${sel.cargue.motivoReversion}` : ''}. Queda como constancia y no se modifica; su código quedó libre.`]] as [string, React.ReactNode][] : []),
           ...(sel.origenFase1 ? [['Origen', <Badge>Convertida de la fase 1: complétela antes de activarla o autorizarla</Badge>]] as [string, React.ReactNode][] : []),
           ...(!tienePermiso('declaraciones.autorizar') ? [['Permiso', <Badge>Su rol no autoriza declaraciones</Badge>]] as [string, React.ReactNode][] : [])]} />}
       </Sheet>

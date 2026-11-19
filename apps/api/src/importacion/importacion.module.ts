@@ -1,15 +1,19 @@
-import { BadRequestException, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, Res,
+  UploadedFile, UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { FormaPago, Prisma, TipoNegociacion, UnidadMedida } from '@prisma/client';
+import { FormaPago, Prisma, TipoNegociacion, UnidadMedida, type CargueMasivo } from '@prisma/client';
 import type { Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
+import { z } from 'zod';
 import {
-  ESTADOS_FISICOS, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, corrienteDe, dvNit, leerArchivo, lista, norm, resolverCodigo, validarFilas,
-  type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla,
+  ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm,
+  resolverCodigo, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
-import { ActorActual, Permiso, type Actor } from '../common/http';
+import { ActorActual, Permiso, Zod, type Actor } from '../common/http';
 import { hashClave } from '../auth/auth.service';
 import { DeclaracionesModule, DeclaracionesService } from '../declaraciones/declaraciones.module';
 
@@ -24,6 +28,7 @@ const si = (v?: string) => norm(v ?? '') === 'si';
 const num = (v?: string) => (v ? Number(v.replace(',', '.')) : undefined);
 const fecha = (v?: string) => (v ? new Date(`${v}T00:00:00Z`) : undefined);
 const DECL = new Set(['decl-residuos', 'decl-servicios']);
+const Reversion = z.object({ motivo: z.string().trim().min(10, 'Explique el motivo (mínimo 10 caracteres).').max(300) });
 type Tx = Prisma.TransactionClient;
 /** Código (mayúsculas) → id, por catálogo. */
 type Ids = Record<ClaveCatalogo, Map<string, string>>;
@@ -85,20 +90,22 @@ class ImportacionService {
       sucursalesPorNit: new Map(clientes.map((c) => [c.nit, new Set(c.sucursales.flatMap((s) => [norm(s.nombre), ...(s.codigo ? [norm(s.codigo)] : [])]))])),
       placas: new Set(vehiculos.map((v) => v.placa)),
       emails: new Set(usuarios.map((u) => u.email.toLowerCase())),
-      numerosDeclaracion: new Set(decls.map((d) => String(d.numero))),
+      numerosDeclaracion: new Set(decls.filter((d) => d.estado !== 'ANULADA').map((d) => String(d.numero))),
       codigosInternos: new Set(decls.filter((d) => d.estado === 'AUTORIZADA' && d.activa && d.codigoInterno).map((d) => d.codigoInterno!.toUpperCase())),
       catalogos: conjuntos(ids), nombres,
       disposicionesCubiertas: new Set(disposiciones.map((d) => d.codigo.toUpperCase())),
     };
   }
 
-  async validar(a: Actor, id: string, file?: Express.Multer.File) {
+  /** Lee y valida el archivo (Excel o CSV) contra los datos de la empresa. En CSV, `delimitador` fija el separador. */
+  async validar(a: Actor, id: string, file?: Express.Multer.File, delimitador?: string) {
     if (!file) throw new BadRequestException({ mensaje: 'Adjunte el archivo en el campo «archivo».' });
-    if (!/\.xlsx$/i.test(file.originalname)) throw new BadRequestException({ mensaje: 'El archivo debe ser .xlsx (Excel). Use la plantilla descargada.' });
     const p = this.plantilla(id);
-    let leido: Awaited<ReturnType<typeof leerArchivo>>;
-    try { leido = await leerArchivo(p, file.buffer.buffer.slice(file.buffer.byteOffset, file.buffer.byteOffset + file.buffer.byteLength) as ArrayBuffer); }
-    catch { throw new BadRequestException({ mensaje: 'No se pudo leer el archivo. Verifique que sea la plantilla en formato .xlsx.' }); }
+    const separador = delimitadorDe(delimitador);
+    if (delimitador && !separador) throw new BadRequestException({ mensaje: 'Separador no válido: use punto y coma, coma, tabulador o barra vertical.' });
+    let leido: PlanillaLeida;
+    try { leido = await leerPlanilla(p, file.originalname, file.buffer.buffer.slice(file.buffer.byteOffset, file.buffer.byteOffset + file.buffer.byteLength) as ArrayBuffer, { delimitador: separador }); }
+    catch (e) { throw new BadRequestException({ mensaje: e instanceof ErrorPlanilla ? e.message : 'No se pudo leer el archivo. Verifique que sea la plantilla en .xlsx, o un CSV con sus mismos encabezados.' }); }
     if (leido.filas.length > 5000) throw new BadRequestException({ mensaje: 'Máximo 5.000 filas por archivo. Divídalo en varios.' });
     const { ids, nombres } = await this.ids(a.empresaId);
     const filas = validarFilas(p, leido.filas, await this.contexto(a.empresaId, ids, nombres));
@@ -106,25 +113,27 @@ class ImportacionService {
     const hash = createHash('sha256').update(file.buffer).digest('hex');
     const previo = await this.db.cargueMasivo.findFirst({ where: { empresaId: a.empresaId, archivoHash: hash, estado: 'CONFIRMADO' }, orderBy: { creadoEn: 'desc' }, select: { creadoEn: true } });
     return { plantilla: p, ids, nombres, hash, archivo: file.originalname, faltantes: leido.faltantes, filas,
+      formato: leido.formato, delimitador: leido.delimitador ?? null, codificacion: leido.codificacion ?? null,
       avisos: previo ? [`Este mismo archivo ya se cargó el ${previo.creadoEn.toISOString().slice(0, 16).replace('T', ' ')}.`] : [],
       resumen: { leidas: filas.length, validas: filas.filter((f) => !f.errores.length).length, conErrores: filas.filter((f) => f.errores.length).length, conAdvertencias: filas.filter((f) => f.advertencias.length).length } };
   }
 
   /** Una declaración nueva no puede repetir el código interno de otra del mismo cliente. */
   private async codigosRepetidos(empresaId: string, filas: FilaValidada[]) {
-    const existentes = await this.db.declaracion.findMany({ where: { empresaId, codigoInterno: { not: null } }, select: { codigoInterno: true, cliente: { select: { nit: true } } } });
+    // Las anuladas (cargue deshecho) liberan su código: el archivo corregido se puede volver a cargar
+    const existentes = await this.db.declaracion.findMany({ where: { empresaId, codigoInterno: { not: null }, estado: { not: 'ANULADA' } }, select: { codigoInterno: true, cliente: { select: { nit: true } } } });
     const set = new Set(existentes.map((d) => `${d.cliente.nit}|${d.codigoInterno!.toUpperCase()}`));
     for (const f of filas) if (f.datos.codigo && set.has(`${digitos(f.datos.nit)}|${f.datos.codigo.trim().toUpperCase()}`))
       f.errores.push(`Código interno: el cliente ya tiene una declaración con el código ${f.datos.codigo}. Modifíquela desde el formulario.`);
   }
 
-  async vistaPrevia(a: Actor, id: string, file?: Express.Multer.File) {
-    const { plantilla: _p, ids: _i, nombres: _n, hash: _h, ...r } = await this.validar(a, id, file);
+  async vistaPrevia(a: Actor, id: string, file?: Express.Multer.File, delimitador?: string) {
+    const { plantilla: _p, ids: _i, nombres: _n, hash: _h, ...r } = await this.validar(a, id, file, delimitador);
     return r;
   }
 
-  async confirmar(a: Actor, id: string, file?: Express.Multer.File) {
-    const v = await this.validar(a, id, file);
+  async confirmar(a: Actor, id: string, file?: Express.Multer.File, delimitador?: string) {
+    const v = await this.validar(a, id, file, delimitador);
     if (v.faltantes.length) throw new BadRequestException({ mensaje: `Faltan columnas obligatorias: ${v.faltantes.join(', ')}.` });
     const validas = v.filas.filter((f) => !f.errores.length);
     if (!validas.length) throw new BadRequestException({ mensaje: 'Ninguna fila es válida. Corrija los errores y vuelva a cargar.', filas: v.filas });
@@ -133,7 +142,7 @@ class ImportacionService {
     // Todo el lote en una transacción: si una fila falla en la base, no se guarda ninguna.
     const cargue = await this.db.$transaction(async (tx) => {
       const c = await tx.cargueMasivo.create({ data: {
-        empresaId: a.empresaId, plantilla: id, archivo: v.archivo.slice(0, 200), archivoHash: v.hash, formato: 'XLSX', estado: 'CONFIRMADO',
+        empresaId: a.empresaId, plantilla: id, archivo: v.archivo.slice(0, 200), archivoHash: v.hash, formato: v.formato, delimitador: v.delimitador, estado: 'CONFIRMADO',
         tipoCargue: DECL.has(id) ? 'DECLARACIONES' : id === 'sucursales' ? 'SUCURSALES' : null,
         filasLeidas: v.filas.length, filasOk: validas.length, filasError: errores.length, errores, usuarioId: a.id,
       } });
@@ -236,7 +245,7 @@ class ImportacionService {
         await this.declaraciones.crear(a, await this.declaracion(tx, a, id, d, ids, nombres), tx, cargueId);
         return 'creadas';
       case 'precios': {
-        const decl = await tx.declaracion.findFirstOrThrow({ where: { empresaId: emp, numero: Number(d.numero) }, include: { cliente: true, tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
+        const decl = await tx.declaracion.findFirstOrThrow({ where: { empresaId: emp, numero: Number(d.numero), estado: { not: 'ANULADA' } }, include: { cliente: true, tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
         const desde = fecha(d.desde)!;
         const actual = decl.tarifas[0];
         if (actual) await tx.tarifa.update({ where: { id: actual.id }, data: { vigenteHasta: new Date(desde.getTime() - 86_400_000) } });
@@ -280,9 +289,71 @@ class ImportacionService {
     throw new BadRequestException({ mensaje: `Plantilla «${id}» sin guardado definido.` });
   }
 
-  historial(a: Actor) {
-    return this.db.cargueMasivo.findMany({ where: { empresaId: a.empresaId }, orderBy: { creadoEn: 'desc' }, take: 100,
-      select: { id: true, plantilla: true, archivo: true, estado: true, filasLeidas: true, filasOk: true, filasError: true, creadoEn: true, usuarioId: true, _count: { select: { declaraciones: true } } } });
+  async historial(a: Actor) {
+    const cargues = await this.db.cargueMasivo.findMany({ where: { empresaId: a.empresaId }, orderBy: { creadoEn: 'desc' }, take: 100,
+      select: { id: true, plantilla: true, tipoCargue: true, archivo: true, formato: true, delimitador: true, estado: true, filasLeidas: true, filasOk: true, filasError: true,
+        creadoEn: true, usuarioId: true, revertidoEn: true, motivoReversion: true, revertidoPor: { select: { nombre: true } }, _count: { select: { declaraciones: true } } } });
+    const usuarios = await this.db.usuario.findMany({ where: { id: { in: [...new Set(cargues.map((c) => c.usuarioId))] } }, select: { id: true, nombre: true } });
+    const nombre = new Map(usuarios.map((u) => [u.id, u.nombre]));
+    return cargues.map((c) => ({ ...c, usuario: nombre.get(c.usuarioId) ?? null, propio: c.usuarioId === a.id }));
+  }
+
+  /**
+   * Deshacer un cargue (fase C). Solo los de declaraciones: los demás crean o actualizan registros que se corrigen con
+   * otro cargue o en su pantalla. Nada se borra: sus declaraciones quedan ANULADAS (inactivas, como constancia) y su
+   * código interno queda libre para volver a cargar el archivo corregido. No se deshace si alguna ya se usó en una
+   * solicitud o un manifiesto (regla también en la base: trg_decl_anulada).
+   * Lo puede deshacer quien lo cargó, si ninguna declaración está autorizada, o quien tenga «importacion.revertir».
+   */
+  async reversion(a: Actor, cargueId: string, db: Tx | PrismaService = this.db) {
+    const c = await db.cargueMasivo.findFirst({ where: { id: cargueId, empresaId: a.empresaId }, include: { revertidoPor: { select: { nombre: true } } } });
+    if (!c) throw new NotFoundException({ mensaje: 'Cargue no encontrado.' });
+    const decls = await db.declaracion.findMany({ where: { cargueId }, orderBy: { numero: 'asc' },
+      select: { id: true, numero: true, nombre: true, codigoInterno: true, estado: true, activa: true, _count: { select: { items: true, manifiestoItems: true } } } });
+    const porEstado: Record<string, number> = {};
+    for (const d of decls) porEstado[d.estado] = (porEstado[d.estado] ?? 0) + 1;
+    const enUso = decls.filter((d) => d._count.items || d._count.manifiestoItems)
+      .map((d) => ({ numero: d.numero, nombre: d.nombre, codigoInterno: d.codigoInterno, solicitudes: d._count.items, manifiestos: d._count.manifiestoItems }));
+    const impedimento = this.impedimento(a, c, decls.length, enUso.map((d) => d.numero), decls.some((d) => d.estado === 'AUTORIZADA'));
+    return {
+      cargue: { id: c.id, archivo: c.archivo, plantilla: c.plantilla, estado: c.estado, creadoEn: c.creadoEn, revertidoEn: c.revertidoEn, revertidoPor: c.revertidoPor?.nombre ?? null, motivoReversion: c.motivoReversion },
+      declaraciones: decls.length, porEstado, enUso, puede: !impedimento, impedimento: impedimento?.mensaje ?? null,
+      lista: decls.map(({ _count: _c, ...d }) => d), codigo: impedimento?.codigo ?? null,
+    };
+  }
+
+  private impedimento(a: Actor, c: CargueMasivo, total: number, enUso: number[], hayAutorizadas: boolean): { codigo: 403 | 409; mensaje: string } | null {
+    if (c.estado === 'REVERTIDO') return { codigo: 409, mensaje: `Este cargue ya se deshizo el ${c.revertidoEn?.toLocaleString('sv-SE', { timeZone: 'America/Bogota' }).slice(0, 16)}.` };
+    if (c.estado !== 'CONFIRMADO') return { codigo: 409, mensaje: 'Solo se deshace un cargue confirmado.' };
+    if (c.tipoCargue !== 'DECLARACIONES')
+      return { codigo: 409, mensaje: 'Solo se deshacen los cargues de declaraciones. Los clientes, sedes, precios, vehículos, usuarios y solicitudes se corrigen con otro cargue o en su pantalla.' };
+    if (!total) return { codigo: 409, mensaje: 'Este cargue no creó declaraciones.' };
+    if (enUso.length) {
+      const n = enUso.slice(0, 10).map((x) => `N.° ${x}`).join(', ') + (enUso.length > 10 ? ` y ${enUso.length - 10} más` : '');
+      return { codigo: 409, mensaje: `No se puede deshacer: ${enUso.length === 1 ? 'la declaración' : `${enUso.length} declaraciones`} (${n}) ya ${enUso.length === 1 ? 'tiene solicitudes o manifiestos. Inactívela' : 'tienen solicitudes o manifiestos. Inactívelas'} desde su ficha.` };
+    }
+    if (a.permisos.includes('*') || a.permisos.includes('importacion.revertir')) return null;
+    if (a.permisos.includes('importacion.cargar') && c.usuarioId === a.id && !hayAutorizadas) return null;
+    return { codigo: 403, mensaje: c.usuarioId === a.id && hayAutorizadas
+      ? 'El cargue tiene declaraciones autorizadas: lo deshace quien tenga el permiso «importacion.revertir» (HSEQ o Administración).'
+      : 'Lo deshace quien lo cargó, si ninguna declaración está autorizada, o quien tenga el permiso «importacion.revertir» (HSEQ o Administración).' };
+  }
+
+  async revertir(a: Actor, cargueId: string, motivo: string) {
+    const r = await this.db.$transaction(async (tx) => {
+      // Bloquea el lote: dos personas no lo deshacen a la vez
+      await tx.$queryRaw`SELECT id FROM cargues_masivos WHERE id = ${cargueId}::uuid FOR UPDATE`;
+      const v = await this.reversion(a, cargueId, tx);
+      if (v.codigo === 403) throw new ForbiddenException({ mensaje: v.impedimento });
+      if (v.impedimento) throw new ConflictException({ mensaje: v.impedimento, enUso: v.enUso });
+      await tx.declaracion.updateMany({ where: { cargueId, estado: { not: 'ANULADA' } }, data: { estado: 'ANULADA', activa: false } });
+      await tx.cargueMasivo.update({ where: { id: cargueId }, data: { estado: 'REVERTIDO', revertidoEn: new Date(), revertidoPorId: a.id, motivoReversion: motivo } });
+      await this.audit.registrar(a, 'cargue_masivo', cargueId, 'REVERTIR', { estado: 'CONFIRMADO' }, { estado: 'REVERTIDO', motivo, anuladas: v.lista.map((d) => d.numero) }, tx);
+      await this.audit.registrarVarios(a, 'declaracion', 'ANULAR', v.lista.map((d) => ({
+        entidadId: d.id, antes: { estado: d.estado, activa: d.activa }, despues: { estado: 'ANULADA', activa: false, cargueId, motivo } })), tx);
+      return v;
+    }, { timeout: 120_000, maxWait: 10_000 });
+    return { cargueId, archivo: r.cargue.archivo, anuladas: r.declaraciones, numeros: r.lista.map((d) => d.numero) };
   }
 }
 
@@ -292,16 +363,32 @@ const archivo = FileInterceptor('archivo', { limits: { fileSize: MAX_MB * 1024 *
 class ImportacionController {
   constructor(private readonly s: ImportacionService) {}
   @Get('plantillas') plantillas() { return PLANTILLAS.map((p) => ({ id: p.id, nombre: p.nombre, descripcion: p.descripcion, archivo: p.archivo, columnas: p.columnas.map(({ validar: _v, advertir: _a, ...c }) => c) })); }
-  @Get('plantillas/:id/archivo') async descargar(@Param('id') id: string, @Res() res: Response) {
+  /** La plantilla en Excel (por defecto) o en CSV separado por punto y coma (`?formato=csv`). */
+  @Get('plantillas/:id/archivo') async descargar(@Param('id') id: string, @Query('formato') formato: string | undefined, @Res() res: Response) {
     const p = this.s.plantilla(id);
+    if (formato === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${p.archivo.replace(/\.xlsx$/i, '.csv')}"`);
+      res.send(construirPlantillaCsv(p));
+      return;
+    }
     const buf = Buffer.from(await construirPlantilla(p));
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${p.archivo}"`);
     res.send(buf);
   }
   @Get('historial') historial(@ActorActual() a: Actor) { return this.s.historial(a); }
-  @Permiso('importacion.cargar') @Post(':id/vista-previa') @UseInterceptors(archivo) previa(@ActorActual() a: Actor, @Param('id') id: string, @UploadedFile() f?: Express.Multer.File) { return this.s.vistaPrevia(a, id, f); }
-  @Permiso('importacion.cargar') @Post(':id/confirmar') @UseInterceptors(archivo) confirmar(@ActorActual() a: Actor, @Param('id') id: string, @UploadedFile() f?: Express.Multer.File) { return this.s.confirmar(a, id, f); }
+  // Sin @Permiso: el servicio decide (quien lo cargó, o «importacion.revertir»)
+  @Get('cargues/:cargueId/reversion') reversion(@ActorActual() a: Actor, @Param('cargueId', ParseUUIDPipe) id: string) {
+    return this.s.reversion(a, id);
+  }
+  @Post('cargues/:cargueId/revertir') revertir(@ActorActual() a: Actor, @Param('cargueId', ParseUUIDPipe) id: string, @Body(new Zod(Reversion)) b: z.infer<typeof Reversion>) {
+    return this.s.revertir(a, id, b.motivo);
+  }
+  @Permiso('importacion.cargar') @Post(':id/vista-previa') @UseInterceptors(archivo)
+  previa(@ActorActual() a: Actor, @Param('id') id: string, @Body('delimitador') d?: string, @UploadedFile() f?: Express.Multer.File) { return this.s.vistaPrevia(a, id, f, d); }
+  @Permiso('importacion.cargar') @Post(':id/confirmar') @UseInterceptors(archivo)
+  confirmar(@ActorActual() a: Actor, @Param('id') id: string, @Body('delimitador') d?: string, @UploadedFile() f?: Express.Multer.File) { return this.s.confirmar(a, id, f, d); }
 }
 
 @Module({ imports: [DeclaracionesModule], controllers: [ImportacionController], providers: [ImportacionService] })

@@ -35,6 +35,7 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 | PR | **Ajustes por requisitos de producción, hechos** (19-11-2026): buscador de clientes y listados de 50 en 50 (probado con 2.000 clientes), consolidado en la base, auditoría con IP e inmutable, permiso y registro de exportaciones, aceptación de la política de datos (Ley 1581), cerrar sesión en todos los dispositivos, aviso de ingreso nuevo, límite de peticiones por usuario, librerías actualizadas, pruebas en GitHub, CodeQL, Dependabot y guion de carga k6. 46 pruebas de reglas y 145 e2e OK | rama `fase-3-operacion` (`docs/REVISION_REQUISITOS_PRODUCCION.md` §9, `apps/api/test/carga/LEAME.md`) |
 | 3-D | **Torre de control (oficina), hecha** (18-11-2026): calendario de rutas y programación por línea; seguimiento del día; manifiestos con fotos, firma y anulación; bandeja y grilla de conciliación con totales en vivo; actas con PDF, ZIP y cargue de aliados; página pública del QR. 43 pruebas de reglas y 109 e2e OK | rama `fase-3-operacion` (`apps/web/src/pages/torre/`) |
 | RG | **Respuestas de la gerencia aplicadas** (19-11-2026): ningún peligroso en Los Pinos (ni autorización ni recepción), hidrocarburos con caracterización CRETIB, gestores aliados reales con licencia y exclusiones, permisos y obligaciones reales (OB-xx), textos legales aprobados (RESPEL solo con peligrosos, aliado con su certificado), cuatro ojos en cambios críticos, sellos vigentes y calibración de báscula. 53 pruebas de reglas y 178 e2e OK | rama `fase-3-operacion` (`docs/declaraciones/MODELO_DATOS.md` §9; respuestas en `docs/privado/`, fuera de git) |
+| 2-C | **Cargue desde CSV y deshacer un cargue, hecho** (19-11-2026): CSV con el separador y la codificación detectados (punto y coma, coma, tabulador o barra; UTF-8, Windows-1252 o UTF-16), plantilla en CSV; deshacer un cargue de declaraciones las deja ANULADAS (nada se borra), libera sus códigos y no se permite si alguna ya está en una solicitud o un manifiesto. 67 pruebas de reglas y 208 e2e OK | rama `fase-3-operacion` (`docs/declaraciones/MODELO_DATOS.md` §10) |
 | 2-B | **Formulario de declaraciones (8 secciones), hecho** (19-11-2026): crear, completar y editar; cobertura legal en vivo; editar una autorizada la deja autorizada si la edita HSEQ y la devuelve a revisión si la edita otro rol; el precio nunca se sobrescribe. 46 pruebas de reglas y 157 e2e OK. Preguntas abiertas para la gerencia: `docs/PREGUNTAS_GERENCIA.md` | rama `fase-3-operacion` (`apps/web/src/pages/declaraciones/`) |
 | 2-A | **Modelo de datos de Declaraciones: aprobado y adoptado** (18-11-2026). 50 tablas, 3 migraciones, reglas en la base, catálogos reales en `packages/shared`, API e importación ajustadas; 52 pruebas e2e OK | rama `fase-2-declaraciones` (leer `docs/declaraciones/MODELO_DATOS.md`) |
 
@@ -60,13 +61,11 @@ para clientes directos. Se trabaja por fases y **se espera el visto bueno del us
 - **B. Formulario de 8 secciones.** ✅ Hecho el 19-11-2026 con el visto bueno del usuario («sí, sigue»): crear, completar
   borradores y editar, con la cobertura legal de cada disposición en vivo. Valida con el mismo `EsquemaDeclaracion` del API
   (sin react-hook-form). Árbol de componentes y reglas de edición: `docs/declaraciones/MODELO_DATOS.md` §8.
-- **C.** Cargue masivo de clientes directos:
-  - Ya hecho para Excel: valida los códigos paramétricos, guarda el lote en una transacción y deja el historial en
-    `cargues_masivos` con el hash del archivo.
-  - Falta:
-    - leer CSV (con su delimitador);
-    - permitir el cargue por cliente desde su portal;
-    - revertir un lote.
+- **C.** Cargue masivo de clientes directos. ✅ Hecho el 19-11-2026 (MODELO_DATOS §10):
+  - Excel o CSV, con el separador y la codificación detectados; valida los códigos paramétricos, guarda el lote en una
+    transacción y deja el historial en `cargues_masivos` con el hash, el formato y el separador del archivo.
+  - Deshacer un cargue de declaraciones: quedan ANULADAS (nada se borra) y sus códigos quedan libres.
+  - Falta el cargue por el propio cliente desde su portal, cuando exista el portal (fase 3).
 
 Las 7 preguntas de la fase A están respondidas. Ver la tabla en `docs/declaraciones/MODELO_DATOS.md`:
 - **ACU:** lo amparan los dos actos, el OF-311-21 y la Res. 316 de 2018.

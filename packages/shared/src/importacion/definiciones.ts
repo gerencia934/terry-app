@@ -283,6 +283,30 @@ export const PLANTILLAS: Plantilla[] = [
 ];
 export const plantilla = (id: string) => PLANTILLAS.find((p) => p.id === id)!;
 
+// ---------------- Lectura de archivos (Excel o CSV) ----------------
+/** Encabezado comparable con el de la plantilla: sin «*», tildes, mayúsculas ni espacios de más. */
+export const limpiarEncabezado = (s: string) => s.replace(/\*/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Clave de la plantilla para cada columna del archivo (undefined si no es de la plantilla) y las obligatorias que faltan. */
+export function mapearEncabezados(p: Plantilla, encabezados: string[]): { claves: (string | undefined)[]; faltantes: string[] } {
+  const claves = encabezados.map((h) => p.columnas.find((c) => limpiarEncabezado(c.header) === limpiarEncabezado(h ?? ''))?.key);
+  return { claves, faltantes: p.columnas.filter((c) => c.requerido && !claves.includes(c.key)).map((c) => c.header) };
+}
+
+/** Fila del archivo → {clave: texto}, con su número en «__fila». Null si está vacía o es la fila de ejemplo («EJEMPLO …»). */
+export function filaLeida(p: Plantilla, valores: [string | undefined, string][], n: number): Record<string, string> | null {
+  const f: Record<string, string> = {};
+  let vacia = true;
+  for (const [clave, valor] of valores) {
+    if (!clave) continue;
+    const v = valor.trim();
+    if (v) vacia = false;
+    f[clave] = v;
+  }
+  if (vacia || (f[p.columnas[0].key] ?? '').toUpperCase().startsWith('EJEMPLO')) return null;
+  return { ...f, __fila: String(n) };
+}
+
 // ---------------- Validación de filas ----------------
 export interface FilaValidada { n: number; datos: Record<string, string>; errores: string[]; advertencias: string[] }
 

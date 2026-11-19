@@ -50,6 +50,7 @@ export interface Cobertura { cubierto: boolean; mensaje: string; detalle: { codi
 /** Lo que la cobertura necesita saber de la declaración. */
 export interface ContextoCobertura { esPeligroso: boolean; contieneHidrocarburos: boolean; caracterizacion: boolean; tipoResiduoCodigo: string | null }
 
+const ANULADA = 'La declaración está anulada (se deshizo el cargue que la creó)';
 const hoy = () => fechaColombia();
 const vigente = () => ({ vigenteDesde: { lte: hoy() }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy() } }] });
 
@@ -63,6 +64,7 @@ const resumen = {
   disposiciones: { select: { principal: true, disposicion: { select: { id: true, codigo: true, nombre: true } } } },
   riesgos: { select: { riesgo: { select: { codigo: true } } } },
   causal: { select: { nombre: true } },
+  cargue: { select: { archivo: true, revertidoEn: true, motivoReversion: true } }, // explica una anulada (cargue deshecho)
 } satisfies Prisma.DeclaracionInclude;
 
 @Injectable()
@@ -121,7 +123,8 @@ export class DeclaracionesService {
   async listar(a: Actor, f: z.infer<typeof Filtros>) {
     const { take, skip, pagina, porPagina } = paginar(f);
     const where: Prisma.DeclaracionWhereInput = {
-      empresaId: a.empresaId, tipo: f.tipo, clienteId: f.clienteId, estado: f.estado, numero: f.numero,
+      empresaId: a.empresaId, tipo: f.tipo, clienteId: f.clienteId, numero: f.numero,
+      estado: f.estado ?? { not: 'ANULADA' }, // las anuladas (cargue deshecho) solo con el filtro «Anulada»
       activa: f.activa ? f.activa === 'true' : undefined,
       esPeligroso: f.peligroso ? f.peligroso === 'true' : undefined,
       sucursales: f.sucursalId ? { some: { sucursalId: f.sucursalId } } : undefined,
@@ -143,6 +146,7 @@ export class DeclaracionesService {
         etiquetados: { include: { sistema: true } }, riesgos: { include: { riesgo: true } },
         codigoY: true, codigoA: true, tarifas: { orderBy: { vigenteDesde: 'desc' }, include: { metrica: true } },
         aceptadaPor: { select: { nombre: true } }, aprobadaPor: { select: { nombre: true } }, creadoPor: { select: { nombre: true } },
+        cargue: { select: { id: true, archivo: true, creadoEn: true, estado: true, revertidoEn: true, motivoReversion: true, revertidoPor: { select: { nombre: true } } } },
       },
     });
     if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
@@ -208,6 +212,7 @@ export class DeclaracionesService {
         tarifas: { where: vigente(), orderBy: { vigenteDesde: 'desc' }, take: 1 },
       } });
       if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
+      if (d.estado === 'ANULADA') throw new BadRequestException({ mensaje: `${ANULADA}: no se modifica. Cree una nueva.` });
       if (b.clienteId !== d.clienteId) throw new BadRequestException({ mensaje: 'No se puede cambiar el cliente de una declaración: cree una nueva para el otro cliente.' });
       if (b.tipo !== d.tipo) throw new BadRequestException({ mensaje: 'No se puede cambiar el tipo (residuo o servicio) de una declaración.' });
       const autorizada = d.estado === 'AUTORIZADA';
@@ -329,6 +334,7 @@ export class DeclaracionesService {
     const d = await this.db.declaracion.findFirst({ where: { id, empresaId: a.empresaId }, include: { _count: { select: { sucursales: true, disposiciones: true } }, tarifas: { where: vigente(), take: 1 } } });
     if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
     if (d.estado === 'BORRADOR') throw new BadRequestException({ mensaje: 'La declaración está en borrador: el cliente debe enviarla primero.' });
+    if (d.estado === 'ANULADA') throw new BadRequestException({ mensaje: `${ANULADA}: no se autoriza ni se rechaza.` });
     if (b.estado === 'AUTORIZADA') {
       if (d.revisionPedidaPorId === a.id)
         throw new ForbiddenException({ mensaje: 'Esta declaración volvió a revisión por un cambio crítico que hizo usted: la debe autorizar otra persona con ese permiso.' });
@@ -353,6 +359,7 @@ export class DeclaracionesService {
   async cambiarActiva(a: Actor, id: string, b: z.infer<typeof CambioActiva>) {
     const d = await this.db.declaracion.findFirst({ where: { id, empresaId: a.empresaId } });
     if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
+    if (d.estado === 'ANULADA') throw new BadRequestException({ mensaje: `${ANULADA}: no se activa ni se inactiva.` });
     if (b.activa && d.estado !== 'AUTORIZADA') throw new BadRequestException({ mensaje: 'Solo se puede activar una declaración autorizada.' });
     if (!b.activa && !b.causalId) throw new BadRequestException({ mensaje: 'Indique la causal de inactivación.' });
     const r = await this.db.declaracion.update({ where: { id }, data: { activa: b.activa, causalId: b.activa ? null : b.causalId } });
@@ -364,6 +371,8 @@ export class DeclaracionesService {
   async tarifasMasivas(a: Actor, b: z.infer<typeof Tarifas>) {
     const decls = await this.db.declaracion.findMany({ where: { id: { in: b.declaraciones }, empresaId: a.empresaId }, include: { cliente: true, tarifas: { where: { vigenteHasta: null }, orderBy: { vigenteDesde: 'desc' }, take: 1 } } });
     if (decls.length !== b.declaraciones.length) throw new BadRequestException({ mensaje: 'Alguna declaración no existe o no es de su empresa.' });
+    const anuladas = decls.filter((d) => d.estado === 'ANULADA').map((d) => `N.° ${d.numero}`);
+    if (anuladas.length) throw new BadRequestException({ mensaje: `Declaraciones anuladas (cargue deshecho): ${anuladas.slice(0, 10).join(', ')}. Quítelas de la selección.` });
     const lote = randomUUID();
     const dia = new Date(b.vigenteDesde.getTime() - 86_400_000);
     await this.db.$transaction(async (tx) => {
@@ -407,7 +416,7 @@ export class DeclaracionesService {
       this.db.catalogoResiduo.findMany({ where: { id: { in: b.catalogoIds }, empresaId: a.empresaId, tipo: 'SERVICIO', activo: true }, orderBy: { nombre: 'asc' } }),
       this.db.cliente.findMany({ where: { id: { in: b.clienteIds }, empresaId: a.empresaId }, orderBy: { razonSocial: 'asc' }, include: {
         sucursales: { where: { activa: true }, select: { id: true, esPrincipal: true } },
-        declaraciones: { where: { catalogoId: { in: b.catalogoIds }, estado: { not: 'RECHAZADA' } }, select: { catalogoId: true } } } }),
+        declaraciones: { where: { catalogoId: { in: b.catalogoIds }, estado: { notIn: ['RECHAZADA', 'ANULADA'] } }, select: { catalogoId: true } } } }),
       this.db.categoriaDeclarado.findFirst({ where: { empresaId: a.empresaId, codigo: 'SERV', activo: true } }),
     ]);
     if (servicios.length !== new Set(b.catalogoIds).size) throw new BadRequestException({ mensaje: 'Algún servicio no existe en el catálogo o está inactivo.' });

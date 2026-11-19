@@ -227,6 +227,15 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
     : revEnviar.total ? `Faltan ${revEnviar.total} ${revEnviar.total === 1 ? 'dato' : 'datos'} para enviar.` : autorizada ? 'Un cambio crítico la devuelve a revisión.' : 'Lista para enviar.';
   const etiquetaEnviar = autorizada ? (vuelveARevision ? 'Guardar y enviar a revisión' : 'Guardar cambios') : d?.estado === 'RECHAZADA' ? 'Corregir y reenviar' : 'Enviar a revisión';
 
+  // Anulada (se deshizo el cargue que la creó): no se edita; la base tampoco lo permite
+  if (d?.estado === 'ANULADA') return (
+    <>
+      <div className="mb-3"><Button variant="ghost" size="sm" onClick={salir}><ArrowLeft size={16} /> Declaraciones</Button></div>
+      <PageHeader eyebrow="Comercial" title={`Declaración ${d.numero}`} subtitle={d.cliente.razonSocial} actions={<EstadoBadge estado="ANULADA" />} />
+      <p className="rounded-lg bg-bad/10 px-3 py-2 text-[13px] text-bad">Esta declaración está anulada: se deshizo el cargue masivo que la creó. Queda como constancia y no se modifica. Para ese residuo o servicio, cree una declaración nueva o vuelva a cargar el archivo corregido.</p>
+    </>
+  );
+
   return (
     <>
       <div className="mb-3"><Button variant="ghost" size="sm" onClick={salir}><ArrowLeft size={16} /> Declaraciones</Button></div>

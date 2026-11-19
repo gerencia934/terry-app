@@ -186,6 +186,33 @@ await rechaza('BIO con hidrocarburos sin caracterización CRETIB → no queda au
 prueba('…con la caracterización cargada sí', (await declaracion('HC-BIO-OK', { contieneHidrocarburos: true, caracterizacionUrl: 'https://lab/cretib.pdf' })).estado === 'AUTORIZADA');
 await rechaza('cuatro ojos: quien pidió la revisión no puede figurar como quien la autoriza', () => db.declaracion.update({ where: { id: dRespel.id }, data: { revisionPedidaPorId: admin.id, aprobadaPorId: admin.id } }), /chk_decl_cuatro_ojos/);
 
+console.log('\n8. Fase C: cargue desde CSV y deshacer un cargue (nada se borra)');
+const datosLote = (x = {}) => ({ empresaId: E, plantilla: 'decl-residuos', tipoCargue: 'DECLARACIONES', archivo: `reglas-${sufijo}.csv`, formato: 'CSV', delimitador: ';',
+  estado: 'CONFIRMADO', filasLeidas: 1, filasOk: 1, filasError: 0, usuarioId: admin.id, ...x });
+await rechaza('un cargue en CSV sin su separador no se registra', () => db.cargueMasivo.create({ data: datosLote({ delimitador: null }) }), /chk_cargue_formato/);
+const loteA = await db.cargueMasivo.create({ data: datosLote() });
+const loteB = await db.cargueMasivo.create({ data: datosLote({ archivo: `reglas-${sufijo}-b.xlsx`, formato: 'XLSX', delimitador: null }) });
+const dLote = await declaracion('LOTE', { cargueId: loteA.id });
+const dLoteUso = await declaracion('LOTE-USO', { cargueId: loteB.id });
+await db.solicitud.create({ data: { empresaId: E, clase: 'FORMAL', clienteId: cliente.id, fechaSolicitada: new Date('2026-12-05'), items: { create: [{ declaracionId: dLoteUso.id, sucursalId: sedeA.id }] } } });
+await rechaza('una declaración que ya está en una solicitud no se anula', () => db.declaracion.update({ where: { id: dLoteUso.id }, data: { estado: 'ANULADA', activa: false } }), /ya tiene solicitudes o manifiestos/);
+await rechaza('una anulada no queda activa', () => db.declaracion.update({ where: { id: dLote.id }, data: { estado: 'ANULADA' } }), /chk_decl_activa_autorizada/);
+const anulada = await db.declaracion.update({ where: { id: dLote.id }, data: { estado: 'ANULADA', activa: false } });
+prueba('sin uso, la declaración del lote se anula: queda como constancia, inactiva', anulada.estado === 'ANULADA' && !anulada.activa);
+await rechaza('una anulada no se modifica (ni vuelve a autorizarse)', () => db.declaracion.update({ where: { id: dLote.id }, data: { estado: 'AUTORIZADA', activa: true } }), /está anulada/);
+await rechaza('…ni sus precios', () => db.tarifa.create({ data: { declaracionId: dLote.id, precioUnitario: 1, tipoNegociacion: 'COBRO', formaPago: 'CONTADO', vigenteDesde: new Date('2027-01-01') } }), /está anulada/);
+await rechaza('…ni sus sedes', () => db.declaracionSucursal.create({ data: { declaracionId: dLote.id, sucursalId: sedeB.id } }), /está anulada/);
+const reuso = await declaracion('LOTE');
+prueba('su código interno queda libre: el archivo corregido crea otra con el mismo código', reuso.codigoInterno === anulada.codigoInterno && reuso.id !== anulada.id);
+await rechaza('…pero dos vigentes del mismo cliente no repiten código', () => declaracion('LOTE'), /Unique constraint/);
+await rechaza('deshacer el lote exige el motivo', () => db.cargueMasivo.update({ where: { id: loteA.id }, data: { estado: 'REVERTIDO', revertidoEn: new Date(), revertidoPorId: admin.id } }), /chk_cargue_revertido/);
+const deshecho = await db.cargueMasivo.update({ where: { id: loteA.id }, data: { estado: 'REVERTIDO', revertidoEn: new Date(), revertidoPorId: admin.id, motivoReversion: 'Prueba de reglas: archivo equivocado' } });
+prueba('con sus declaraciones anuladas y el motivo, el lote queda deshecho', deshecho.estado === 'REVERTIDO');
+await rechaza('un lote deshecho no cambia más', () => db.cargueMasivo.update({ where: { id: loteA.id }, data: { archivo: 'otro.csv' } }), /ya se deshizo/);
+await rechaza('un lote con declaraciones sin anular no se deshace', () => db.cargueMasivo.update({ where: { id: loteB.id }, data: { estado: 'REVERTIDO', revertidoEn: new Date(), revertidoPorId: admin.id, motivoReversion: 'Prueba de reglas: no debe pasar' } }), /primero se anulan/);
+const loteSedes = await db.cargueMasivo.create({ data: datosLote({ plantilla: 'sucursales', tipoCargue: 'SUCURSALES', formato: 'XLSX', delimitador: null }) });
+await rechaza('solo se deshacen cargues de declaraciones', () => db.cargueMasivo.update({ where: { id: loteSedes.id }, data: { estado: 'REVERTIDO', revertidoEn: new Date(), revertidoPorId: admin.id, motivoReversion: 'Prueba de reglas: sedes' } }), /Solo se deshacen cargues de declaraciones/);
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

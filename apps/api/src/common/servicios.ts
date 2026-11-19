@@ -18,6 +18,15 @@ export class Auditoria {
         ip: contextoPeticion.getStore()?.ip ?? null, agente: contextoPeticion.getStore()?.agente ?? null },
     });
   }
+  /** Varios eventos de la misma acción en un solo INSERT (p. ej., las declaraciones de un cargue que se deshace). */
+  registrarVarios(actor: Actor | { id: string } | null, entidad: string, accion: string, eventos: { entidadId: string; antes?: unknown; despues?: unknown }[], tx?: Prisma.TransactionClient) {
+    const ctx = contextoPeticion.getStore();
+    return (tx ?? this.db).auditoria.createMany({ data: eventos.map((e) => ({
+      usuarioId: actor?.id ?? null, entidad, entidadId: e.entidadId, accion,
+      antes: (e.antes ?? undefined) as Prisma.InputJsonValue, despues: (e.despues ?? undefined) as Prisma.InputJsonValue,
+      ip: ctx?.ip ?? null, agente: ctx?.agente ?? null,
+    })) });
+  }
 }
 
 /** Correo transaccional. Sin SMTP configurado, escribe el mensaje en la consola (útil en desarrollo). */

@@ -20,14 +20,15 @@ const PERMISOS = [
   ['actas.emitir', 'Emitir, cargar y anular actas y certificados'], ['informes.ver', 'Ver informes de operación'],
   ['exportar.masivo', 'Exportar a Excel y descargar documentos en bloque (queda en la auditoría)'],
   ['rutas.programar', 'Programar rutas'], ['rutas.operar', 'Operar rutas en campo (preoperacional, paradas, estados)'],
-  ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel'],
+  ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel o CSV'],
+  ['importacion.revertir', 'Deshacer cargues de declaraciones de otras personas o con declaraciones autorizadas (las anula; no borra)'],
   ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
 ];
 const ROLES = {
   Administrador: ['*'],
   Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar',
     'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'],
-  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'],
+  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'importacion.revertir', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'],
   Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo'],
   Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo'],
   Conductor: ['rutas.operar', 'manifiestos.operar'],

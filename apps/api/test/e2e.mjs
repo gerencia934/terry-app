@@ -111,7 +111,7 @@ let rechazoSub = false;
 try { await db.codigoClasificacion.create({ data: { tipo: 'A', codigo: 'Y9.2', descripcion: 'x', padreId: sub.padreId } }); } catch (e) { rechazoSub = /mismo tipo/.test(String(e)); }
 prueba('la base no deja colgar una subcorriente de otro tipo', rechazoSub);
 r = await llamar('POST', '/importacion/clientes/confirmar', { token: T, form: (() => { const f = new FormData(); f.append('archivo', new Blob(['hola']), 'malo.csv'); return f; })() });
-prueba('archivo que no es .xlsx → 400', r.status === 400);
+prueba('un archivo sin los encabezados de la plantilla no se guarda → 400 con las columnas que faltan', r.status === 400 && /Faltan columnas/.test(r.json.mensaje), JSON.stringify(r.json));
 
 console.log('\n3. Declaraciones y permisos ambientales');
 r = await llamar('GET', `/declaraciones?estado=PENDIENTE`, { token: T });
@@ -279,6 +279,109 @@ r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: thseq, 
 prueba('…la autoriza otra persona con el permiso (HSEQ)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 300));
 r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: thseq, cuerpo: { ...conTransporte, cantidadFrecuencia: 45 } });
 prueba('un cambio no crítico de quien autoriza la deja autorizada', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa && !r.json.cambiosCriticos?.length, JSON.stringify(r.json).slice(0, 200));
+
+console.log('\n3b. Cargue desde CSV y deshacer un cargue (fase C)');
+/** La plantilla en CSV, como la guardaría Excel: encabezados con «*» y comillas solo donde hacen falta. */
+const csvDe = (id, filas, d = ';') => {
+  const p = plantilla(id);
+  const celda = (v) => { const x = String(v ?? ''); return x.includes(d) || /["\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  return [p.columnas.map((c) => c.header + (c.requerido ? ' *' : '')), ...filas.map((f) => p.columnas.map((c) => f[c.key] ?? ''))]
+    .map((fila) => fila.map(celda).join(d)).join('\r\n') + '\r\n';
+};
+const conSeparador = (buf, nombre, d) => { const f = formDe(buf, nombre); f.append('delimitador', d); return f; };
+const filaCsv = (x) => filaResiduo({ categoria: 'NOPEL', peligroso: 'No', corrienteY: '', riesgos: '', disposiciones: 'BIO', frecuenciaDias: '30', metrica: 'kg', precio: '700', ...x });
+// Como lo guarda Excel en Colombia («CSV UTF-8»): con BOM, punto y coma, y las celdas de varios valores entre comillas
+const csvA = Buffer.from('﻿' + csvDe('decl-residuos', [
+  filaCsv({ codigo: 'CSV-01', residuo: 'Lodos de biorremediación', sedes: 'C001;C002' }),
+  filaCsv({ codigo: 'CSV-02', residuo: 'Suelo con grasa vegetal', disposiciones: 'BIO;ASP' }),
+]), 'utf8');
+r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: formDe(csvA, 'declaraciones.csv') });
+prueba('CSV UTF-8 de Excel: detecta el punto y coma y lee las celdas con «;» entre comillas', r.status === 201 && r.json.formato === 'CSV' && r.json.delimitador === ';'
+  && r.json.resumen.validas === 2 && r.json.filas[0]?.datos.sedes === 'C001;C002' && r.json.filas[1]?.datos.disposiciones === 'BIO;ASP', JSON.stringify(r.json).slice(0, 400));
+r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: tcom, form: formDe(csvA, 'declaraciones.csv') });
+const loteCsv = r.json.cargueId ? await db.cargueMasivo.findUnique({ where: { id: r.json.cargueId } }) : null;
+prueba('…lo guarda (Comercial) con el formato y el separador en el historial', r.status === 201 && r.json.creadas === 2 && loteCsv?.formato === 'CSV' && loteCsv.delimitador === ';', JSON.stringify(r.json).slice(0, 300));
+// «CSV (delimitado por comas)» de Excel en Windows: coma y Windows-1252
+const csvB = Buffer.from(csvDe('decl-residuos', [filaCsv({ codigo: 'CSV-03', residuo: 'Lodos de desnatación', sedes: 'C002' })], ','), 'latin1');
+r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: formDe(csvB, 'excel-windows.csv') });
+prueba('CSV de Excel en Windows (coma, Windows-1252): detecta la coma y las tildes llegan bien', r.status === 201 && r.json.delimitador === ',' && r.json.codificacion === 'Windows-1252'
+  && !r.json.faltantes.length && r.json.filas[0]?.datos.residuo === 'Lodos de desnatación' && r.json.resumen.validas === 1, JSON.stringify(r.json).slice(0, 400));
+r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: conSeparador(csvA, 'declaraciones.csv', ',') });
+prueba('…con un separador equivocado elegido a mano, dice qué columnas no encuentra', r.status === 201 && r.json.delimitador === ',' && r.json.faltantes.length > 0, JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: conSeparador(csvA, 'declaraciones.csv', 'x') });
+prueba('…y un separador que no existe → 400', r.status === 400 && /Separador no válido/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', '/importacion/clientes/vista-previa', { token: T, form: formDe(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]), 'viejo.xls') });
+prueba('un Excel antiguo (.xls) se rechaza explicando cómo guardarlo', r.status === 400 && /antiguo/.test(r.json.mensaje), JSON.stringify(r.json));
+const plantillaCsv = await fetch(`${API}/importacion/plantillas/decl-residuos/archivo?formato=csv`, { headers: { authorization: `Bearer ${T}` } });
+const bytesCsv = Buffer.from(await plantillaCsv.arrayBuffer());
+prueba('la plantilla también se descarga en CSV (UTF-8 con BOM, punto y coma)', plantillaCsv.status === 200 && /text\/csv/.test(plantillaCsv.headers.get('content-type') ?? '')
+  && bytesCsv[0] === 0xef && bytesCsv[1] === 0xbb && bytesCsv[2] === 0xbf && bytesCsv.toString('utf8').includes('NIT cliente *;'), bytesCsv.toString('utf8').slice(0, 80));
+
+// Deshacer: quien lo cargó, sin autorizadas; nada se borra
+r = await llamar('GET', `/importacion/cargues/${loteCsv.id}/reversion`, { token: tcom });
+prueba('deshacer: muestra qué se anula (2 pendientes) y que quien lo cargó puede hacerlo', r.status === 200 && r.json.puede === true && r.json.declaraciones === 2 && r.json.porEstado.PENDIENTE === 2, JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/importacion/cargues/${loteCsv.id}/revertir`, { token: tcom, cuerpo: { motivo: 'corto' } });
+prueba('…exige el motivo (mínimo 10 caracteres)', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', `/importacion/cargues/${loteCsv.id}/revertir`, { token: tcom, cuerpo: { motivo: 'Archivo con las sedes equivocadas' } });
+const anuladasCsv = await db.declaracion.findMany({ where: { cargueId: loteCsv.id } });
+const loteDeshecho = await db.cargueMasivo.findUnique({ where: { id: loteCsv.id } });
+prueba('…lo deshace: sus declaraciones quedan ANULADAS e inactivas (no se borran) y el lote, deshecho con el motivo', r.status === 201 && r.json.anuladas === 2
+  && anuladasCsv.length === 2 && anuladasCsv.every((d) => d.estado === 'ANULADA' && !d.activa) && loteDeshecho.estado === 'REVERTIDO' && loteDeshecho.motivoReversion === 'Archivo con las sedes equivocadas', JSON.stringify(r.json));
+const audAnular = await db.auditoria.count({ where: { entidad: 'declaracion', accion: 'ANULAR', entidadId: { in: anuladasCsv.map((d) => d.id) } } });
+const audRevertir = await db.auditoria.findFirst({ where: { entidad: 'cargue_masivo', entidadId: loteCsv.id, accion: 'REVERTIR' } });
+prueba('…y la auditoría guarda el lote deshecho y la anulación de cada declaración', audAnular === 2 && audRevertir?.despues?.motivo === 'Archivo con las sedes equivocadas', String(audAnular));
+r = await llamar('GET', '/declaraciones?tipo=RESIDUO&codigo=CSV-0', { token: T });
+const rAnuladas = await llamar('GET', '/declaraciones?tipo=RESIDUO&estado=ANULADA', { token: T });
+prueba('el listado ya no las muestra, salvo con el filtro «Anulada» (que explica de qué cargue vienen)', r.status === 200 && r.json.filas.length === 0
+  && rAnuladas.json.filas?.filter((d) => d.codigoInterno?.startsWith('CSV-')).length === 2 && rAnuladas.json.filas[0].cargue?.motivoReversion === 'Archivo con las sedes equivocadas', JSON.stringify(rAnuladas.json).slice(0, 300));
+r = await llamar('PATCH', `/declaraciones/${anuladasCsv[0].id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('una anulada no se autoriza (API)', r.status === 400 && /anulada/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PUT', `/declaraciones/${anuladasCsv[0].id}`, { token: T, cuerpo: { ...formulario, codigoInterno: 'CSV-01' } });
+prueba('…ni se edita', r.status === 400 && /anulada/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+let anuladaFija = false;
+try { await db.declaracion.update({ where: { id: anuladasCsv[0].id }, data: { observaciones: 'cambio directo' } }); } catch (e) { anuladaFija = /está anulada/.test(String(e)); }
+prueba('…ni se modifica escribiendo directo en la base', anuladaFija);
+let precioFijo = false;
+try { await db.tarifa.create({ data: { declaracionId: anuladasCsv[0].id, precioUnitario: 1, tipoNegociacion: 'COBRO', formaPago: 'CONTADO', vigenteDesde: new Date('2027-01-01') } }); } catch (e) { precioFijo = /está anulada/.test(String(e)); }
+prueba('…ni recibe precios nuevos (regla en la base)', precioFijo);
+r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: tcom, form: formDe(csvA, 'declaraciones.csv') });
+const loteNuevo = r.json.cargueId;
+prueba('el mismo archivo se vuelve a cargar: los códigos de las anuladas quedaron libres', r.status === 201 && r.json.creadas === 2, JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/importacion/cargues/${loteCsv.id}/revertir`, { token: T, cuerpo: { motivo: 'Intento de deshacerlo otra vez' } });
+prueba('un cargue deshecho no se deshace otra vez → 409', r.status === 409 && /ya se deshizo/.test(r.json.mensaje), JSON.stringify(r.json));
+let loteFijo = false;
+try { await db.cargueMasivo.update({ where: { id: loteCsv.id }, data: { archivo: 'otro.csv' } }); } catch (e) { loteFijo = /ya se deshizo/.test(String(e)); }
+prueba('…ni se modifica en la base', loteFijo);
+r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: T, form: formDe(csvB, 'excel-windows.csv') });
+const loteAdmin = r.json.cargueId;
+const desnatacion = await db.declaracion.findFirst({ where: { cargueId: loteAdmin ?? undefined } });
+prueba('el CSV de Windows se guarda con sus tildes', r.status === 201 && desnatacion?.nombre === 'Lodos de desnatación', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/importacion/cargues/${loteAdmin}/revertir`, { token: tcom, cuerpo: { motivo: 'No es mío pero lo intento' } });
+prueba('un cargue de otra persona: Comercial no lo deshace → 403', r.status === 403 && /quien lo cargó/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', `/importacion/cargues/${loteAdmin}/revertir`, { token: T, cuerpo: { motivo: 'Lo deshace el administrador' } });
+prueba('…el administrador sí', r.status === 201 && r.json.anuladas === 1, JSON.stringify(r.json));
+const loteSedes = await db.cargueMasivo.findFirst({ where: { plantilla: 'sucursales', estado: 'CONFIRMADO' } });
+r = await llamar('POST', `/importacion/cargues/${loteSedes.id}/revertir`, { token: T, cuerpo: { motivo: 'Probar con un cargue de sedes' } });
+prueba('solo se deshacen cargues de declaraciones (los de sedes se corrigen con otro cargue) → 409', r.status === 409 && /Solo se deshacen/.test(r.json.mensaje), JSON.stringify(r.json));
+// Con una autorizada: Comercial ya no; HSEQ sí, salvo que alguna esté en uso
+const nuevasCsv = await db.declaracion.findMany({ where: { cargueId: loteNuevo }, orderBy: { numero: 'asc' } });
+r = await llamar('PATCH', `/declaraciones/${nuevasCsv[0].id}/estado`, { token: thseq, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('(HSEQ autoriza una declaración del cargue nuevo)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/importacion/cargues/${loteNuevo}/revertir`, { token: tcom, cuerpo: { motivo: 'Comercial quiere deshacerlo' } });
+prueba('con declaraciones autorizadas, quien lo cargó (Comercial) no lo deshace → 403', r.status === 403 && /importacion.revertir/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('GET', `/importacion/cargues/${loteNuevo}/reversion`, { token: thseq });
+prueba('…HSEQ (permiso «importacion.revertir») sí podría', r.status === 200 && r.json.puede === true && r.json.porEstado.AUTORIZADA === 1, JSON.stringify(r.json).slice(0, 200));
+const sedeC001 = await db.sucursal.findFirst({ where: { codigo: 'C001', cliente: { nit: NIT } } });
+r = await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: sedeC001.clienteId, sucursalId: sedeC001.id, fechaSolicitada: '2026-11-25', items: [{ declaracionId: nuevasCsv[0].id, cantidadEstimada: 50 }] } });
+prueba('(una solicitud usa la declaración autorizada)', r.status === 201, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', `/importacion/cargues/${loteNuevo}/reversion`, { token: thseq });
+prueba('si una ya está en una solicitud, no se deshace y dice cuál', r.status === 200 && r.json.puede === false && r.json.enUso.length === 1 && r.json.enUso[0].numero === nuevasCsv[0].numero
+  && /solicitudes o manifiestos/.test(r.json.impedimento), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/importacion/cargues/${loteNuevo}/revertir`, { token: thseq, cuerpo: { motivo: 'HSEQ intenta deshacerlo' } });
+prueba('…el API lo rechaza → 409', r.status === 409, JSON.stringify(r.json));
+let enUsoBase = false;
+try { await db.declaracion.update({ where: { id: nuevasCsv[0].id }, data: { estado: 'ANULADA', activa: false } }); } catch (e) { enUsoBase = /ya tiene solicitudes/.test(String(e)); }
+prueba('…ni escribiendo directo en la base', enUsoBase);
 
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });

@@ -1,5 +1,5 @@
 import type ExcelJSNS from 'exceljs';
-import type { Plantilla } from './definiciones';
+import { filaLeida, mapearEncabezados, type Plantilla } from './definiciones';
 import { CODIGOS_BASE } from '../declaraciones/catalogos';
 
 // ExcelJS se carga solo cuando se usa (no pesa en el arranque de la app web; en el API se carga una vez).
@@ -91,29 +91,19 @@ export async function leerArchivo(p: Plantilla, buf: ArrayBuffer): Promise<{ fil
   const wb = new X.Workbook();
   await wb.xlsx.load(buf);
   const ws = wb.getWorksheet('Plantilla') ?? wb.worksheets.find((w) => w.state === 'visible')!;
-  const limpia = (s: string) => s.replace(/\*/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
-  const mapa = new Map<number, string>();
-  ws.getRow(1).eachCell((cell, col) => {
-    const c = p.columnas.find((x) => limpia(x.header) === limpia(String(cell.text ?? '')));
-    if (c) mapa.set(col, c.key);
-  });
-  const faltantes = p.columnas.filter((c) => c.requerido && ![...mapa.values()].includes(c.key)).map((c) => c.header);
+  const encabezados: string[] = [];
+  ws.getRow(1).eachCell((cell, col) => { encabezados[col - 1] = String(cell.text ?? ''); });
+  const { claves, faltantes } = mapearEncabezados(p, Array.from(encabezados, (h) => h ?? ''));
+  const texto = (cell: ExcelJSNS.Cell) => {
+    if (cell.value instanceof Date) return cell.value.toISOString().slice(0, 10);
+    if (cell.value && typeof cell.value === 'object' && 'result' in cell.value) return String((cell.value as { result: unknown }).result ?? '');
+    return String(cell.text ?? '');
+  };
   const filas: Record<string, string>[] = [];
   ws.eachRow((row, r) => {
     if (r === 1) return;
-    const f: Record<string, string> = {};
-    let vacia = true;
-    mapa.forEach((key, col) => {
-      const cell = row.getCell(col);
-      let v = '';
-      if (cell.value instanceof Date) v = cell.value.toISOString().slice(0, 10);
-      else if (cell.value && typeof cell.value === 'object' && 'result' in cell.value) v = String((cell.value as { result: unknown }).result ?? '');
-      else v = String(cell.text ?? '').trim();
-      if (v) vacia = false;
-      f[key] = v;
-    });
-    const primera = f[p.columnas[0].key] ?? '';
-    if (!vacia && !primera.toUpperCase().startsWith('EJEMPLO')) filas.push({ ...f, __fila: String(r) });
+    const f = filaLeida(p, claves.map((k, i) => [k, k ? texto(row.getCell(i + 1)) : '']), r);
+    if (f) filas.push(f);
   });
   return { filas, faltantes };
 }

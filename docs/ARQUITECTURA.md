@@ -16,8 +16,8 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 63 tablas, 12 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
-| Reglas compartidas | `packages/shared` (validaciones e importación de Excel) | Hecho |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 63 tablas, 14 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Reglas compartidas | `packages/shared` (validaciones e importación de Excel y CSV) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Fase 2 |
 | PDF | Gotenberg (HTML → PDF) | Fase 2 |
@@ -32,7 +32,7 @@ certificado ante la CAS o el cliente.
 | Declaraciones | `GET/POST declaraciones`, `PUT declaraciones/:id`, `GET declaraciones/catalogos`, `GET declaraciones/cobertura`, `PATCH :id/estado`, `PATCH :id/activa`, `POST tarifas/masivas`, `POST asignacion-masiva` | Una declaración por residuo y cliente, con N sedes y N disposiciones. No autoriza si alguna disposición no está cubierta por permiso de la CAS, licencia vigente del gestor aliado u objeto social (regla también en la base); peligroso exige FDS; tarifas con vigencias. Ver `docs/declaraciones/MODELO_DATOS.md` |
 | Logística | `solicitudes` (+ `:id/aprobacion`, `:id/estado`, `items/:id/descartar`), `rutas` (código automático R-AAAAMMDD-NN), `PATCH rutas/:id`, `rutas/:id/items`, `rutas/:id/rastreo`, `programacion/pendientes`, `PATCH rutas/:id/estado`, `preoperacionales`, `PATCH paradas/:id` | Solo residuos autorizados (trigger); la ruta no inicia sin inspección aprobada (trigger); cancelar siempre se permite |
 | Cumplimiento | `permisos-ambientales`, `PATCH obligaciones/:id/cumplida`, `alertas`, `catalogos`, `vehiculos`, `personal`, `zonas`, `estados-recorrido`, `elementos-chequeo`, `salud` | Alertas de obligaciones, SOAT/RTM/póliza, licencias y curso MP, rutas sin inspección |
-| Importación | `GET importacion/plantillas[/:id/archivo]`, `POST importacion/:id/vista-previa · confirmar`, `GET historial` | Revalida todo en servidor; guarda en una transacción; registra el cargue |
+| Importación | `GET importacion/plantillas[/:id/archivo[?formato=csv]]`, `POST importacion/:id/vista-previa · confirmar` (Excel o CSV; campo opcional `delimitador`), `GET historial`, `GET importacion/cargues/:id/reversion`, `POST importacion/cargues/:id/revertir` | Revalida todo en servidor; guarda en una transacción; registra el cargue con su formato y separador. Deshacer un cargue de declaraciones las deja ANULADAS (nada se borra) si ninguna está en uso; lo hace quien lo cargó (sin autorizadas) o quien tenga `importacion.revertir` |
 | Manifiestos | `manifiestos`, `desde-ruta`, `:id/items`, `:id/evidencias`, `:id/grabar`, `:id/anular`, `:id/pdf`, `:id/recibo` (80 mm) | Firma táctil, báscula, ARL/EPS de terceros; al grabar abre la conciliación (regla en la base) |
 | Conciliaciones | `conciliaciones`, `consolidado`, `:id/items`, `:id/igualar · aprobar · reabrir`, `:id/excel` | Totales por unidad (shared); ±2 % con justificación; aprobada solo cambia factura/pago |
 | Actas | `actas`, `pendientes`, `:id/emitir`, `cargar`, `:id/pdf`, `zip`, `PATCH lineas/:id/certificado-aliado`, `verificar/:código` (pública; el QR abre `<web>/#verificar/<código>`) | Solo líneas aprobadas; soporte legal a la fecha del servicio; PDF con QR (pdfkit) |

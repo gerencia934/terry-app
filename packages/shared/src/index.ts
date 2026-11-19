@@ -4,3 +4,5 @@ export * from './declaraciones/catalogos';
 export * from './declaraciones/esquema';
 export * from './operacion/totales';
 export { construirPlantilla, leerArchivo, exportarErrores } from './importacion/excel';
+export * from './importacion/csv';
+export * from './importacion/planilla';

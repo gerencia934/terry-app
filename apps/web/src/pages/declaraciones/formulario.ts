@@ -48,7 +48,7 @@ export const formVacio = (tipo: Tipo = 'RESIDUO'): FormDecl => ({
 
 /** Lo que devuelve GET /declaraciones/:id (solo lo que usa el formulario). */
 export interface DetalleDecl {
-  id: string; numero: number; tipo: Tipo; estado: 'BORRADOR' | 'PENDIENTE' | 'AUTORIZADA' | 'RECHAZADA'; activa: boolean; origenFase1: boolean;
+  id: string; numero: number; tipo: Tipo; estado: 'BORRADOR' | 'PENDIENTE' | 'AUTORIZADA' | 'RECHAZADA' | 'ANULADA'; activa: boolean; origenFase1: boolean;
   clienteId: string; cliente: { id: string; razonSocial: string; nit: string; tipo?: 'DIRECTO' | 'GESTOR' }; alcanceSedes: Alcance;
   sucursales: { activa: boolean; sucursal: { id: string; codigo: string | null; nombre: string } }[];
   nombre: string; codigoInterno: string | null; catalogoId: string | null; categoriaId: string; tipoResiduoId: string | null; lineaServicioId: string;
