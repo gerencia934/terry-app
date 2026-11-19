@@ -605,6 +605,49 @@ prueba('un conductor NO puede autorizar declaraciones → 403', r.status === 403
 r = await llamar('GET', '/declaraciones', { token: tc });
 prueba('…pero sí puede consultar', r.status === 200);
 
+console.log('\n5b. Usuarios y roles (fase 1c)');
+r = await llamar('GET', '/usuarios', { token: thseq });
+prueba('usuarios: solo la administración los ve (HSEQ → 403)', r.status === 403, String(r.status));
+r = await llamar('GET', '/roles', { token: T });
+const rolesE2e = r.json;
+const rolComercialId = rolesE2e.roles?.find((x) => x.nombre === 'Comercial')?.id;
+prueba('roles con sus permisos (la matriz) y los usuarios activos de cada uno', r.status === 200 && rolesE2e.roles.find((x) => x.nombre === 'HSEQ')?.permisos.includes('importacion.revertir')
+  && rolesE2e.permisos.length > 10 && rolesE2e.roles.find((x) => x.nombre === 'Comercial')?.usuariosActivos >= 1, JSON.stringify(rolesE2e).slice(0, 300));
+r = await llamar('GET', '/usuarios?q=e2e', { token: T });
+prueba('…el listado busca por nombre o correo y nunca trae la contraseña', r.status === 200 && r.json.total >= 3 && !JSON.stringify(r.json).includes('passwordHash'), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/usuarios', { token: T, cuerpo: { email: 'Nuevo.Comercial@terravivasas.com', nombre: 'Nuevo Comercial', documento: '1098765432', rolId: rolComercialId } });
+const nuevoU = r.json;
+const invitacion = nuevoU.id ? await db.passwordReset.findFirst({ where: { usuarioId: nuevoU.id }, orderBy: { expiraEn: 'desc' } }) : null;
+prueba('invitar un usuario: correo en minúsculas y un enlace de 72 horas para que cree su contraseña', r.status === 201 && nuevoU.email === 'nuevo.comercial@terravivasas.com'
+  && !!invitacion && invitacion.expiraEn.getTime() - Date.now() > 70 * 3_600_000, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/usuarios', { token: T, cuerpo: { email: 'nuevo.comercial@terravivasas.com', nombre: 'Otra Persona', documento: '12345', rolId: rolComercialId } });
+prueba('…no repite un correo', r.status === 400 && /Ya existe/.test(r.json.mensaje), JSON.stringify(r.json));
+const yoAdmin = (await llamar('GET', '/auth/yo', { token: T })).json;
+r = await llamar('PATCH', `/usuarios/${yoAdmin.id}`, { token: T, cuerpo: { activo: false } });
+prueba('nadie se inactiva ni se cambia el rol a sí mismo', r.status === 400 && /a sí mismo/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/usuarios/${nuevoU.id}`, { token: T, cuerpo: { esConductor: true, licenciaCat: 'C2', licenciaVence: fechaEn(30), cursoMpVence: fechaEn(400) } });
+prueba('editar: datos de conductor (categoría y vencimiento de la licencia, curso)', r.status === 200 && r.json.esConductor === true && r.json.licenciaCat === 'C2', JSON.stringify(r.json).slice(0, 200));
+const temporal = await db.usuario.create({ data: { empresaId: cliente.empresaId, rolId: rolComercialId, nombre: 'Temporal E2E', documento: '777', email: 'temporal.e2e@terravivasas.com',
+  passwordHash: await (await import('@node-rs/argon2')).hash('Temporal2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+const tTemporal = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: temporal.email, clave: 'Temporal2026!' } })).json)).accessToken;
+prueba('(el usuario temporal ingresa)', (await llamar('GET', '/auth/yo', { token: tTemporal })).status === 200);
+r = await llamar('PATCH', `/usuarios/${temporal.id}`, { token: T, cuerpo: { activo: false } });
+const trasInactivar = await llamar('GET', '/auth/yo', { token: tTemporal });
+prueba('inactivar a un usuario cierra sus sesiones de inmediato', r.status === 200 && r.json.activo === false && trasInactivar.status === 401, `${r.status} ${trasInactivar.status}`);
+r = await llamar('POST', `/usuarios/${temporal.id}/invitacion`, { token: T });
+prueba('…y no se le envía invitación mientras esté inactivo', r.status === 400, JSON.stringify(r.json));
+await db.usuario.update({ where: { id: nuevoU.id }, data: { intentosFallidos: 5, bloqueadoHasta: new Date(Date.now() + 15 * 60_000) } });
+r = await llamar('GET', '/usuarios?q=nuevo.comercial', { token: T });
+prueba('un usuario bloqueado por intentos fallidos aparece bloqueado', r.status === 200 && r.json.filas[0]?.bloqueado === true, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PATCH', `/usuarios/${nuevoU.id}`, { token: T, cuerpo: { desbloquear: true } });
+prueba('…y la administración lo desbloquea', r.status === 200 && r.json.bloqueado === false, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/usuarios/${nuevoU.id}/invitacion`, { token: T });
+prueba('reenviar la invitación crea un enlace nuevo', r.status === 204 && (await db.passwordReset.count({ where: { usuarioId: nuevoU.id } })) === 2, String(r.status));
+// Administrador de prueba (para revisar en el navegador las pantallas de administración sobre la base de prueba)
+const rolAdminE2e = await db.rol.findFirst({ where: { nombre: 'Administrador', empresaId: cliente.empresaId } });
+await db.usuario.upsert({ where: { email: 'admin.e2e@terravivasas.com' }, update: {}, create: { empresaId: cliente.empresaId, rolId: rolAdminE2e.id, nombre: 'Administrador E2E', documento: '5', email: 'admin.e2e@terravivasas.com',
+  passwordHash: await (await import('@node-rs/argon2')).hash('AdminE2E2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+
 console.log('\n6. Multiempresa (aislamiento de datos)');
 const otra = await db.empresa.upsert({ where: { nit: '800000001-1' }, update: {}, create: { nit: '800000001-1', razonSocial: 'Otra Empresa Prueba' } });
 const rolOtra = await db.rol.upsert({ where: { empresaId_nombre: { empresaId: otra.id, nombre: 'Administrador' } }, update: {}, create: { empresaId: otra.id, nombre: 'Administrador' } });

@@ -118,6 +118,16 @@ export class AuthService {
     return this.db.usuario.findUniqueOrThrow({ where: { id: actor.id }, select: { id: true, nombre: true, email: true, telefono: true, esConductor: true, rol: { select: { nombre: true } }, empresa: { select: { razonSocial: true, nit: true } } } });
   }
 
+  /** Invitación a un usuario nuevo (o reenvío): enlace para crear su contraseña, válido 72 horas y una sola vez. */
+  async invitar(usuarioId: string) {
+    const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId } });
+    const token = randomBytes(32).toString('base64url');
+    await this.db.passwordReset.create({ data: { usuarioId: u.id, tokenHash: sha256(token), expiraEn: new Date(Date.now() + 72 * 3_600_000) } });
+    const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
+    await this.correo.enviar(u.email, 'Bienvenido a TERRY-GO · cree su contraseña',
+      `Hola ${u.nombre}:\n\nTerra Viva le creó un usuario en TERRY-GO. Para crear su contraseña abra este enlace (vence en 72 horas y sirve una sola vez):\n${url}\n\nSi no esperaba este correo, ignórelo.`);
+  }
+
   /** Siempre responde igual para no revelar si el correo existe. */
   async solicitarRecuperacion(email: string) {
     const u = await this.db.usuario.findUnique({ where: { email: email.trim().toLowerCase() } });
