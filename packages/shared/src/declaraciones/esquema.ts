@@ -10,7 +10,7 @@ const lleno = (s?: string | null) => !!s && s.trim().length > 0;
 
 export const ESTADOS_FISICOS_DB = ['SOLIDO', 'SEMISOLIDO', 'LIQUIDO', 'GASEOSO'] as const;
 export const ALCANCES_SEDES = ['TODAS', 'PRINCIPAL', 'SELECCION'] as const;
-export const NEGOCIACIONES = ['COBRO', 'COMPRA', 'SIN_COSTO'] as const;
+export const NEGOCIACIONES = ['COBRO', 'COMPRA', 'SIN_COSTO', 'CONTRATO'] as const;
 export const FORMAS_PAGO = ['CONTADO', 'CREDITO_30', 'CREDITO_60', 'CREDITO_90'] as const;
 
 const base = z.object({

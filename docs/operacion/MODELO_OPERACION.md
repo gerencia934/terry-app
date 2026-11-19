@@ -270,13 +270,75 @@ Se probó en el navegador contra la API, de punta a punta:
 - **Bandeja de conciliación:** abre en las que están **en borrador**, con servicio en los últimos 60 días.
 - **Nueva acta:** propone el **mes anterior** completo y todas sus líneas aprobadas sin certificar.
 
-## 9. Lo que sigue
+## 9. Ajustes por los documentos reales (hechos, 19-11-2026)
+
+Aplican `docs/referencia/ANALISIS_DOCUMENTOS_REALES.md`, que analiza documentos reales de Terra Viva:
+- el recibo y el manifiesto de descarga TV1830;
+- el certificado PSAP2026-296;
+- la planilla de cargue DMR.
+
+Se probaron de punta a punta en el navegador y con pruebas automáticas.
+
+**Recepción en planta** (menú Planta Los Pinos):
+- **Descarga de un transportador externo:**
+  - empresa transportadora con NIT, placa y tipo de vehículo;
+  - conductor con documento, ARL y EPS;
+  - auxiliar;
+  - horas de llegada y salida;
+  - báscula: entrada, salida y neto.
+- **Dos firmas:** el receptor de Terra Viva y el conductor o cliente. La base no deja grabar una descarga sin la firma
+  del receptor.
+- **Documentos:** al grabar salen el **recibo angosto** para impresora térmica de 80 mm y el **manifiesto completo**,
+  con el mismo número. Ambos llevan la nota de calibración de la báscula.
+
+**Numeración propia:**
+- Los manifiestos usan `TV####`, sin reinicio anual. Los certificados usan `PSAP{año}-{n}`.
+- En **Ajustes › Datos de la empresa** se pone el último número del sistema anterior (por ejemplo, 1830 para seguir en
+  TV1831). Ese número solo puede subir.
+- Se corrigió un error de la base: los números más largos que los dígitos se recortaban.
+
+**Certificado:**
+- **Clientes gestores:** un certificado **por generador**, a nombre del generador (su razón social y su NIT, nunca el
+  nombre de una sede), o uno consolidado con el generador de cada línea.
+- **Licencia y/o permiso:** columna que se llena sola con el permiso o la licencia vigente a la fecha de cada servicio.
+- **Textos legales:** los párrafos de respaldo salen **solo si el certificado tiene residuos con esa disposición**. Se
+  administran en Ajustes, y cada cambio queda como versión nueva. Los textos iniciales están marcados «por revisar» y
+  ya atienden las alertas 2 y 3 del análisis: no afirman «vertimiento cero» y no «eliminan» la responsabilidad del
+  generador.
+- **Firma y sellos:** «Lugar y fecha», nombre y cargo del representante legal, y certificaciones del sistema de gestión
+  (ISO 9001, 14001, 45001 y Norsok S-006) con su número.
+- **Integridad:** se guarda la **huella SHA-256 del PDF** al emitir y al cargar el acta de un aliado.
+- **Solo líneas con tratamiento:** un servicio sin disposición, como una fumigación, no entra al certificado.
+
+**Otras reglas:**
+- **Facturación por contrato:** nuevo tipo de negociación. La línea puede ir en 0 o sin precio, la conciliación se
+  aprueba igual y la línea no suma al cobro.
+- **Anular en vez de borrar** (requisitos de producción §3): al anular un manifiesto, su conciliación queda **ANULADA**,
+  con sus líneas, en vez de borrarse. Las solicitudes recurrentes que nadie tocó quedan «no aprobadas».
+- **Subcorrientes del IDEAM** (Y9.1 → Y9), con las corrientes Y1 a Y45 completas.
+- **Cargue masivo:**
+  - acepta el código o el nombre exacto y avisa si es ambiguo;
+  - explica cuando un número UN está en la columna equivocada.
+- **Asignación masiva** de los servicios estándar a muchos clientes.
+- **Solicitudes automáticas agrupadas** por sede y fecha.
+- **Permisos reales del certificado:**
+  - el ACU lo ampara el Oficio SAA 0311-21;
+  - el Oficio SAO 1762-2023 complementa la Resolución 000632 pero no ampara solo;
+  - se agrega el plan de contingencia de la CDMB.
+
+**Falta confirmar (gerencia):**
+- **Alerta 1 del análisis:** si la Resolución 000632 ampara también las aguas residuales domésticas (ARD).
+- **Textos legales:** que el área jurídica los revise o los reemplace por el texto propio.
+- **Unidades:** registrar la cantidad en la unidad en que se recibe (por ejemplo, litros) y convertirla a la unidad de
+  la declaración. Queda pendiente: hoy se recibe en la unidad de la tarifa.
+
+## 10. Lo que sigue
 
 - **Pendientes de la torre de control:**
-  - descargues en planta desde la oficina: hoy la API los soporta, pero falta el formulario de la solicitud de descarga
-    y su manifiesto;
+  - solicitud de descarga desde la oficina (la recepción ya se hace sin ella);
   - recorrido GPS completo en un mapa (hoy se ve el último punto);
   - mover rutas arrastrándolas en el calendario.
+- **Ajustes de producción:** ver `docs/REVISION_REQUISITOS_PRODUCCION.md`.
 - **Conectar lo que aún es de ejemplo:** clientes, tarifas, inspecciones (vista de oficina), inventario, permisos,
   indicadores y ajustes.
 - **Declaraciones, fase B:** el formulario de 8 secciones.

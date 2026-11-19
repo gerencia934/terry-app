@@ -5,6 +5,7 @@ import { Throttle } from '@nestjs/throttler';
 import { EstadoActa, Prisma, TipoActa } from '@prisma/client';
 import type { Response } from 'express';
 import JSZip from 'jszip';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
@@ -25,7 +26,12 @@ const Pendientes = z.object({ clienteId: id, desde: z.coerce.date().optional(), 
 const Crear = z.object({
   tipo: z.nativeEnum(TipoActa).default('DISPOSICION'), clienteId: id, destinoId: id.optional(),
   periodoDesde: z.coerce.date(), periodoHasta: z.coerce.date(), conciliacionItemIds: z.array(id).max(2000).default([]),
+  /** Cliente gestor: un certificado por cada generador (documentos reales §1), en vez de uno consolidado. */
+  porGenerador: z.boolean().default(false),
 }).refine((b) => b.periodoHasta >= b.periodoDesde, { message: 'El periodo está invertido.' });
+const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+/** Configuración de la empresa que usa el certificado (Ajustes › Datos de la empresa). */
+interface ConfigEmpresa { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; certificaciones?: { norma: string; numero: string }[] }
 const Items = z.object({ agregar: z.array(id).max(2000).default([]), quitar: z.array(id).max(2000).default([]) });
 const Anular = z.object({ motivo: z.string().trim().min(5).max(300) });
 const Cargar = z.object({
@@ -62,7 +68,9 @@ class ActasService {
 
   /** Líneas de conciliaciones aprobadas del cliente que aún no están en un acta. */
   private wherePendientes(empresaId: string, clienteId: string, desde?: Date, hasta?: Date): Prisma.ConciliacionItemWhereInput {
-    return { actaId: null, conciliacion: { empresaId, estado: 'APROBADA', manifiesto: { clienteId, fechaServicio: desde || hasta ? { gte: desde, lte: hasta } : undefined } } };
+    // Solo se certifican líneas con tratamiento (los servicios sin disposición, como una fumigación, no van en el certificado)
+    return { actaId: null, conciliacion: { empresaId, estado: 'APROBADA', manifiesto: { clienteId, fechaServicio: desde || hasta ? { gte: desde, lte: hasta } : undefined } },
+      OR: [{ disposicionId: { not: null } }, { manifiestoItem: { disposicionId: { not: null } } }] };
   }
 
   async pendientes(a: Actor, f: z.infer<typeof Pendientes>) {
@@ -114,15 +122,39 @@ class ActasService {
       const ids = b.conciliacionItemIds.length ? b.conciliacionItemIds
         : (await tx.conciliacionItem.findMany({ where: this.wherePendientes(a.empresaId, cliente.id, b.periodoDesde, b.periodoHasta), select: { id: true } })).map((x) => x.id);
       if (!ids.length) throw new BadRequestException({ mensaje: 'No hay líneas de conciliaciones aprobadas sin certificar en ese periodo.' });
-      const acta = await tx.acta.create({ data: { empresaId: a.empresaId, tipo: b.tipo, clienteId: cliente.id, destinoId: destino.id, periodoDesde: b.periodoDesde, periodoHasta: b.periodoHasta } });
-      await this.vincular(tx, a, acta.id, ids);
-      await this.audit.registrar(a, 'acta', acta.id, 'CREAR', undefined, { numero: acta.numero, lineas: ids.length }, tx);
-      return acta;
+      if (!b.porGenerador) {
+        const acta = await tx.acta.create({ data: { empresaId: a.empresaId, tipo: b.tipo, clienteId: cliente.id, destinoId: destino.id, periodoDesde: b.periodoDesde, periodoHasta: b.periodoHasta } });
+        await this.vincular(tx, a, acta.id, ids);
+        await this.audit.registrar(a, 'acta', acta.id, 'CREAR', undefined, { numero: acta.numero, lineas: ids.length }, tx);
+        return acta;
+      }
+      // Un certificado por generador: la razón social del certificado es la del generador, nunca el nombre de una sede
+      if (cliente.tipo !== 'GESTOR') throw new BadRequestException({ mensaje: 'Solo los clientes gestores tienen certificados por generador.' });
+      const lineas = await tx.conciliacionItem.findMany({ where: { id: { in: ids } }, select: { id: true, manifiestoItem: { select: { sucursal: { select: { nombre: true, generadorNit: true, generadorNombre: true } } } } } });
+      const sinGenerador = [...new Set(lineas.filter((l) => !l.manifiestoItem.sucursal.generadorNit).map((l) => l.manifiestoItem.sucursal.nombre))];
+      if (sinGenerador.length) throw new BadRequestException({ mensaje: `Complete el NIT y la razón social del generador en las sedes: ${sinGenerador.join(', ')} (Clientes y sedes).` });
+      const grupos = new Map<string, { nombre: string; ids: string[] }>();
+      for (const l of lineas) {
+        const g = l.manifiestoItem.sucursal; const k = g.generadorNit!;
+        const x = grupos.get(k) ?? { nombre: g.generadorNombre ?? g.nombre, ids: [] }; x.ids.push(l.id); grupos.set(k, x);
+      }
+      const actas = [];
+      for (const [nit, g] of [...grupos.entries()].sort((x, y) => x[1].nombre.localeCompare(y[1].nombre))) {
+        const acta = await tx.acta.create({ data: { empresaId: a.empresaId, tipo: b.tipo, clienteId: cliente.id, destinoId: destino.id, periodoDesde: b.periodoDesde, periodoHasta: b.periodoHasta,
+          generadorNit: nit, generadorNombre: g.nombre } });
+        await this.vincular(tx, a, acta.id, g.ids);
+        await this.audit.registrar(a, 'acta', acta.id, 'CREAR', undefined, { numero: acta.numero, lineas: g.ids.length, generador: nit }, tx);
+        actas.push(acta);
+      }
+      return { ...actas[0], actas };
     });
   }
 
   /** Asigna líneas al acta en borrador. La base exige conciliación aprobada y el mismo cliente. */
   private async vincular(tx: Tx, a: Actor, actaId: string, ids: string[]) {
+    const acta = await tx.acta.findUniqueOrThrow({ where: { id: actaId }, select: { generadorNit: true } });
+    if (acta.generadorNit && (await tx.conciliacionItem.count({ where: { id: { in: ids }, manifiestoItem: { sucursal: { OR: [{ generadorNit: null }, { generadorNit: { not: acta.generadorNit } }] } } } })))
+      throw new BadRequestException({ mensaje: 'Esta acta es de un solo generador: solo admite líneas de sus sedes.' });
     const r = await tx.conciliacionItem.updateMany({ where: { id: { in: ids }, actaId: null, conciliacion: { empresaId: a.empresaId } }, data: { actaId } });
     if (r.count !== new Set(ids).size) throw new BadRequestException({ mensaje: 'Alguna línea no existe, no es de su empresa o ya está en otra acta.' });
   }
@@ -165,6 +197,7 @@ class ActasService {
       const s = soporte(l);
       if (exigirSoporte && (!s || !d)) sinSoporte.push(`${m.numero} · ${mi.declaracion.nombre}${d ? ` (${d.nombre})` : ' (sin tratamiento)'}`);
       return {
+        disposicion: d?.codigo ?? null, generador: mi.sucursal.generadorNombre ?? mi.sucursal.nombre, generadorNit: mi.sucursal.generadorNit,
         manifiesto: m.numero, fechaServicio: m.fechaServicio.toISOString().slice(0, 10), residuo: mi.declaracion.nombre, codigoInterno: mi.declaracion.codigoInterno,
         peligroso: mi.declaracion.esPeligroso, corrientes: [mi.declaracion.codigoY?.codigo, mi.declaracion.codigoA?.codigo].filter(Boolean) as string[],
         sede: mi.sucursal.nombre, cantidad: Number(l.cantidadConciliada ?? l.cantidadCargada), unidad: l.metrica?.abreviacion ?? mi.metrica?.abreviacion ?? 'und',
@@ -172,6 +205,11 @@ class ActasService {
       };
     });
     if (sinSoporte.length) throw new BadRequestException({ mensaje: `No se puede emitir: sin permiso o licencia vigente a la fecha del servicio para ${sinSoporte.join('; ')}.` });
+    // Párrafos de respaldo: solo los que aplican a las disposiciones de este certificado (vacío = van siempre)
+    const presentes = new Set(filas.map((f) => f.disposicion).filter(Boolean) as string[]);
+    const textos = (await this.db.textoLegal.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ orden: 'asc' }, { codigo: 'asc' }] }))
+      .filter((t) => !t.disposiciones.length || t.disposiciones.some((x) => presentes.has(x)));
+    const conf = (empresa.configuracion ?? {}) as ConfigEmpresa;
     const totales = new Map<string, number>();
     filas.forEach((f) => totales.set(f.unidad, (totales.get(f.unidad) ?? 0) + f.cantidad));
     const sedes = new Map(lineas.map((l) => [l.manifiestoItem.sucursal.id, l.manifiestoItem.sucursal]));
@@ -180,16 +218,21 @@ class ActasService {
       transportador: m.transporte?.empresaTransportadora ?? empresa.razonSocial,
     }]; }));
     return {
-      version: 1, origen: acta.origen, tipo: acta.tipo, numero: acta.numero, emitidaEn: new Date().toISOString(),
+      version: 2, origen: acta.origen, tipo: acta.tipo, numero: acta.numero, emitidaEn: new Date().toISOString(),
       periodo: { desde: acta.periodoDesde.toISOString().slice(0, 10), hasta: acta.periodoHasta.toISOString().slice(0, 10) },
       emisor: { razonSocial: empresa.razonSocial, nit: empresa.nit },
       destino: { razonSocial: acta.destino.razonSocial, nit: acta.destino.nit, municipio: acta.destino.municipio },
       cliente: { razonSocial: acta.cliente.razonSocial, nit: acta.cliente.nit, dv: acta.cliente.dv },
+      generador: acta.generadorNit ? { razonSocial: acta.generadorNombre ?? acta.generadorNit, nit: acta.generadorNit } : null,
+      clienteGestor: acta.cliente.tipo === 'GESTOR',
       sedes: [...sedes.values()].map((s) => ({ codigo: s.codigo, nombre: s.nombre, direccion: s.direccion, municipio: s.municipio ? `${s.municipio.nombre} (${s.municipio.departamento})` : null,
         latitud: s.latitud === null ? null : Number(s.latitud), longitud: s.longitud === null ? null : Number(s.longitud) })),
-      lineas: filas, totales: [...totales.entries()].map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 })),
+      lineas: filas.map(({ disposicion: _d, ...f }) => f), totales: [...totales.entries()].map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 })),
       transporte: [...transporte.values()], marcoLegal: [...permisosUsados.values()],
       verificacion: { codigo: acta.codigoVerificacion, url: this.urlVerificacion(acta.codigoVerificacion) },
+      textosLegales: textos.map((t) => ({ codigo: t.codigo, version: t.version, titulo: t.titulo, texto: t.texto })),
+      firma: { ciudad: conf.ciudadFirma?.trim() || null, representante: conf.representanteLegal?.trim() || null, cargo: conf.cargoFirmante?.trim() || null },
+      certificaciones: (conf.certificaciones ?? []).filter((x) => x?.norma),
     };
   }
 
@@ -200,8 +243,9 @@ class ActasService {
     if (acta.estado !== 'BORRADOR') throw new BadRequestException({ mensaje: `El acta ${acta.numero} ya fue emitida o anulada.` });
     if (acta.origen === 'CARGADA') throw new BadRequestException({ mensaje: 'Las actas cargadas de un aliado se emiten al cargarlas.' });
     const contenido = await this.contenido(a, acta, true);
-    const pdf = await this.archivos.guardar(a.empresaId, 'actas', await pdfActa(contenido), ['pdf']);
-    await this.db.acta.update({ where: { id }, data: { contenido: contenido as unknown as Prisma.InputJsonValue, estado: 'EMITIDA', emitidaPorId: a.id, pdfUrl: pdf.clave, emitidaEn: new Date(contenido.emitidaEn) } });
+    const buf = await pdfActa(contenido);
+    const pdf = await this.archivos.guardar(a.empresaId, 'actas', buf, ['pdf']);
+    await this.db.acta.update({ where: { id }, data: { contenido: contenido as unknown as Prisma.InputJsonValue, estado: 'EMITIDA', emitidaPorId: a.id, pdfUrl: pdf.clave, pdfSha256: sha256(buf), emitidaEn: new Date(contenido.emitidaEn) } });
     await this.audit.registrar(a, 'acta', id, 'EMITIR', { estado: 'BORRADOR' }, { estado: 'EMITIDA', lineas: contenido.lineas.length });
     return this.obtener(a, id);
   }
@@ -217,7 +261,7 @@ class ActasService {
     if (!cliente || !destino) throw new BadRequestException({ mensaje: 'Cliente o gestor no encontrado.' });
     const g = await this.archivos.guardar(a.empresaId, 'actas', file.buffer, ['pdf']);
     const acta = await this.db.$transaction(async (tx) => {
-      const x = await tx.acta.create({ data: { empresaId: a.empresaId, tipo: b.tipo, origen: 'CARGADA', clienteId: cliente.id, destinoId: destino.id, periodoDesde: b.periodoDesde, periodoHasta: b.periodoHasta, archivoUrl: g.clave, cargadaPorId: a.id } });
+      const x = await tx.acta.create({ data: { empresaId: a.empresaId, tipo: b.tipo, origen: 'CARGADA', clienteId: cliente.id, destinoId: destino.id, periodoDesde: b.periodoDesde, periodoHasta: b.periodoHasta, archivoUrl: g.clave, pdfSha256: sha256(file.buffer), cargadaPorId: a.id } });
       if (b.conciliacionItemIds.length) await this.vincular(tx, a, x.id, b.conciliacionItemIds);
       return tx.acta.findUniqueOrThrow({ where: { id: x.id }, include: { cliente: true, destino: true } });
     });
@@ -265,8 +309,7 @@ class ActasService {
     const x = await this.db.acta.findUnique({ where: { codigoVerificacion: codigo }, include: { empresa: { select: { razonSocial: true, nit: true } } } });
     if (!x || x.estado === 'BORRADOR') throw new NotFoundException({ valido: false, mensaje: 'No existe un documento emitido con ese código.' });
     return {
-      valido: x.estado === 'EMITIDA', estado: x.estado, numero: x.numero, tipo: x.tipo, emitidaEn: x.emitidaEn,
-      periodo: { desde: x.periodoDesde, hasta: x.periodoHasta }, emisor: x.empresa,
+      valido: x.estado === 'EMITIDA', estado: x.estado, numero: x.numero, emitidaEn: x.emitidaEn, emisor: { razonSocial: x.empresa.razonSocial },
       mensaje: x.estado === 'EMITIDA' ? 'Documento auténtico y vigente.' : `Documento ANULADO el ${x.anuladaEn?.toISOString().slice(0, 10) ?? ''}.`,
     };
   }

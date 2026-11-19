@@ -14,9 +14,10 @@ const TIPOS: Record<TipoActa, string> = { DISPOSICION: 'Tratamiento y disposici�
 interface ActaFila {
   id: string; numero: string; tipo: TipoActa; origen: 'GENERADA' | 'CARGADA'; estado: 'BORRADOR' | 'EMITIDA' | 'ANULADA'; periodoDesde: string; periodoHasta: string;
   emitidaEn: string | null; cliente: { razonSocial: string }; destino: { razonSocial: string }; emitidaPor: { nombre: string } | null; _count: { items: number };
+  generadorNit: string | null; generadorNombre: string | null;
 }
 interface ActaDetalle extends Omit<ActaFila, '_count' | 'cliente' | 'destino'> {
-  codigoVerificacion: string; urlVerificacion: string; motivoAnulacion: string | null; anuladaEn: string | null;
+  codigoVerificacion: string; urlVerificacion: string; motivoAnulacion: string | null; anuladaEn: string | null; pdfSha256: string | null;
   cliente: { razonSocial: string; nit: string }; destino: { razonSocial: string }; cargadaPor: { nombre: string } | null;
   items: { id: string; cantidadConciliada: string | null; metrica: { abreviacion: string } | null; disposicion: { nombre: string } | null;
     conciliacion: { manifiesto: { numero: string; fechaServicio: string } };
@@ -46,7 +47,7 @@ export function ActasServidor() {
   const cols: Column<ActaFila>[] = [
     { key: 'num', header: 'Número', render: (a) => <span className="num font-medium">{a.numero}</span>, priority: 3 },
     { key: 'tipo', header: 'Tipo', render: (a) => TIPOS[a.tipo], priority: 2 },
-    { key: 'cli', header: 'Cliente', render: (a) => <span className="block max-w-[220px] truncate">{a.cliente.razonSocial}</span>, priority: 3 },
+    { key: 'cli', header: 'Cliente', render: (a) => <span className="block max-w-[220px] truncate">{a.generadorNombre ? <>{a.generadorNombre} <span className="text-muted">· vía {a.cliente.razonSocial}</span></> : a.cliente.razonSocial}</span>, priority: 3 },
     { key: 'dest', header: 'Gestor', render: (a) => <span className="block max-w-[180px] truncate">{a.destino.razonSocial}{a.origen === 'CARGADA' && <Badge tone="info">aliado</Badge>}</span>, priority: 3 },
     { key: 'per', header: 'Periodo', render: (a) => <span className="num">{fmtFechaCorta(a.periodoDesde)} – {fmtFechaCorta(a.periodoHasta)}</span>, priority: 1 },
     { key: 'lin', header: 'Líneas', align: 'right', render: (a) => a._count.items, priority: 3 },
@@ -127,11 +128,13 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
           <DefList items={[
             ['Estado', <EstadoBadge estado={a.estado} />],
             ['Documento', `${TIPOS[a.tipo]}${a.origen === 'CARGADA' ? ' · cargada de un gestor aliado' : ''}`],
-            ['Cliente', `${a.cliente.razonSocial} · NIT ${a.cliente.nit}`],
+            ...(a.generadorNombre ? [['Generador', `${a.generadorNombre} · NIT ${a.generadorNit}`]] as [string, string][] : []),
+            [a.generadorNombre ? 'Gestor (cliente)' : 'Cliente', `${a.cliente.razonSocial} · NIT ${a.cliente.nit}`],
             ['Gestor', a.destino.razonSocial],
             ['Periodo', `${fmtFecha(a.periodoDesde)} a ${fmtFecha(a.periodoHasta)}`],
             ...(a.emitidaEn ? [['Emitida', `${fechaHoraCo(a.emitidaEn)}${a.emitidaPor ? ` · ${a.emitidaPor.nombre}` : ''}`]] as [string, string][] : []),
             ...(a.cargadaPor ? [['Cargada por', a.cargadaPor.nombre]] as [string, string][] : []),
+            ...(a.pdfSha256 ? [['Huella del PDF (SHA-256)', <span className="num break-all text-[11px]">{a.pdfSha256}</span>]] as [string, React.ReactNode][] : []),
             ...(a.estado === 'ANULADA' ? [['Anulación', `${fechaHoraCo(a.anuladaEn)} · ${a.motivoAnulacion ?? ''}`]] as [string, string][] : []),
             ...(a.estado !== 'BORRADOR' ? [['Verificación', <span className="flex flex-wrap items-center gap-2"><span className="num text-[12px]">{a.codigoVerificacion}</span>
               <Button size="sm" variant="ghost" onClick={copiar}><Copy size={14} /> Copiar enlace</Button>
@@ -168,6 +171,8 @@ function NuevaActa({ modo, clientes, onClose, onListo }: { modo: 'generar' | 'ca
   const toast = useToast();
   const cat = useCatalogos();
   const [f, setF] = useState(() => ({ clienteId: '', tipo: 'DISPOSICION' as TipoActa, destinoId: '', ...mesAnterior() }));
+  const [porGenerador, setPorGenerador] = useState(true);
+  const gestor = clientes.find((c) => c.id === f.clienteId)?.tipo === 'GESTOR';
   const [elegidas, setElegidas] = useState<Set<string>>(new Set());
   const [archivo, setArchivo] = useState<File | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -191,8 +196,8 @@ function NuevaActa({ modo, clientes, onClose, onListo }: { modo: 'generar' | 'ca
         const r = await api<{ id: string; numero: string }>('/actas/cargar', { form });
         toast(`Acta ${r.numero} del aliado cargada y emitida.`); onListo(r.id);
       } else {
-        const r = await api<{ id: string; numero: string }>('/actas', { cuerpo: { tipo: f.tipo, clienteId: f.clienteId, destinoId: f.destinoId || undefined, periodoDesde: f.desde, periodoHasta: f.hasta, conciliacionItemIds: [...elegidas] } });
-        toast(`Acta ${r.numero} creada en borrador: revísela y emítala.`); onListo(r.id);
+        const r = await api<{ id: string; numero: string; actas?: { numero: string }[] }>('/actas', { cuerpo: { tipo: f.tipo, clienteId: f.clienteId, destinoId: f.destinoId || undefined, periodoDesde: f.desde, periodoHasta: f.hasta, conciliacionItemIds: [...elegidas], porGenerador: gestor && porGenerador } });
+        toast(r.actas && r.actas.length > 1 ? `${r.actas.length} actas creadas en borrador, una por generador (${r.actas.map((x) => x.numero).join(', ')}).` : `Acta ${r.numero} creada en borrador: revísela y emítala.`); onListo(r.id);
       }
     } catch (e) { toast(msg(e), 'warn'); } finally { setOcupado(false); }
   };
@@ -206,6 +211,10 @@ function NuevaActa({ modo, clientes, onClose, onListo }: { modo: 'generar' | 'ca
           <Field label="Periodo desde" id="na-d"><Input id="na-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
           <Field label="Hasta" id="na-h"><Input id="na-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>
         </div>
+        {gestor && !cargar && (
+          <label className="flex items-start gap-2 rounded-lg bg-info/10 px-3 py-2 text-[13px]"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={porGenerador} onChange={(e) => setPorGenerador(e.target.checked)} />
+            <span>Es un cliente gestor: <b>un certificado por cada generador</b>, a nombre del generador (lo que el gestor entrega a sus clientes). Sin marcar, sale uno consolidado con el generador de cada línea.</span></label>
+        )}
         <Field label="Tipo de documento" id="na-t"><Select id="na-t" value={f.tipo} onChange={(e) => setF((s) => ({ ...s, tipo: e.target.value as TipoActa }))}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
         <Field label={cargar ? 'Gestor aliado' : 'Gestor que certifica'} id="na-g" hint={cargar ? undefined : 'Vacío: la planta propia'}>
           <Select id="na-g" value={f.destinoId} onChange={(e) => setF((s) => ({ ...s, destinoId: e.target.value }))}><option value="">{cargar ? 'Elija el gestor' : 'Planta propia'}</option>{destinos.map((x) => <option key={x.id} value={x.id}>{x.razonSocial}</option>)}</Select>

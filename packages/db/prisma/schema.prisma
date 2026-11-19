@@ -85,6 +85,7 @@ enum TipoNegociacion {
   COBRO // el cliente paga por la gestión
   COMPRA // Terra Viva compra el material (aprovechables)
   SIN_COSTO
+  CONTRATO // se factura aparte (tarifa global o contrato): la línea puede ir en 0
 }
 
 enum FormaPago {
@@ -175,6 +176,7 @@ enum TipoEvidencia {
 enum EstadoConciliacion {
   BORRADOR
   APROBADA // habilita el acta
+  ANULADA // se anuló su manifiesto: queda para el historial, no se borra
 }
 
 enum EstadoPago {
@@ -226,6 +228,8 @@ model Empresa {
   nit         String   @unique @db.VarChar(15)
   razonSocial String   @map("razon_social") @db.VarChar(200)
   logoUrl     String?  @map("logo_url")
+  /// Ciudad de firma, representante legal, certificaciones (ISO, Norsok) y nota de calibración de la báscula
+  configuracion Json   @default("{}")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   usuarios         Usuario[]
@@ -258,6 +262,7 @@ model Empresa {
   transportes      TransporteTercero[]
   conciliaciones   Conciliacion[]
   consecutivos     Consecutivo[]
+  textosLegales    TextoLegal[]
 
   @@map("empresas")
 }
@@ -326,6 +331,8 @@ model Usuario {
   manifiestosCreados      Manifiesto[]            @relation("MfCreadoPor")
   manifiestosRealizados   Manifiesto[]            @relation("MfRealizadoPor")
   manifiestosAnulados     Manifiesto[]            @relation("MfAnuladoPor")
+  manifiestosRecibidos    Manifiesto[]            @relation("MfReceptor")
+  textosLegales           TextoLegal[]            @relation("TextoLegalCreadoPor")
   evidenciasSubidas       ManifiestoEvidencia[]
   solicitudesAprobadas    Solicitud[]             @relation("SolAprobadaPor")
   conciliacionesAprobadas Conciliacion[]
@@ -872,6 +879,7 @@ model TransporteTercero {
   auxiliarArlId         String?  @map("auxiliar_arl_id") @db.Uuid
   auxiliarEpsId         String?  @map("auxiliar_eps_id") @db.Uuid
   telefono              String?  @db.VarChar(20)
+  nit                   String?  @db.VarChar(15) // NIT de la empresa transportadora
   createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   empresa      Empresa                 @relation(fields: [empresaId], references: [id])
@@ -1128,6 +1136,11 @@ model Manifiesto {
   anuladoPorId      String?          @map("anulado_por") @db.Uuid
   consecutivoRndc   String?          @map("consecutivo_rndc") @db.VarChar(30)
   pdfUrl            String?          @map("pdf_url")
+  // Recepción en planta (descargue): firma del receptor de Terra Viva además de la del conductor o el cliente
+  receptorId        String?          @map("receptor_id") @db.Uuid
+  receptorNombre    String?          @map("receptor_nombre") @db.VarChar(150)
+  receptorDocumento String?          @map("receptor_documento") @db.VarChar(20)
+  firmaReceptorUrl  String?          @map("firma_receptor_url")
   creadoPorId       String?          @map("creado_por") @db.Uuid
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz
 
@@ -1143,6 +1156,7 @@ model Manifiesto {
   causalAnulacion CatalogoItem?         @relation("CausalAnulacionMf", fields: [causalAnulacionId], references: [id])
   anuladoPor      Usuario?              @relation("MfAnuladoPor", fields: [anuladoPorId], references: [id])
   creadoPor       Usuario?              @relation("MfCreadoPor", fields: [creadoPorId], references: [id])
+  receptor        Usuario?              @relation("MfReceptor", fields: [receptorId], references: [id])
   items           ManifiestoItem[]
   evidencias      ManifiestoEvidencia[]
   conciliacion    Conciliacion?
@@ -1285,6 +1299,10 @@ model Acta {
   emitidaEn          DateTime?  @map("emitida_en") @db.Timestamptz
   emitidaPorId       String?    @map("emitida_por") @db.Uuid
   pdfUrl             String?    @map("pdf_url")
+  pdfSha256          String?    @map("pdf_sha256") @db.Char(64) // integridad del PDF emitido
+  // Certificado por generador (clientes GESTOR): la razón social del certificado es la del generador
+  generadorNit       String?    @map("generador_nit") @db.VarChar(15)
+  generadorNombre    String?    @map("generador_nombre") @db.VarChar(200)
   archivoUrl         String?    @map("archivo_url") // acta CARGADA de un gestor aliado
   cargadaPorId       String?    @map("cargada_por") @db.Uuid
   motivoAnulacion    String?    @map("motivo_anulacion") @db.VarChar(300)
@@ -1627,4 +1645,28 @@ model Municipio {
   sucursales Sucursal[]
 
   @@map("municipios")
+}
+
+/// Párrafos de respaldo legal del certificado. Cada código tiene versiones (una activa); el certificado guarda la que usó.
+/// Un párrafo solo sale si el certificado tiene residuos con alguna de sus disposiciones (vacío = siempre).
+model TextoLegal {
+  id            String   @id @default(uuid()) @db.Uuid
+  empresaId     String   @map("empresa_id") @db.Uuid
+  codigo        String   @db.VarChar(30)
+  version       Int
+  titulo        String   @db.VarChar(150)
+  texto         String
+  disposiciones String[] @db.VarChar(20)
+  orden         Int      @default(0) @db.SmallInt
+  vigenteDesde  DateTime @default(dbgenerated("CURRENT_DATE")) @map("vigente_desde") @db.Date
+  activo        Boolean  @default(true)
+  revisado      Boolean  @default(false) // texto inicial pendiente de revisión jurídica
+  creadoPorId   String?  @map("creado_por") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  empresa   Empresa  @relation(fields: [empresaId], references: [id])
+  creadoPor Usuario? @relation("TextoLegalCreadoPor", fields: [creadoPorId], references: [id])
+
+  @@unique([empresaId, codigo, version])
+  @@map("textos_legales")
 }

@@ -129,6 +129,30 @@ export const PERMISOS_CAS: { acto: string; autoridad?: string; expedicion?: stri
   { acto: 'Oficio SAA No. 0311-21', alcance: 'Inscripción como gestor de aceite de cocina usado (ACU), conforme a la Resolución 316 de 2018', disposiciones: ['ACU'], obligacion: ['Reporte trimestral de volúmenes de ACU gestionados', 'trimestral', '2027-01-10'] },
 ];
 
+/**
+ * Párrafos de respaldo legal del certificado: TEXTOS INICIALES, factuales, para que el área jurídica los revise o los
+ * reemplace por el texto propio de Terra Viva (Ajustes › Datos de la empresa; cada cambio queda como versión nueva).
+ * Cada uno sale solo si el certificado tiene residuos con alguna de sus disposiciones (vacío = siempre).
+ * Atienden las alertas 2 y 3 de docs/referencia/ANALISIS_DOCUMENTOS_REALES.md: sin afirmar «vertimiento cero» y sin
+ * «eliminar» la responsabilidad del generador (Ley 1252 de 2008).
+ */
+export const TEXTOS_LEGALES_INICIALES: { codigo: string; titulo: string; texto: string; disposiciones: string[]; orden: number }[] = [
+  { codigo: 'RESPONSABILIDAD', orden: 1, disposiciones: [], titulo: 'Responsabilidad del generador',
+    texto: 'De acuerdo con la Ley 1252 de 2008 y el Decreto 1076 de 2015, la responsabilidad del generador sobre sus residuos peligrosos subsiste hasta que se realice su aprovechamiento o disposición final. Este certificado acredita que el tratamiento y la disposición final de los residuos relacionados se realizaron en las condiciones aquí descritas.' },
+  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], titulo: 'Tratamiento y vertimiento al suelo',
+    texto: 'Las aguas residuales y lodos relacionados se trataron en el Parque de Saneamiento Ambiental Los Pinos, y su vertimiento al suelo se realizó en los términos del permiso otorgado por la Corporación Autónoma Regional de Santander (CAS) mediante la Resolución DGL No. 000632 de 2023, con el alcance técnico del Oficio SAO No. 1762-2023.' },
+  { codigo: 'BIORREMEDIACION', orden: 11, disposiciones: ['BIO'], titulo: 'Biorremediación',
+    texto: 'Los residuos relacionados se trataron por biorremediación (landfarming) en el Parque de Saneamiento Ambiental Los Pinos, al amparo de la Resolución DGL No. 000632 de 2023 de la CAS y del alcance técnico del Oficio SAO No. 1762-2023.' },
+  { codigo: 'RCD', orden: 12, disposiciones: ['RCD'], titulo: 'Residuos de construcción y demolición',
+    texto: 'Los residuos de construcción y demolición relacionados se gestionaron conforme a la Resolución 0235 de 2024 de la CAS y a la Resolución 0472 de 2017 del Ministerio de Ambiente y Desarrollo Sostenible.' },
+  { codigo: 'ACU', orden: 13, disposiciones: ['ACU'], titulo: 'Aceite de cocina usado',
+    texto: 'El aceite de cocina usado relacionado se gestionó por la empresa como gestor inscrito ante la CAS (Oficio SAA No. 0311-21), conforme a la Resolución 316 de 2018 del Ministerio de Ambiente y Desarrollo Sostenible.' },
+  { codigo: 'GESTOR_ALIADO', orden: 14, disposiciones: ['INCH', 'INCO', 'RS', 'COP', 'DES', 'DF', 'POS'], titulo: 'Gestores aliados',
+    texto: 'Los residuos cuyo tratamiento realizó un gestor aliado se entregaron a un gestor con licencia o programa vigente a la fecha del servicio, citado en la columna «Licencia y/o permiso».' },
+  { codigo: 'APROVECHAMIENTO', orden: 15, disposiciones: ['APR', 'REC'], titulo: 'Aprovechamiento',
+    texto: 'Los materiales relacionados se aprovecharon o valorizaron dentro del objeto social de la empresa, según su certificado de existencia y representación legal.' },
+];
+
 /** «Y9.1» → «Y9»; null si no es subcorriente. Las subcorrientes del IDEAM cuelgan de su corriente Y o código A. */
 export const corrienteDe = (codigo: string): string | null => /^(Y\d{1,2}|A\d{4})\.\d{1,2}$/i.exec(codigo.trim())?.[1].toUpperCase() ?? null;
 

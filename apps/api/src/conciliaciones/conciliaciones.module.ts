@@ -115,6 +115,7 @@ class ConciliacionesService {
 
   async cambiarEstado(a: Actor, id: string, estado: EstadoConciliacion) {
     const c = await this.propia(a, id);
+    if (c.estado === 'ANULADA') throw new BadRequestException({ mensaje: 'La conciliación está anulada: se anuló su manifiesto.' });
     if (c.estado === estado) throw new BadRequestException({ mensaje: estado === 'APROBADA' ? 'La conciliación ya está aprobada.' : 'La conciliación ya está en borrador.' });
     await this.db.conciliacion.update({ where: { id }, data: { estado, aprobadaPorId: estado === 'APROBADA' ? a.id : null } });
     await this.audit.registrar(a, 'conciliacion', id, estado === 'APROBADA' ? 'APROBAR' : 'REABRIR', { estado: c.estado }, { estado });
@@ -124,7 +125,7 @@ class ConciliacionesService {
   /** Consolidado de varias conciliaciones (por periodo y cliente). */
   async consolidado(a: Actor, f: z.infer<typeof Filtros>) {
     const cs = await this.db.conciliacion.findMany({
-      where: { empresaId: a.empresaId, estado: f.estado, manifiesto: { clienteId: f.clienteId, fechaServicio: f.desde || f.hasta ? { gte: f.desde, lte: f.hasta } : undefined } },
+      where: { empresaId: a.empresaId, estado: f.estado ?? { not: 'ANULADA' }, manifiesto: { clienteId: f.clienteId, fechaServicio: f.desde || f.hasta ? { gte: f.desde, lte: f.hasta } : undefined } },
       include: { manifiesto: { select: { pesoEntrada: true, pesoSalida: true, pesoNeto: true, cliente: { select: { id: true, razonSocial: true } } } }, items: lineas },
       take: 5000,
     });

@@ -11,7 +11,7 @@ import { cx, fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
 import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi } from '../../lib/servidor';
 import { CONC_OFICINA, MF_OFICINA, useClientes } from './comun';
 
-type Negociacion = 'COBRO' | 'COMPRA' | 'SIN_COSTO';
+type Negociacion = 'COBRO' | 'COMPRA' | 'SIN_COSTO' | 'CONTRATO';
 type Forma = 'CONTADO' | 'CREDITO_30' | 'CREDITO_60' | 'CREDITO_90';
 interface LineaConc {
   id: string; cantidadCargada: string; cantidadConciliada: string | null; precioUnitario: string | null; tipoNegociacion: Negociacion | null; formaPago: Forma | null;
@@ -31,7 +31,7 @@ interface ConcFila {
 }
 interface Consolidado { conciliaciones: number; totales: Totales }
 
-const NEGOCIACION: Record<Negociacion, string> = { COBRO: 'Cobro', COMPRA: 'Compra', SIN_COSTO: 'Sin costo' };
+const NEGOCIACION: Record<Negociacion, string> = { COBRO: 'Cobro', COMPRA: 'Compra', SIN_COSTO: 'Sin costo', CONTRATO: 'Por contrato' };
 const FORMA: Record<Forma, string> = { CONTADO: 'Contado', CREDITO_30: 'Crédito 30 días', CREDITO_60: 'Crédito 60 días', CREDITO_90: 'Crédito 90 días' };
 const PAGO = { PENDIENTE: 'Pendiente', ABONADA: 'Abonada', PAGADA: 'Pagada', ANULADA: 'Anulada' };
 const unidadDe = (l: LineaConc) => l.metrica?.abreviacion ?? l.manifiestoItem.metrica?.abreviacion ?? null;

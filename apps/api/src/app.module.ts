@@ -17,6 +17,7 @@ import { ManifiestosModule } from './manifiestos/manifiestos.module';
 import { ConciliacionesModule } from './conciliaciones/conciliaciones.module';
 import { ActasModule } from './actas/actas.module';
 import { InformesModule } from './informes/informes.module';
+import { EmpresaModule } from './empresa/empresa.module';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { InformesModule } from './informes/informes.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     PrismaModule, ComunModule, ArchivosModule, AuthModule,
     ClientesModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
-    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule,
+    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

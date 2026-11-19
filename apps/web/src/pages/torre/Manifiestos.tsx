@@ -1,6 +1,6 @@
 // Torre de control: manifiestos de transporte (lista, detalle con evidencias y firma, PDF escaneado y anulación).
 import { useEffect, useRef, useState } from 'react';
-import { RefreshCw, Ban, Paperclip, Scale, FileText, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Ban, Paperclip, Scale, FileText, AlertTriangle, Printer } from 'lucide-react';
 import { FilterBar, ResponsiveTable, type Column } from '../../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
@@ -22,7 +22,8 @@ interface MfDetalle {
   realizadoEn: string | null; motivoAnulacion: string | null; anuladoEn: string | null;
   cliente: { razonSocial: string; nit: string; dv: string | null }; destino: { razonSocial: string }; ruta: { codigo: string } | null;
   vehiculo: { placa: string; tipo: string } | null; conductor: { nombre: string; documento: string } | null; auxiliar: { nombre: string } | null;
-  transporte: { empresaTransportadora: string; placa: string | null; conductorNombre: string | null; conductorDocumento: string | null; auxiliarNombre: string | null;
+  receptorNombre: string | null; receptorDocumento: string | null; firmaReceptorUrl: string | null;
+  transporte: { empresaTransportadora: string; nit: string | null; placa: string | null; conductorNombre: string | null; conductorDocumento: string | null; auxiliarNombre: string | null;
     conductorArl: { nombre: string } | null; conductorEps: { nombre: string } | null } | null;
   causalAnulacion: { nombre: string } | null; conciliacion: { id: string; estado: string } | null; evidencias: Evidencia[];
   items: { id: string; cantidad: string; embalajes: number | null; precioUnitario: string | null; subtotal: number; observaciones: string | null;
@@ -110,6 +111,8 @@ function DetalleManifiesto({ id, onClose, onCambio }: { id: string | null; onClo
       footer={m && (anular
         ? <><Button onClick={() => setAnular(false)}>Volver</Button><Button variant="danger" disabled={ocupado || (!causal && motivo.trim().length < 3)} onClick={enviarAnular}><Ban size={16} /> Anular</Button></>
         : <>
+            <Button onClick={() => verPdf(`/manifiestos/${m.id}/pdf`).catch((x) => toast(msg(x), 'warn'))}><FileText size={16} /> PDF</Button>
+            {m.tipo === 'DESCARGUE' && m.estado !== 'PENDIENTE' && <Button onClick={() => verPdf(`/manifiestos/${m.id}/recibo`).catch((x) => toast(msg(x), 'warn'))}><Printer size={16} /> Recibo</Button>}
             {m.conciliacion && <Button onClick={irConciliacion}><Scale size={16} /> Conciliación</Button>}
             {tienePermiso('manifiestos.operar') && m.estado !== 'ANULADO' && !pdfs.length && <Button disabled={ocupado} onClick={() => archivo.current?.click()}><Paperclip size={16} /> Adjuntar PDF</Button>}
             {puedeAnular && <Button variant="ghost" onClick={() => setAnular(true)}><Ban size={16} /> Anular</Button>}
@@ -131,7 +134,7 @@ function DetalleManifiesto({ id, onClose, onCambio }: { id: string | null; onClo
             ['Cliente', `${m.cliente.razonSocial} · NIT ${m.cliente.nit}${m.cliente.dv ? `-${m.cliente.dv}` : ''}`],
             ['Destino', m.destino.razonSocial],
             ...(m.ruta ? [['Ruta', m.ruta.codigo]] as [string, string][] : []),
-            ['Vehículo', m.vehiculo ? `${m.vehiculo.placa} · ${m.vehiculo.tipo}` : m.transporte ? `${m.transporte.placa ?? 'Sin placa'} · ${m.transporte.empresaTransportadora}` : '—'],
+            ['Vehículo', m.vehiculo ? `${m.vehiculo.placa} · ${m.vehiculo.tipo}` : m.transporte ? `${m.transporte.placa ?? 'Sin placa'} · ${m.transporte.empresaTransportadora}${m.transporte.nit ? ` (NIT ${m.transporte.nit})` : ''}` : '—'],
             ['Conductor', m.conductor ? `${m.conductor.nombre} · CC ${m.conductor.documento}` : m.transporte?.conductorNombre ? `${m.transporte.conductorNombre}${m.transporte.conductorDocumento ? ` · CC ${m.transporte.conductorDocumento}` : ''}` : '—'],
             ...(m.transporte ? [['ARL / EPS', `${m.transporte.conductorArl?.nombre ?? 'Sin ARL'} / ${m.transporte.conductorEps?.nombre ?? 'Sin EPS'}`]] as [string, string][] : []),
             ['Auxiliar', m.auxiliar?.nombre ?? m.transporte?.auxiliarNombre ?? '—'],
@@ -143,7 +146,12 @@ function DetalleManifiesto({ id, onClose, onCambio }: { id: string | null; onClo
             ...(m.realizadoEn ? [['Grabado', `${fechaHoraCo(m.realizadoEn)} · firmó ${m.firmaNombre ?? ''}${m.firmaDocumento ? ` (CC ${m.firmaDocumento})` : ''}`]] as [string, string][] : []),
             ...(m.estado === 'ANULADO' ? [['Anulación', `${fechaHoraCo(m.anuladoEn)} · ${[m.causalAnulacion?.nombre, m.motivoAnulacion].filter(Boolean).join(' · ')}`]] as [string, string][] : []),
           ]} />
-          {m.firmaUrl && <div><p className="mb-1 text-[12px] text-muted">Firma</p><ImagenProtegida clave={m.firmaUrl} alt="Firma del conductor" className="h-24 w-full max-w-xs rounded-lg border border-line bg-white object-contain" /></div>}
+          {(m.firmaUrl || m.firmaReceptorUrl) && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {m.firmaReceptorUrl && <div><p className="mb-1 text-[12px] text-muted">Recibe por Terra Viva: {m.receptorNombre}{m.receptorDocumento ? ` (CC ${m.receptorDocumento})` : ''}</p><ImagenProtegida clave={m.firmaReceptorUrl} alt="Firma del receptor" className="h-24 w-full rounded-lg border border-line bg-white object-contain" /></div>}
+              {m.firmaUrl && <div><p className="mb-1 text-[12px] text-muted">{m.tipo === 'DESCARGUE' ? 'Entrega' : 'Conductor'}: {m.firmaNombre}</p><ImagenProtegida clave={m.firmaUrl} alt="Firma de quien entrega" className="h-24 w-full rounded-lg border border-line bg-white object-contain" /></div>}
+            </div>
+          )}
 
           <section className="flex flex-col gap-2">
             <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Residuos y servicios</h3>

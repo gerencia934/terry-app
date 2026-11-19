@@ -16,7 +16,7 @@ import { DeclaracionesModule, DeclaracionesService } from '../declaraciones/decl
 const MAX_MB = 10;
 const digitos = (s?: string) => (s ?? '').replace(/\D/g, '');
 const mapa = <T extends string>(pares: [string, T][]) => (v?: string) => pares.find(([k]) => norm(k) === norm(v ?? ''))?.[1];
-const negociacion = mapa<TipoNegociacion>([['Cobro', 'COBRO'], ['Compra', 'COMPRA'], ['Sin costo', 'SIN_COSTO']]);
+const negociacion = mapa<TipoNegociacion>([['Cobro', 'COBRO'], ['Compra', 'COMPRA'], ['Sin costo', 'SIN_COSTO'], ['Por contrato', 'CONTRATO']]);
 const formaPago = mapa<FormaPago>([['Contado', 'CONTADO'], ['Crédito 30 días', 'CREDITO_30'], ['Crédito 60 días', 'CREDITO_60'], ['Crédito 90 días', 'CREDITO_90']]);
 const unidad = mapa<UnidadMedida>([['kg', 'KG'], ['t', 'TON'], ['m³', 'M3'], ['m3', 'M3'], ['gal', 'GAL'], ['L', 'L'], ['und', 'UND']]);
 const estadoFisico = mapa(ESTADOS_FISICOS);

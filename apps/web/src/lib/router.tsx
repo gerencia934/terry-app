@@ -7,7 +7,7 @@ export const ROUTES = [
   'clientes', 'declaraciones', 'tarifas', 'exportar',
   'solicitudes', 'por-confirmar', 'programacion', 'programacion-tabla', 'seguimiento',
   'inspecciones', 'manifiestos',
-  'recepcion', 'inventario', 'certificados',
+  'recepcion', 'descargues', 'inventario', 'certificados',
   'permisos',
   'indicadores', 'informes',
   'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'catalogos', 'etapas',

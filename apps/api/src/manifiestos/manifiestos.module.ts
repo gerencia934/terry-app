@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EstadoManifiesto, Prisma, TipoConciliacion, TipoManifiesto } from '@prisma/client';
 import { z } from 'zod';
@@ -6,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
+import { pdfManifiesto, pdfRecibo, type DatosManifiesto } from './pdf';
 
 type Tx = Prisma.TransactionClient;
 const id = z.string().uuid();
@@ -16,7 +18,8 @@ const placa = z.string().trim().toUpperCase().regex(/^([A-Z]{3}\d{3}|[A-Z]{3}\d{
 
 /** Vehículo y tripulación de un tercero (descargas). Datos personales: Ley 1581 de 2012. */
 const Transporte = z.object({
-  empresaTransportadora: z.string().trim().min(2).max(200), tipoVehiculo: texto(40), placa: placa.optional(),
+  empresaTransportadora: z.string().trim().min(2).max(200), nit: z.string().trim().regex(/^\d{6,15}$/, 'NIT de la transportadora: solo números, sin dígito de verificación.').optional(),
+  tipoVehiculo: texto(40), placa: placa.optional(),
   conductorNombre: texto(150), conductorDocumento: texto(20), conductorArlId: id.optional(), conductorEpsId: id.optional(),
   auxiliarNombre: texto(150), auxiliarDocumento: texto(20), auxiliarArlId: id.optional(), auxiliarEpsId: id.optional(), telefono: texto(20),
 });
@@ -44,6 +47,9 @@ const Actualizar = z.object({
 const Grabar = z.object({
   firma: z.string().max(700_000, 'La firma es demasiado grande.'), firmaNombre: z.string().trim().min(3).max(150), firmaDocumento: z.string().trim().min(3).max(20),
   horaLlegada: z.coerce.date(), horaSalida: z.coerce.date(), pesoEntrada: peso.optional(), pesoSalida: peso.optional(), pesoNeto: peso.optional(), observaciones: texto(2000),
+  // Descarga en planta: también firma el receptor de Terra Viva (documentos reales §2)
+  firmaReceptor: z.string().max(700_000, 'La firma es demasiado grande.').optional(), receptorNombre: z.string().trim().min(3).max(150).optional(),
+  receptorDocumento: z.string().trim().min(3).max(20).optional(),
 });
 const Anular = z.object({ causalId: id.optional(), motivo: texto(300) }).refine((b) => b.causalId || b.motivo, { message: 'Indique la causal o el motivo.' });
 const Evidencia = z.object({ tipo: z.enum(['FOTO', 'PDF']), tomadaEn: z.coerce.date().optional(), latitud: z.coerce.number().min(-5).max(14).optional(), longitud: z.coerce.number().min(-82).max(-66).optional() });
@@ -251,13 +257,66 @@ export class ManifiestosService {
     const pesoSalida = b.pesoSalida ?? (m.pesoSalida === null ? undefined : Number(m.pesoSalida));
     const pesoNeto = b.pesoNeto ?? (pesoEntrada !== undefined && pesoSalida !== undefined ? Math.round((pesoEntrada - pesoSalida) * 100) / 100 : (m.pesoNeto === null ? undefined : Number(m.pesoNeto)));
     if (pesoNeto !== undefined && pesoNeto < 0) throw new BadRequestException({ mensaje: 'El peso de salida no puede ser mayor que el de entrada.' });
+    if (m.tipo === 'DESCARGUE' && (!b.firmaReceptor || !b.receptorNombre))
+      throw new BadRequestException({ mensaje: 'En una descarga en planta firman el receptor de Terra Viva y el conductor o el cliente: falta la firma del receptor.' });
     const firma = await this.archivos.guardar(a.empresaId, 'firmas', firmaDesdeDataUrl(b.firma), ['png']);
+    const receptor = b.firmaReceptor ? await this.archivos.guardar(a.empresaId, 'firmas', firmaDesdeDataUrl(b.firmaReceptor), ['png']) : null;
     await this.db.manifiesto.update({ where: { id }, data: {
       firmaUrl: firma.clave, firmaNombre: b.firmaNombre, firmaDocumento: b.firmaDocumento, horaLlegada: b.horaLlegada, horaSalida: b.horaSalida,
       pesoEntrada, pesoSalida, pesoNeto, observaciones: b.observaciones ?? m.observaciones, estado: 'REALIZADO', realizadoPorId: a.id,
+      ...(receptor ? { firmaReceptorUrl: receptor.clave, receptorNombre: b.receptorNombre, receptorDocumento: b.receptorDocumento ?? null, receptorId: a.id } : {}),
     } });
     await this.audit.registrar(a, 'manifiesto', id, 'GRABAR', { estado: m.estado }, { estado: 'REALIZADO', pesoNeto });
     return this.obtener(a, id);
+  }
+
+  /** Datos del PDF: se arman al pedirlo, desde lo grabado (el manifiesto grabado ya no cambia). */
+  private async datosPdf(a: Actor, id: string): Promise<DatosManifiesto> {
+    const m = await this.db.manifiesto.findFirst({ where: { id, empresaId: a.empresaId }, include: {
+      empresa: true, cliente: true, destino: true, ruta: true, vehiculo: true, conductor: true, auxiliar: true, causalAnulacion: true,
+      transporte: { include: { conductorArl: true, conductorEps: true } },
+      items: { orderBy: { id: 'asc' }, include: { declaracion: { include: { codigoY: true, codigoA: true } }, sucursal: true, metrica: true, disposicion: true, tipoEmbalaje: true } },
+    } });
+    if (!m) throw new NotFoundException({ mensaje: 'Manifiesto no encontrado.' });
+    const leer = async (clave: string | null) => (clave ? (await this.archivos.leer(clave, a.empresaId).catch(() => null))?.buf ?? null : null);
+    const conf = (m.empresa.configuracion ?? {}) as { notaBascula?: string };
+    const t = m.transporte;
+    const n = (v: Prisma.Decimal | null) => (v === null ? null : Number(v));
+    return {
+      numero: m.numero, tipo: m.tipo, estado: m.estado, fechaServicio: m.fechaServicio.toISOString(),
+      emisor: { razonSocial: m.empresa.razonSocial, nit: m.empresa.nit, notaBascula: conf.notaBascula?.trim() || null },
+      cliente: { razonSocial: m.cliente.razonSocial, nit: `${m.cliente.nit}${m.cliente.dv ? `-${m.cliente.dv}` : ''}` },
+      destino: m.destino.razonSocial, ordenCompra: m.ordenCompra, manifiestoCliente: m.manifiestoCliente, ruta: m.ruta?.codigo ?? null,
+      transporte: t
+        ? { empresa: t.empresaTransportadora, nit: t.nit, placa: t.placa, tipoVehiculo: t.tipoVehiculo, conductor: t.conductorNombre, conductorDocumento: t.conductorDocumento,
+            arl: t.conductorArl?.nombre ?? null, eps: t.conductorEps?.nombre ?? null, auxiliar: t.auxiliarNombre }
+        : { empresa: m.empresa.razonSocial, nit: m.empresa.nit, placa: m.vehiculo?.placa ?? null, tipoVehiculo: m.vehiculo?.tipo ?? null, conductor: m.conductor?.nombre ?? null,
+            conductorDocumento: m.conductor?.documento ?? null, arl: null, eps: null, auxiliar: m.auxiliar?.nombre ?? null },
+      horaLlegada: m.horaLlegada?.toISOString() ?? null, horaSalida: m.horaSalida?.toISOString() ?? null,
+      bascula: { entrada: n(m.pesoEntrada), salida: n(m.pesoSalida), neto: n(m.pesoNeto) },
+      lineas: m.items.map((i) => ({
+        generador: i.sucursal.generadorNombre ?? `${i.sucursal.codigo ? `${i.sucursal.codigo} · ` : ''}${i.sucursal.nombre}`, generadorNit: i.sucursal.generadorNit,
+        residuo: i.declaracion.nombre, corrientes: [i.declaracion.codigoY?.codigo, i.declaracion.codigoA?.codigo].filter(Boolean) as string[],
+        cantidad: Number(i.cantidad), unidad: i.metrica?.abreviacion ?? 'und', embalajes: i.embalajes !== null ? `${i.embalajes} ${i.tipoEmbalaje?.nombre ?? ''}`.trim() : null,
+        tratamiento: i.disposicion?.nombre ?? '—',
+      })),
+      observaciones: m.observaciones,
+      firmas: [
+        ...(m.tipo === 'DESCARGUE' ? [{ titulo: 'Recibe por Terra Viva', nombre: m.receptorNombre, documento: m.receptorDocumento, imagen: await leer(m.firmaReceptorUrl) }] : []),
+        { titulo: m.tipo === 'DESCARGUE' ? 'Entrega (conductor o cliente)' : 'Conductor', nombre: m.firmaNombre, documento: m.firmaDocumento, imagen: await leer(m.firmaUrl) },
+      ],
+      realizadoEn: m.realizadoEn?.toISOString() ?? null,
+      anulacion: m.estado === 'ANULADO' ? [m.causalAnulacion?.nombre, m.motivoAnulacion].filter(Boolean).join(' · ') || null : null,
+    };
+  }
+
+  async pdf(a: Actor, id: string, res: Response, recibo: boolean) {
+    const d = await this.datosPdf(a, id);
+    const buf = recibo ? await pdfRecibo(d) : await pdfManifiesto(d);
+    await this.audit.registrar(a, 'manifiesto', id, recibo ? 'RECIBO_PDF' : 'PDF');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${recibo ? 'recibo' : 'manifiesto'}-${d.numero}.pdf"`);
+    res.send(buf);
   }
 
   async anular(a: Actor, id: string, b: z.infer<typeof Anular>) {
@@ -276,6 +335,8 @@ class ManifiestosController {
   constructor(private readonly s: ManifiestosService) {}
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
+  @Get(':id/pdf') pdf(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.pdf(a, id, res, false); }
+  @Get(':id/recibo') recibo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.pdf(a, id, res, true); }
   @Permiso('manifiestos.operar') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(Crear)) b: z.infer<typeof Crear>) { return this.s.crear(a, b); }
   @Permiso('manifiestos.operar') @Post('desde-ruta') desdeRuta(@ActorActual() a: Actor, @Body(new Zod(DesdeRuta)) b: z.infer<typeof DesdeRuta>) { return this.s.desdeRuta(a, b); }
   @Permiso('manifiestos.operar') @Patch(':id') actualizar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Actualizar)) b: z.infer<typeof Actualizar>) { return this.s.actualizar(a, id, b); }

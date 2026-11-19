@@ -282,7 +282,7 @@ r = await llamar('POST', `/rutas/${rutaB.id}/rastreo`, { token: T8, cuerpo: { pu
 prueba('GPS en lote: guarda el punto de la etapa con rastreo y rechaza el de antes de salir', r.status === 201 && r.json.guardados === 1 && r.json.rechazados.length === 1, JSON.stringify(r.json));
 
 r = await llamar('POST', '/manifiestos/desde-ruta', { token: T8, cuerpo: { rutaId: rutaB.id } });
-prueba('manifiesto de cargue desde la ruta, con consecutivo', r.status === 201 && r.json.length === 1 && /^MF-\d{4}-\d{5}$/.test(r.json[0].numero), JSON.stringify(r.json).slice(0, 200));
+prueba('manifiesto de cargue desde la ruta, con consecutivo', r.status === 201 && r.json.length === 1 && /^TV\d{4,}$/.test(r.json[0].numero), JSON.stringify(r.json).slice(0, 200));
 const mfB = r.json[0];
 r = await llamar('GET', `/manifiestos/${mfB.id}`, { token: T8 });
 prueba('la línea trae precio de la tarifa, disposición principal y métrica', r.status === 200 && r.json.items.length === 1 && Number(r.json.items[0].precioUnitario) === 780 && r.json.items[0].disposicion?.codigo === 'BIO' && r.json.items[0].metrica?.abreviacion === 'kg', JSON.stringify(r.json.items?.[0]).slice(0, 300));
@@ -333,7 +333,7 @@ prueba('no se anula un manifiesto con conciliación aprobada → 409', r.status 
 r = await llamar('GET', `/actas/pendientes?clienteId=${suc.clienteId}`, { token: T8 });
 prueba('la línea aprobada queda pendiente de certificar', r.status === 200 && r.json.some((x) => x.id === lineaB));
 r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.clienteId, periodoDesde: '2026-11-01', periodoHasta: '2026-11-30' } });
-prueba('crear el acta del periodo con las líneas aprobadas', r.status === 201 && /^ACT-\d{4}-\d{5}$/.test(r.json.numero), JSON.stringify(r.json));
+prueba('crear el acta del periodo con las líneas aprobadas (número PSAP{año}-{n})', r.status === 201 && /^PSAP\d{4}-\d+$/.test(r.json.numero), JSON.stringify(r.json));
 const actaB = r.json;
 r = await llamar('POST', `/actas/${actaB.id}/emitir`, { token: T8 });
 prueba('emitir: copia fija con soporte legal (Res. DGL 000632 de 2023) y PDF', r.status === 201 && r.json.estado === 'EMITIDA' && r.json.pdfUrl && JSON.stringify(r.json.contenido).includes('000632 de 2023'), JSON.stringify(r.json).slice(0, 300));
@@ -358,14 +358,17 @@ const solD = r.json;
 r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE', clienteId: suc.clienteId, fechaServicio: '2026-11-26', solicitudId: solD.id } });
 prueba('manifiesto de descargue desde la solicitud, con el transportador de la solicitud', r.status === 201, JSON.stringify(r.json));
 const mfD = r.json;
-r = await llamar('POST', `/manifiestos/${mfD.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-26T08:00:00-05:00', horaSalida: '2026-11-26T08:30:00-05:00', pesoEntrada: 12000, pesoSalida: 11900 } });
+const receptor = { firmaReceptor: `data:image/png;base64,${PNG}`, receptorNombre: 'Receptor de planta', receptorDocumento: '1098000111' };
+r = await llamar('POST', `/manifiestos/${mfD.id}/grabar`, { token: T8, cuerpo: { ...firma, ...receptor, horaLlegada: '2026-11-26T08:00:00-05:00', horaSalida: '2026-11-26T08:30:00-05:00', pesoEntrada: 12000, pesoSalida: 11900 } });
 prueba('descargue sin ARL ni EPS del conductor → 409', r.status === 409 && /ARL y EPS del conductor/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('PATCH', `/manifiestos/${mfD.id}`, { token: T8, cuerpo: { transporte: { empresaTransportadora: 'Transportes del Magdalena', placa: 'XYZ123', conductorNombre: 'Conductor tercero', conductorDocumento: '91234567', conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id } } });
 r = await llamar('POST', `/manifiestos/${mfD.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-26T08:00:00-05:00', horaSalida: '2026-11-26T08:30:00-05:00', pesoEntrada: 12000, pesoSalida: 11900 } });
-prueba('con ARL y EPS el descargue se graba', r.status === 201 && r.json.estado === 'REALIZADO', JSON.stringify(r.json).slice(0, 200));
+prueba('descargue sin la firma del receptor de Terra Viva → 400', r.status === 400 && /receptor/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', `/manifiestos/${mfD.id}/grabar`, { token: T8, cuerpo: { ...firma, ...receptor, horaLlegada: '2026-11-26T08:00:00-05:00', horaSalida: '2026-11-26T08:30:00-05:00', pesoEntrada: 12000, pesoSalida: 11900 } });
+prueba('con ARL, EPS y las dos firmas el descargue se graba', r.status === 201 && r.json.estado === 'REALIZADO', JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', `/manifiestos/${mfD.id}/anular`, { token: T8, cuerpo: { causalId: (await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL' } })).id } });
 const lineaD = await db.solicitudItem.findFirst({ where: { solicitudId: solD.id } });
-prueba('anular el descargue: sin conciliación y la línea vuelve a pendiente', r.status === 201 && !(await db.conciliacion.findUnique({ where: { manifiestoId: mfD.id } })) && lineaD.estado === 'PENDIENTE');
+prueba('anular el descargue: la conciliación queda ANULADA (nada legal se borra) y la línea vuelve a pendiente', r.status === 201 && (await db.conciliacion.findUnique({ where: { manifiestoId: mfD.id } }))?.estado === 'ANULADA' && lineaD.estado === 'PENDIENTE');
 
 // Documentos reales: las solicitudes automáticas se agrupan por sede y fecha (antes, una por residuo)
 const sedePrincipal = await db.sucursal.findFirst({ where: { clienteId: suc.clienteId, esPrincipal: true } });
@@ -402,6 +405,49 @@ prueba('cargar como acta de aliado un archivo que no es PDF → 400', r.status =
 r = await llamar('POST', '/actas/cargar', { token: T8, form: archivoForm(PDF, 'acta-aliado.pdf', camposAliado) });
 prueba('cargar el acta de un gestor aliado: queda emitida y descargable', r.status === 201 && r.json.origen === 'CARGADA' && r.json.estado === 'EMITIDA'
   && (await descargar(`/actas/${r.json.id}/pdf`, T8)).buf.subarray(0, 4).toString() === '%PDF', JSON.stringify(r.json).slice(0, 200));
+
+// Documentos reales: numeración TV/PSAP, recepción en planta con NIT y dos firmas, recibo y manifiesto en PDF
+r = await llamar('GET', '/empresa', { token: T8 });
+prueba('Datos de la empresa: la numeración de manifiestos es TV####', r.status === 200 && /^TV\d{4}$/.test(r.json.consecutivos.find((c) => c.documento === 'MANIFIESTO')?.siguiente), JSON.stringify(r.json.consecutivos));
+r = await llamar('PATCH', '/empresa/consecutivos/MANIFIESTO', { token: T8, cuerpo: { ultimo: 1830 } });
+prueba('continuar la serie del sistema anterior: el siguiente es TV1831', r.status === 200 && r.json.consecutivos.find((c) => c.documento === 'MANIFIESTO').siguiente === 'TV1831', JSON.stringify(r.json));
+r = await llamar('PATCH', '/empresa/consecutivos/MANIFIESTO', { token: T8, cuerpo: { ultimo: 10 } });
+prueba('bajar el último número → 400 (se repetirían números)', r.status === 400);
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE', clienteId: suc.clienteId, fechaServicio: '2026-11-28',
+  transporte: { empresaTransportadora: 'Limpieza y Logística E2E', nit: '901234567', placa: 'LPM847', tipoVehiculo: 'Vacuum', conductorNombre: 'Conductor del cliente', conductorDocumento: '91000111', conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id },
+  items: [{ declaracionId: lodo.id, sucursalId: suc.id, cantidad: 12 }] } });
+const mfTv = r.json;
+prueba('recepción de un transportador externo con NIT: el manifiesto queda TV1831', r.status === 201 && mfTv.numero === 'TV1831', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/manifiestos/${mfTv.id}/grabar`, { token: T8, cuerpo: { ...firma, ...receptor, horaLlegada: '2026-11-28T07:00:00-05:00', horaSalida: '2026-11-28T07:40:00-05:00', pesoEntrada: 18500, pesoSalida: 6400 } });
+prueba('…se graba con las dos firmas y báscula (neto 12.100 kg)', r.status === 201 && Number(r.json.pesoNeto) === 12100 && r.json.receptorNombre === 'Receptor de planta' && r.json.transporte?.nit === '901234567', JSON.stringify(r.json).slice(0, 300));
+const pdfMf = await descargar(`/manifiestos/${mfTv.id}/pdf`, T8);
+const recibo = await descargar(`/manifiestos/${mfTv.id}/recibo`, T8);
+prueba('manifiesto completo y recibo angosto en PDF (mismo número)', pdfMf.status === 200 && pdfMf.buf.subarray(0, 4).toString() === '%PDF' && recibo.status === 200 && recibo.buf.subarray(0, 4).toString() === '%PDF');
+// Facturación por contrato: la línea no necesita precio
+const concAuto = await db.conciliacion.findUnique({ where: { manifiestoId: mfAuto.id }, include: { items: true } });
+r = await llamar('PATCH', `/conciliaciones/${concAuto.id}/items`, { token: T8, cuerpo: { items: concAuto.items.map((i) => ({ id: i.id, tipoNegociacion: 'CONTRATO', precioUnitario: null })) } });
+await llamar('POST', `/conciliaciones/${concAuto.id}/igualar`, { token: T8, cuerpo: {} });
+r = await llamar('POST', `/conciliaciones/${concAuto.id}/aprobar`, { token: T8 });
+prueba('facturación por contrato: se aprueba sin precio y no suma al cobro', r.status === 201 && r.json.estado === 'APROBADA' && r.json.totales.cobro === 0, JSON.stringify(r.json).slice(0, 300));
+// Certificado por generador de un cliente gestor, con textos legales que aplican, firma y hash
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { ciudadFirma: 'Sabana de Torres', representanteLegal: 'Representante E2E', certificaciones: [{ norma: 'ISO 9001:2015', numero: 'CO-SC-123' }] } });
+prueba('configurar ciudad de firma, representante y certificaciones', r.status === 200 && r.json.configuracion.ciudadFirma === 'Sabana de Torres');
+await db.cliente.update({ where: { id: suc.clienteId }, data: { tipo: 'GESTOR' } });
+await db.sucursal.update({ where: { id: suc.id }, data: { generadorNit: '800111222', generadorNombre: 'Generador Tercero S.A.S.' } });
+r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.clienteId, periodoDesde: '2026-11-01', periodoHasta: '2026-11-30', porGenerador: true } });
+const actaGen = r.json.actas?.find((x) => x.generadorNit === '800111222');
+prueba('cliente gestor: un certificado por generador, a nombre del generador', r.status === 201 && actaGen?.generadorNombre === 'Generador Tercero S.A.S.' && /^PSAP\d{4}-\d+$/.test(actaGen.numero), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/actas/${actaGen.id}/emitir`, { token: T8 });
+const contenido = r.json.contenido ?? {};
+const textos = (contenido.textosLegales ?? []).map((t) => t.codigo);
+prueba('el certificado lleva al generador, la firma con ciudad y representante, y la certificación ISO', r.status === 201 && contenido.version === 2 && contenido.generador?.razonSocial === 'Generador Tercero S.A.S.'
+  && contenido.firma?.ciudad === 'Sabana de Torres' && contenido.certificaciones?.some((c) => c.numero === 'CO-SC-123'), JSON.stringify(contenido).slice(0, 300));
+prueba('solo los textos legales que aplican (responsabilidad y biorremediación; no RCD)', textos.includes('RESPONSABILIDAD') && textos.includes('BIORREMEDIACION') && !textos.includes('RCD'), JSON.stringify(textos));
+const pdfGen = await descargar(`/actas/${actaGen.id}/pdf`, T8);
+const { createHash } = await import('node:crypto');
+prueba('se guarda el hash SHA-256 del PDF emitido y coincide con el descargado', r.json.pdfSha256 === createHash('sha256').update(pdfGen.buf).digest('hex'));
+r = await llamar('GET', `/verificar/${r.json.codigoVerificacion}`);
+prueba('la verificación pública muestra solo número, fecha y validez', r.status === 200 && r.json.valido && r.json.numero && !('periodo' in r.json) && !('tipo' in r.json), JSON.stringify(r.json));
 
 r = await llamar('GET', '/informes/rutas/rendimiento?desde=2026-11-25&hasta=2026-11-25', { token: T8 });
 const rend = r.json.rutas?.find((x) => x.rutaId === rutaB.id);

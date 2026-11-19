@@ -7,7 +7,7 @@ import shared from '@terraviva/shared';
 
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
   PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS,
-  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR } = shared;
+  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR, TEXTOS_LEGALES_INICIALES } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
@@ -18,6 +18,7 @@ const PERMISOS = [
   ['manifiestos.operar', 'Diligenciar, firmar y grabar manifiestos'], ['manifiestos.anular', 'Anular manifiestos'],
   ['conciliaciones.gestionar', 'Conciliar cantidades y registrar facturas y pagos'], ['conciliaciones.aprobar', 'Aprobar y reabrir conciliaciones'],
   ['actas.emitir', 'Emitir, cargar y anular actas y certificados'], ['informes.ver', 'Ver informes de operación'],
+  ['empresa.configurar', 'Configurar datos de la empresa, numeración y textos legales del certificado'],
   ['rutas.programar', 'Programar rutas'], ['rutas.operar', 'Operar rutas en campo (preoperacional, paradas, estados)'],
   ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel'],
   ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
@@ -95,6 +96,18 @@ async function main() {
     if (!(await db.obligacionPermiso.count({ where: { permisoId: p.id } })))
       await db.obligacionPermiso.create({ data: { permisoId: p.id, descripcion: `${desc} (VERIFICAR fecha y periodicidad en el acto)`, periodicidad: per, proximaFecha: new Date(f) } });
   }
+
+  // Textos legales del certificado: texto inicial por revisar (revisado = false); cada cambio en Ajustes crea una versión.
+  for (const t of TEXTOS_LEGALES_INICIALES) {
+    if (await db.textoLegal.findFirst({ where: { empresaId: E, codigo: t.codigo } })) continue;
+    await db.textoLegal.create({ data: { empresaId: E, version: 1, revisado: false, ...t } });
+  }
+  // Configuración de la empresa para los documentos (se completa en Ajustes › Datos de la empresa)
+  const emp = await db.empresa.findUniqueOrThrow({ where: { id: E } });
+  if (!emp.configuracion || !Object.keys(emp.configuracion).length) await db.empresa.update({ where: { id: E }, data: { configuracion: {
+    ciudadFirma: '', representanteLegal: '', cargoFirmante: 'Representante legal', notaBascula: '',
+    certificaciones: ['ISO 9001:2015', 'ISO 14001:2015', 'ISO 45001:2018', 'NORSOK S-006'].map((norma) => ({ norma, numero: '' })),
+  } } });
 
   // Zonas, bodegas, destinos
   for (const [nombre, color] of [['Área Metropolitana BGA', '#2A78D6'], ['Magdalena Medio', '#EB6834'], ['Sabana – Lebrija', '#1BAF7A'], ['Provincia de Mares / Chucurí', '#EDA100']])

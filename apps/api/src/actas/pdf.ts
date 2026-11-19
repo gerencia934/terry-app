@@ -5,7 +5,8 @@ import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 
 export interface ContenidoActa {
-  version: 1;
+  /** 1: contenido de las primeras actas. 2: agrega generador, textos legales, firma y certificaciones (documentos reales). */
+  version: 1 | 2;
   origen: 'GENERADA' | 'CARGADA';
   tipo: 'DISPOSICION' | 'CONCILIACION' | 'APROVECHAMIENTO';
   numero: string;
@@ -14,15 +15,24 @@ export interface ContenidoActa {
   emisor: { razonSocial: string; nit: string };
   destino: { razonSocial: string; nit: string; municipio: string | null };
   cliente: { razonSocial: string; nit: string; dv: string | null };
+  /** v2: certificado de UN generador de un cliente gestor (su razón social encabeza el certificado). */
+  generador?: { razonSocial: string; nit: string } | null;
+  /** v2: el cliente es un gestor con varios generadores (cada línea dice el suyo). */
+  clienteGestor?: boolean;
   sedes: { codigo: string | null; nombre: string; direccion: string | null; municipio: string | null; latitud: number | null; longitud: number | null }[];
   lineas: {
     manifiesto: string; fechaServicio: string; residuo: string; codigoInterno: string | null; peligroso: boolean; corrientes: string[];
     sede: string; cantidad: number; unidad: string; tratamiento: string; soporte: string[];
+    generador?: string; generadorNit?: string | null; // v2
   }[];
   totales: { unidad: string; cantidad: number }[];
   transporte: { manifiesto: string; vehiculo: string | null; transportador: string }[];
   marcoLegal: { acto: string; autoridad: string; alcance: string; vence: string | null }[];
   verificacion: { codigo: string; url: string };
+  /** v2: párrafos de respaldo legal que aplican a las disposiciones del certificado (con su versión). */
+  textosLegales?: { codigo: string; version: number; titulo: string; texto: string }[];
+  firma?: { ciudad: string | null; representante: string | null; cargo: string | null };
+  certificaciones?: { norma: string; numero: string }[];
 }
 
 const TITULOS = {
@@ -36,6 +46,7 @@ const fecha = (iso: string) => { const [a, m, d] = iso.slice(0, 10).split('-'); 
 /** Instantes (emisión): se muestran en hora de Colombia, no en UTC. */
 const fechaInstante = (iso: string) => new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' });
 const num = (v: number) => v.toLocaleString('es-CO', { maximumFractionDigits: 2 });
+const fechaLarga = (iso: string) => new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'long', year: 'numeric' });
 
 export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'LETTER', margins: { top: 48, bottom: 60, left: 48, right: 48 }, bufferPages: true,
@@ -83,17 +94,32 @@ export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
 
   // ---------- 1. Generador ----------
   seccion('1. Generador');
-  doc.text(`${c.cliente.razonSocial} · NIT ${c.cliente.nit}${c.cliente.dv ? `-${c.cliente.dv}` : ''}`, x0, doc.y, { width: ancho }).moveDown(0.3);
+  const nitCliente = `${c.cliente.nit}${c.cliente.dv ? `-${c.cliente.dv}` : ''}`;
+  if (c.generador) {
+    // Cliente gestor: el certificado es del generador; el gestor figura como quien contrató el servicio
+    doc.font('Helvetica-Bold').text(`${c.generador.razonSocial} · NIT ${c.generador.nit}`, x0, doc.y, { width: ancho })
+      .font('Helvetica').text(`Gestor que contrató el servicio: ${c.cliente.razonSocial} · NIT ${nitCliente}`, x0, doc.y, { width: ancho }).moveDown(0.3);
+  } else {
+    doc.text(`${c.cliente.razonSocial} · NIT ${nitCliente}${c.clienteGestor ? ' (gestor: el generador de cada residuo va en la relación)' : ''}`, x0, doc.y, { width: ancho }).moveDown(0.3);
+  }
   tabla([{ t: 'Sede', w: 0.26 }, { t: 'Dirección', w: 0.32 }, { t: 'Municipio', w: 0.18 }, { t: 'Coordenadas', w: 0.24 }],
     c.sedes.map((s) => [`${s.codigo ? `${s.codigo} · ` : ''}${s.nombre}`, s.direccion ?? '', s.municipio ?? '',
       s.latitud !== null && s.longitud !== null ? `${s.latitud.toFixed(5)}, ${s.longitud.toFixed(5)}` : 'Sin registro']));
 
   // ---------- 2. Residuos ----------
   seccion('2. Residuos y servicios gestionados');
-  tabla([{ t: 'Manifiesto', w: 0.13 }, { t: 'Fecha', w: 0.09 }, { t: 'Residuo / servicio', w: 0.22 }, { t: 'Cantidad', w: 0.08, der: true }, { t: 'Unidad', w: 0.07 },
-    { t: 'Tratamiento', w: 0.18 }, { t: 'Soporte legal', w: 0.23 }],
-    c.lineas.map((l) => [l.manifiesto, fecha(l.fechaServicio), `${l.residuo}${l.corrientes.length ? ` (${l.corrientes.join(', ')})` : ''}${l.peligroso ? ' · RESPEL' : ''}`,
-      num(l.cantidad), l.unidad, l.tratamiento, l.soporte.join('; ')]));
+  if (c.clienteGestor && !c.generador) {
+    // Consolidado del gestor: cada línea con su generador
+    tabla([{ t: 'Manifiesto', w: 0.12 }, { t: 'Fecha', w: 0.08 }, { t: 'Generador', w: 0.17 }, { t: 'Residuo / servicio', w: 0.17 }, { t: 'Cantidad', w: 0.08, der: true },
+      { t: 'Unidad', w: 0.06 }, { t: 'Tratamiento', w: 0.14 }, { t: 'Licencia y/o permiso', w: 0.18 }],
+      c.lineas.map((l) => [l.manifiesto, fecha(l.fechaServicio), `${l.generador ?? l.sede}${l.generadorNit ? ` · NIT ${l.generadorNit}` : ''}`,
+        `${l.residuo}${l.corrientes.length ? ` (${l.corrientes.join(', ')})` : ''}${l.peligroso ? ' · RESPEL' : ''}`, num(l.cantidad), l.unidad, l.tratamiento, l.soporte.join('; ')]));
+  } else {
+    tabla([{ t: 'Manifiesto', w: 0.13 }, { t: 'Fecha', w: 0.09 }, { t: 'Residuo / servicio', w: 0.22 }, { t: 'Cantidad', w: 0.08, der: true }, { t: 'Unidad', w: 0.07 },
+      { t: 'Tratamiento', w: 0.18 }, { t: c.version >= 2 ? 'Licencia y/o permiso' : 'Soporte legal', w: 0.23 }],
+      c.lineas.map((l) => [l.manifiesto, fecha(l.fechaServicio), `${l.residuo}${l.corrientes.length ? ` (${l.corrientes.join(', ')})` : ''}${l.peligroso ? ' · RESPEL' : ''}`,
+        num(l.cantidad), l.unidad, l.tratamiento, l.soporte.join('; ')]));
+  }
   doc.moveDown(0.3).font('Helvetica-Bold').fontSize(9).text(`Total: ${c.totales.map((t) => `${num(t.cantidad)} ${t.unidad}`).join(' · ')}`, x0, doc.y, { width: ancho });
 
   // ---------- 3. Transporte ----------
@@ -109,15 +135,27 @@ export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
   doc.moveDown(0.5).text(
     `${c.emisor.razonSocial} certifica que recibió y gestionó los residuos y servicios relacionados en este documento, en las cantidades ` +
     `conciliadas con el generador, mediante los tratamientos indicados y al amparo de los actos administrativos citados.` +
-    (peligrosos ? ' Los residuos peligrosos se gestionaron conforme al Decreto 1076 de 2015 (Libro 2, Parte 2, Título 6) y a la Ley 1252 de 2008.' : ''),
+    (peligrosos && !c.textosLegales ? ' Los residuos peligrosos se gestionaron conforme al Decreto 1076 de 2015 (Libro 2, Parte 2, Título 6) y a la Ley 1252 de 2008.' : ''),
     x0, doc.y, { width: ancho, align: 'justify' });
+  // v2: solo los párrafos que aplican a las disposiciones de este certificado (administrados en Ajustes, con versión)
+  for (const t of c.textosLegales ?? []) {
+    if (doc.y > doc.page.height - doc.page.margins.bottom - 50) doc.addPage();
+    doc.moveDown(0.4).font('Helvetica-Bold').fontSize(9).text(t.titulo, x0, doc.y, { width: ancho })
+      .font('Helvetica').text(t.texto, x0, doc.y, { width: ancho, align: 'justify' });
+  }
 
   // ---------- Firma ----------
-  if (doc.y > doc.page.height - doc.page.margins.bottom - 90) doc.addPage();
-  doc.moveDown(3.5);
+  if (doc.y > doc.page.height - doc.page.margins.bottom - 110) doc.addPage();
+  if (c.firma?.ciudad) doc.moveDown(0.8).font('Helvetica').fontSize(9).text(`Lugar y fecha: ${c.firma.ciudad}, ${fechaLarga(c.emitidaEn)}.`, x0, doc.y, { width: ancho });
+  doc.moveDown(3.2);
   const yf = doc.y;
   doc.moveTo(x0, yf).lineTo(x0 + 220, yf).lineWidth(0.6).strokeColor('black').stroke();
-  doc.font('Helvetica-Bold').fontSize(9).text('Representante legal', x0, yf + 4).font('Helvetica').text(c.emisor.razonSocial);
+  doc.font('Helvetica-Bold').fontSize(9).text(c.firma?.representante || 'Representante legal', x0, yf + 4)
+    .font('Helvetica').text(c.firma?.representante ? (c.firma.cargo || 'Representante legal') : c.emisor.razonSocial);
+  if (c.firma?.representante) doc.text(c.emisor.razonSocial);
+  // Certificaciones del sistema de gestión (solo las que tienen número)
+  const sellos = (c.certificaciones ?? []).filter((x) => x.numero?.trim());
+  if (sellos.length) doc.moveDown(0.8).fontSize(7.5).fillColor(GRIS).text(`Sistema de gestión certificado: ${sellos.map((x) => `${x.norma} (certificado ${x.numero})`).join(' · ')}`, x0, doc.y, { width: ancho }).fillColor('black');
 
   // ---------- Pie de página en todas las hojas ----------
   const rango = doc.bufferedPageRange();

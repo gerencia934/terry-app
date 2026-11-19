@@ -20,6 +20,8 @@ import { ManifiestosServidor } from './pages/torre/Manifiestos';
 import { ConciliacionServidor } from './pages/torre/Conciliacion';
 import { ActasServidor } from './pages/torre/Actas';
 import { SolicitudesServidor } from './pages/torre/Solicitudes';
+import { RecepcionPlantaServidor } from './pages/torre/Recepcion';
+import { EmpresaServidor } from './pages/torre/Empresa';
 import Verificar from './pages/Verificar';
 
 function Screen() {
@@ -54,6 +56,7 @@ function Screen() {
       case 'inspecciones': return <Inspecciones />;
       case 'manifiestos': return MODO_REAL ? <ManifiestosServidor /> : <Manifiestos />;
       case 'recepcion': return MODO_REAL ? <ConciliacionServidor /> : <Recepcion />;
+      case 'descargues': return MODO_REAL ? <RecepcionPlantaServidor /> : <Recepcion />;
       case 'inventario': return <Inventario />;
       case 'certificados': return MODO_REAL ? <ActasServidor /> : <Certificados />;
       case 'permisos': return <Permisos />;
@@ -61,7 +64,7 @@ function Screen() {
       case 'informes': return <Informes />;
       case 'ajustes': return <ConfigIndex />;
       case 'importar': return <Cargues />;
-      case 'empresa': return <MisDatos />;
+      case 'empresa': return MODO_REAL ? <EmpresaServidor /> : <MisDatos />;
       case 'vehiculos': return <Vehiculos />;
       case 'usuarios': return <Usuarios />;
       case 'catalogos': return <Catalogos />;

@@ -1,0 +1,154 @@
+# Revisión: requisitos de producción frente a lo construido
+
+Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase-3-operacion`. Para cada requisito dice si
+**ya se cumple (✅)**, **se cumple en parte (⚠️)** o **falta (❌)**, y cómo se ajusta. Al final está el orden propuesto.
+
+## Resumen para la gerencia
+
+**Lo que ya está bien hecho:**
+- El API no guarda estado: la sesión viaja en un token firmado, así que se pueden correr varias copias.
+- Las URL usan identificadores UUID, no consecutivos adivinables.
+- Contraseñas argon2id, bloqueo por intentos y recuperación con token de un solo uso.
+- Permisos por rol y aislamiento entre empresas, con pruebas automáticas.
+- Auditoría de cambios.
+- Los manifiestos y certificados emitidos se anulan con causa, nunca se borran.
+- QR de verificación pública.
+- Reglas del negocio en la base de datos, que no se saltan ni con cargue masivo.
+
+**Lo que hay que ajustar antes de cargar datos reales:**
+1. **Listados para 2.000 clientes.** Hoy algunas pantallas cargan hasta 500 clientes en una lista: deben pasar a
+   buscadores y páginas.
+2. **Descargas.** Deben salir del almacenamiento con enlace firmado de 5 minutos, no a través del API.
+3. **Trabajos pesados en cola:** ZIP, Excel e informes.
+4. **Nada legal se borra:** hay dos borrados automáticos al anular un manifiesto que deben ser anulaciones.
+5. **Auditoría con IP, ingresos y exportaciones.**
+6. **Doble factor (2FA)** para el personal interno.
+7. **Aceptación de la política de datos** en el primer ingreso (Ley 1581).
+8. **Rol de cliente y barrera en la base (RLS)** para el portal de clientes.
+9. **Pruebas automáticas en GitHub** con cada cambio.
+
+**Lo que necesita decisión o contratación de la gerencia** (no se puede hacer solo con código):
+- Nube administrada.
+- Cloudflare.
+- Copias en otra región.
+- Monitoreo (Sentry o similar).
+- Prueba de penetración.
+- Llaves de Siigo y Wialon.
+- Textos de la política de datos.
+- Proteger la rama `main` y exigir 2FA en GitHub: lo hace el dueño de la cuenta.
+
+## 1. Alcance y escala
+
+| Requisito | Estado | Ajuste |
+|---|---|---|
+| API sin estado, varias copias detrás de un balanceador | ⚠️ El token es sin estado. Pero el límite de peticiones vive en la memoria de cada copia, y los archivos en el disco del servidor | Límite de peticiones en un almacén compartido (Redis); archivos en S3 |
+| Índices y paginación en todos los listados | ⚠️ El API pagina (máximo 500 por página), pero varias pantallas piden 200 a 500 registros de una vez y los selectores de cliente cargan los primeros 500. El consolidado de conciliaciones suma en memoria hasta 5.000 | Buscador de clientes con autocompletar; bandejas con «cargar más»; consolidado sumado en la base |
+| PDF y reportes pesados en cola | ❌ El PDF del acta, el ZIP de actas y los Excel se generan durante la petición | Cola de trabajos en PostgreSQL (no exige Redis). El usuario recibe aviso y enlace cuando está listo |
+| Archivos con URL firmada, no a través del API | ❌ Fotos, firmas y PDF pasan por el API | Almacenamiento privado tipo S3. El API verifica el permiso y entrega un enlace firmado de 5 minutos. En desarrollo, el enlace firmado lo sirve el propio API |
+
+## 2. Aislamiento de datos de clientes (crítico)
+
+| Requisito | Estado | Ajuste |
+|---|---|---|
+| Rol `CLIENTE` ligado a un `cliente_id` (administrador del cliente y consulta; sedes opcionales) | ❌ No existe todavía: es el portal de clientes (paso 3 del orden) | Usuario con `cliente_id`, perfil y sedes permitidas |
+| Doble barrera: filtro en el API y RLS en la base | ⚠️ El API filtra por empresa en cada consulta (probado). Falta el filtro por cliente y la RLS | RLS por empresa y por cliente en las tablas con datos de clientes; el API fija la empresa y el cliente en cada transacción |
+| Pruebas: el cliente A recibe 403/404 en cada endpoint al pedir datos de B | ⚠️ Hay pruebas entre empresas, no entre clientes | Prueba automática que recorre todos los endpoints (listados, detalle, descargas y filtros) |
+| Descargas solo con URL firmada de corta vida; almacenamiento nunca público | ⚠️ Es privado y verifica la empresa, pero sin URL firmada | Ver §1 |
+| UUID en las URL; el consecutivo es solo un dato visible | ✅ | — |
+
+## 3. Conservación e integridad
+
+| Requisito | Estado | Ajuste |
+|---|---|---|
+| Retención de 10 años | ⚠️ Nada se depura, pero falta la política escrita y el almacenamiento con bloqueo | S3 con versionado y bloqueo de objeto (WORM) |
+| Nada legal se borra; borrado lógico | ⚠️ Los documentos emitidos se anulan con causa, usuario y fecha. Pero al **anular un manifiesto la base borra su conciliación en borrador** y las solicitudes recurrentes que nadie ha tocado | Pasan a estado «anulada» y quedan en el historial. Los datos del módulo de declaraciones ya se conservan |
+| Auditoría con quién, qué, cuándo **y desde qué IP** | ⚠️ Falta la IP. Tampoco registra ingresos ni exportaciones | Se agregan IP y navegador; se registran ingresos, descargas masivas y exportaciones |
+| Hash SHA-256 de los PDF emitidos | ❌ | Se guarda al emitir el certificado (y al cargar el de un aliado) |
+| QR público con **solo** número, fecha y validez | ⚠️ Muestra además tipo, periodo y emisor | Se deja solo lo pedido |
+| Versionado y bloqueo (WORM) | ❌ (infraestructura) | S3 con *Object Lock* en modo cumplimiento |
+| Copias 3-2-1, punto en el tiempo (PITR) de 7 días, RPO de 15 min, RTO de 4 h, restauración mensual | ❌ (infraestructura) | PostgreSQL administrado con PITR, volcado cifrado diario en otra región y guía de prueba mensual |
+
+## 4. Seguridad (OWASP ASVS nivel 2)
+
+| Requisito | Estado | Ajuste |
+|---|---|---|
+| argon2id, bloqueo por intentos, recuperación de un solo uso | ✅ | — |
+| 2FA (TOTP) obligatorio para internos, opcional para clientes | ❌ | TOTP con códigos de respaldo; obligatorio para el personal |
+| Sesiones revocables y cierre en todos los dispositivos | ⚠️ Son revocables y el token de renovación rota, pero falta el botón «cerrar en todos los dispositivos» | Se agregan el endpoint y el botón |
+| Aviso por correo de ingreso nuevo | ❌ | Correo cuando el ingreso viene de una IP o navegador nuevo |
+| Cloudflare, HSTS y base sin acceso público | ❌ (infraestructura) | En el despliegue |
+| Permisos por rol | ✅ | — |
+| Exportaciones solo para roles autorizados y registradas | ⚠️ Exigen sesión, pero no un permiso propio ni quedan en la auditoría | Permiso «exportar» y registro de cada exportación |
+| Secretos en el gestor del proveedor | ⚠️ Hoy en `.env` local (bien para desarrollo) | En producción, gestor de secretos |
+| Pull requests con pruebas en GitHub Actions, Dependabot, CodeQL | ❌ | Se agregan los flujos de trabajo al repositorio |
+| Rama `main` protegida y 2FA en GitHub | ❌ | Lo configura el dueño de la cuenta en GitHub |
+| Registro de errores, alertas y monitoreo | ❌ | Sentry opcional por variable de entorno; alertas por picos de ingresos fallidos, descargas masivas y errores 5xx |
+| Prueba de penetración y prueba de carga (400 usuarios, p95 < 1 s) | ❌ | Guion k6 en el repositorio para correr en `staging`; la prueba de penetración la contrata la gerencia |
+
+## 5. Datos personales (Ley 1581)
+
+| Requisito | Estado | Ajuste |
+|---|---|---|
+| Autorización registrada en el primer ingreso | ❌ | Se registra fecha, IP y versión de la política aceptada; sin aceptarla no se entra |
+| Política, aviso de privacidad, contrato de encargo y RNBD | ❌ (gerencia) | Los textos los da la gerencia; el sistema enlaza la versión vigente |
+| Exportar o corregir los datos de un titular | ❌ | Exportación de los datos de un usuario o conductor desde Ajustes |
+
+## 6. Infraestructura
+
+Hoy hay `Dockerfile` y `docker-compose.yml`, suficientes para desarrollo y para una primera instalación.
+
+**Propuesta para producción:**
+- Dirección: `app.terravivasas.com`.
+- Base de datos: PostgreSQL administrado con PITR, por ejemplo DigitalOcean Managed Databases o AWS RDS.
+- API: contenedores (dos copias como mínimo) detrás de un balanceador.
+- Archivos: almacenamiento S3 privado con bloqueo de objeto.
+- Perímetro: Cloudflare delante.
+- Ambientes: dos, `staging` y `produccion`.
+- Despliegue automático desde GitHub, con vuelta a la versión anterior.
+
+El sitio web sigue en Hostinger.
+
+## 7. Integraciones
+
+Siigo, Wialon, el módulo Comercial (en reemplazo de Bigin) y la salida de Grinclic van en sus fases (pasos 4 a 7).
+Todas usarán una tabla de envíos pendientes (patrón *outbox*) con reintentos y registro de cada intercambio. Así,
+si Siigo o Wialon fallan, la operación sigue.
+
+## 8. Orden propuesto
+
+1. **Terminar lo pedido de los documentos reales:**
+   - recepción en planta;
+   - numeración TV y PSAP;
+   - certificado por generador con textos legales condicionados y hash.
+2. **Ajustes de código de esta revisión**, todos en esta rama y con pruebas:
+   - auditoría con IP y de exportaciones;
+   - QR mínimo;
+   - anular en vez de borrar;
+   - buscador de clientes y listados paginados;
+   - consolidado sumado en la base;
+   - aceptación de la política de datos;
+   - cierre en todos los dispositivos;
+   - flujos de GitHub (pruebas, Dependabot, CodeQL);
+   - guion de carga k6.
+3. **Declaraciones, fases B y C:**
+   - formulario de 8 secciones;
+   - CSV;
+   - cargue desde el portal;
+   - reversión de lotes.
+4. **Antes de cargar datos reales** (infraestructura y seguridad):
+   - nube;
+   - copias;
+   - S3 con URL firmada;
+   - cola de trabajos;
+   - RLS;
+   - 2FA;
+   - monitoreo.
+5. **Siguientes pasos:**
+   - portal de clientes;
+   - Wialon;
+   - Siigo;
+   - módulo Comercial;
+   - pruebas de penetración y de carga;
+   - operación en paralelo y salida de Grinclic.
+
+La lista de lo aplicado está en `docs/CONTEXTO_PROYECTO.md`.

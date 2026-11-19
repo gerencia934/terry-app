@@ -35,7 +35,7 @@ export interface RutaApi {
 let cache: Promise<Catalogos> | null = null;
 let cacheClientes: Promise<ClienteRef[]> | null = null;
 alCambiarSesion(() => { cache = null; cacheClientes = null; });
-export interface ClienteRef { id: string; razonSocial: string; nit: string }
+export interface ClienteRef { id: string; razonSocial: string; nit: string; tipo?: 'DIRECTO' | 'GESTOR' }
 export function useClientes() {
   const [c, setC] = useState<ClienteRef[] | null>(null);
   useEffect(() => {

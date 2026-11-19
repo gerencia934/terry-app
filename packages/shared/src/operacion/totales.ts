@@ -6,7 +6,7 @@ export interface LineaTotal {
   cantidadConciliada: number | string | null;
   precioUnitario: number | string | null;
   unidad: string | null; // abreviatura de la métrica (kg, m³…); null = global / sin unidad
-  tipoNegociacion: 'COBRO' | 'COMPRA' | 'SIN_COSTO' | null;
+  tipoNegociacion: 'COBRO' | 'COMPRA' | 'SIN_COSTO' | 'CONTRATO' | null; // CONTRATO: se factura aparte (no suma aquí)
   formaPago: 'CONTADO' | 'CREDITO_30' | 'CREDITO_60' | 'CREDITO_90' | null;
 }
 export interface Bascula { pesoEntrada?: number | string | null; pesoSalida?: number | string | null; pesoNeto?: number | string | null }
@@ -29,6 +29,9 @@ const redondear = (v: number) => Math.round(v * 100) / 100;
 /** Valor de una línea: cantidad conciliada (o cargada si aún no se concilia) × precio. */
 export const valorLinea = (l: LineaTotal) => redondear(n(l.cantidadConciliada ?? l.cantidadCargada) * n(l.precioUnitario));
 
+/** Negociaciones que no suman al cobro: sin costo, y por contrato (se factura aparte). */
+const SIN_VALOR = new Set(['SIN_COSTO', 'CONTRATO']);
+
 export function totalesConciliacion(lineas: LineaTotal[], basculas: Bascula[] = []): Totales {
   const unidades = new Map<string, { cargado: number; conciliado: number }>();
   let cobro = 0, compra = 0, contado = 0, credito = 0, sinConciliar = 0;
@@ -38,11 +41,13 @@ export function totalesConciliacion(lineas: LineaTotal[], basculas: Bascula[] = 
     acc.cargado += n(l.cantidadCargada);
     acc.conciliado += n(l.cantidadConciliada);
     unidades.set(u, acc);
-    if (l.cantidadConciliada === null || l.cantidadConciliada === '' || l.precioUnitario === null || l.precioUnitario === '') sinConciliar++;
+    // Por contrato o sin costo, la línea no necesita precio (misma regla que la base al aprobar)
+    const sinPrecio = (l.precioUnitario === null || l.precioUnitario === '') && !SIN_VALOR.has(l.tipoNegociacion ?? '');
+    if (l.cantidadConciliada === null || l.cantidadConciliada === '' || sinPrecio) sinConciliar++;
     const valor = valorLinea(l);
     if (l.tipoNegociacion === 'COMPRA') compra += valor;
-    else if (l.tipoNegociacion !== 'SIN_COSTO') cobro += valor;
-    if (l.tipoNegociacion !== 'SIN_COSTO') {
+    else if (!SIN_VALOR.has(l.tipoNegociacion ?? '')) cobro += valor;
+    if (!SIN_VALOR.has(l.tipoNegociacion ?? '')) {
       if (!l.formaPago || l.formaPago === 'CONTADO') contado += valor; else credito += valor;
     }
   }

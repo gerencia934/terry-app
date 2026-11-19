@@ -60,7 +60,7 @@ export const lista = (v?: string) => (v ?? '').split(';').map((x) => x.trim()).f
 // ---------------- Listas ----------------
 export const L = {
   siNo: ['Sí', 'No'],
-  negociacion: ['Cobro', 'Compra', 'Sin costo'],
+  negociacion: ['Cobro', 'Compra', 'Sin costo', 'Por contrato'],
   formaPago: ['Contado', 'Crédito 30 días', 'Crédito 60 días', 'Crédito 90 días'],
   tipoPersona: ['Jurídica', 'Natural'],
   tipoCliente: ['Directo', 'Gestor'],

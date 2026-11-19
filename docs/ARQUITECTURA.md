@@ -16,7 +16,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 60 tablas, 8 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 61 tablas, 10 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Fase 2 |
@@ -33,10 +33,11 @@ certificado ante la CAS o el cliente.
 | Logística | `solicitudes` (+ `:id/aprobacion`, `:id/estado`, `items/:id/descartar`), `rutas` (código automático R-AAAAMMDD-NN), `PATCH rutas/:id`, `rutas/:id/items`, `rutas/:id/rastreo`, `programacion/pendientes`, `PATCH rutas/:id/estado`, `preoperacionales`, `PATCH paradas/:id` | Solo residuos autorizados (trigger); la ruta no inicia sin inspección aprobada (trigger); cancelar siempre se permite |
 | Cumplimiento | `permisos-ambientales`, `PATCH obligaciones/:id/cumplida`, `alertas`, `catalogos`, `vehiculos`, `personal`, `zonas`, `estados-recorrido`, `elementos-chequeo`, `salud` | Alertas de obligaciones, SOAT/RTM/póliza, licencias y curso MP, rutas sin inspección |
 | Importación | `GET importacion/plantillas[/:id/archivo]`, `POST importacion/:id/vista-previa · confirmar`, `GET historial` | Revalida todo en servidor; guarda en una transacción; registra el cargue |
-| Manifiestos | `manifiestos`, `desde-ruta`, `:id/items`, `:id/evidencias`, `:id/grabar`, `:id/anular` | Firma táctil, báscula, ARL/EPS de terceros; al grabar abre la conciliación (regla en la base) |
+| Manifiestos | `manifiestos`, `desde-ruta`, `:id/items`, `:id/evidencias`, `:id/grabar`, `:id/anular`, `:id/pdf`, `:id/recibo` (80 mm) | Firma táctil, báscula, ARL/EPS de terceros; al grabar abre la conciliación (regla en la base) |
 | Conciliaciones | `conciliaciones`, `consolidado`, `:id/items`, `:id/igualar · aprobar · reabrir`, `:id/excel` | Totales por unidad (shared); ±2 % con justificación; aprobada solo cambia factura/pago |
 | Actas | `actas`, `pendientes`, `:id/emitir`, `cargar`, `:id/pdf`, `zip`, `verificar/:código` (pública; el QR abre `<web>/#verificar/<código>`) | Solo líneas aprobadas; soporte legal a la fecha del servicio; PDF con QR (pdfkit) |
 | Informes | `informes/rutas/rendimiento`, `informes/rutas/costos` | Cumplimiento por ruta/día/rango; fletes en Excel |
+| Empresa | `empresa`, `PATCH empresa/configuracion`, `PATCH empresa/consecutivos/:documento`, `empresa/textos-legales` (versiones) | Numeración TV/PSAP (el último número solo sube); textos legales con versión que salen según la disposición |
 | Archivos | `archivos?clave=` | Carpeta local por empresa (S3/R2 en producción); tipo real validado |
 
 Detalle de la cadena operativa: `docs/operacion/MODELO_OPERACION.md`.

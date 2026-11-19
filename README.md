@@ -73,7 +73,7 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-109 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
+132 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
 declaraciones y permisos ambientales, residuos no autorizados, inspección vehicular, tarifas, auditoría y la cadena
 operativa completa: programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con
 QR, actas de aliados e informes.
@@ -84,7 +84,7 @@ Reglas de la cadena operativa escritas directamente en la base (sin API), sobre 
 DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:reglas -w @terraviva/db
 ```
 
-43 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
+46 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
 conciliación, actas y descargue en planta.
 
 ## App del conductor (celular, sin señal)

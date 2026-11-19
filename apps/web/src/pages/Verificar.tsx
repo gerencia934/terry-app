@@ -4,13 +4,11 @@ import { Logo } from '../components/AppShell';
 import { Button, DefList, Field, Input } from '../components/ui';
 import { API_URL, MODO_REAL } from '../lib/api';
 import { codigoVerificacion } from '../lib/router';
-import { cx, fmtFecha } from '../lib/format';
+import { cx } from '../lib/format';
 
 interface Respuesta {
-  valido: boolean; estado?: 'EMITIDA' | 'ANULADA'; numero?: string; tipo?: 'DISPOSICION' | 'APROVECHAMIENTO' | 'CONCILIACION';
-  emitidaEn?: string | null; periodo?: { desde: string; hasta: string }; emisor?: { razonSocial: string; nit: string }; mensaje: string;
+  valido: boolean; estado?: 'EMITIDA' | 'ANULADA'; numero?: string; emitidaEn?: string | null; emisor?: { razonSocial: string }; mensaje: string;
 }
-const TIPOS = { DISPOSICION: 'Certificado de tratamiento y disposición final', APROVECHAMIENTO: 'Certificado de aprovechamiento', CONCILIACION: 'Acta de conciliación de residuos' };
 const CODIGO = /^[0-9a-f]{24}$/;
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -78,13 +76,11 @@ export default function Verificar() {
               {res.numero && (
                 <DefList items={[
                   ['Número', <span className="num font-semibold">{res.numero}</span>],
-                  ['Documento', res.tipo ? TIPOS[res.tipo] : '—'],
-                  ['Periodo', res.periodo ? `${fmtFecha(res.periodo.desde)} a ${fmtFecha(res.periodo.hasta)}` : '—'],
                   ['Emitido', res.emitidaEn ? fechaHora(res.emitidaEn) : '—'],
-                  ['Emisor', res.emisor ? `${res.emisor.razonSocial} · NIT ${res.emisor.nit}` : '—'],
+                  ['Emisor', res.emisor?.razonSocial ?? '—'],
                 ]} />
               )}
-              {res.numero && <p className="text-[12px] text-subtle">Por protección de datos, esta página no muestra la información del generador. Compare el número y el periodo con el documento que tiene en la mano.</p>}
+              {res.numero && <p className="text-[12px] text-subtle">Por protección de datos, esta página solo confirma el número, la fecha y la validez. Compare el número con el documento que tiene en la mano.</p>}
             </div>
           )}
         </section>

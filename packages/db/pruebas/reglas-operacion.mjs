@@ -95,7 +95,7 @@ await rechaza('ni uno con hora en el futuro', () =>
 
 console.log('\n3. Manifiesto de cargue');
 const mf = await db.manifiesto.create({ data: { empresaId: E, tipo: 'CARGUE', rutaId: ruta2.id, clienteId: cliente.id, destinoId: planta.id, fechaServicio: new Date('2026-12-02'), vehiculoId: vehiculo.id, conductorId: admin.id } });
-prueba(`la base asigna el consecutivo (${mf.numero})`, /^MF-\d{4}-\d{5}$/.test(mf.numero));
+prueba(`la base asigna el consecutivo con el formato de Terra Viva (${mf.numero})`, /^TV\d{4,}$/.test(mf.numero));
 await rechaza('línea de residuo no declarado en esa sede → rechazada', () =>
   db.manifiestoItem.create({ data: { manifiestoId: mf.id, declaracionId: dSimple.id, sucursalId: sedeB.id, cantidad: 10 } }), /no está asignada a esa sede/);
 const kg = await id('metrica', { empresaId: E, codigo: 'kg' });
@@ -136,7 +136,7 @@ await rechaza('anular un manifiesto con la conciliación aprobada → rechazado'
 
 console.log('\n5. Actas');
 const acta = await db.acta.create({ data: { empresaId: E, tipo: 'DISPOSICION', clienteId: cliente.id, destinoId: planta.id, periodoDesde: new Date('2026-12-01'), periodoHasta: new Date('2026-12-31') } });
-prueba(`la base asigna consecutivo y código de verificación (${acta.numero})`, /^ACT-\d{4}-\d{5}$/.test(acta.numero) && acta.codigoVerificacion.length === 24);
+prueba(`la base asigna consecutivo y código de verificación (${acta.numero})`, /^PSAP\d{4}-\d+$/.test(acta.numero) && acta.codigoVerificacion.length === 24);
 await rechaza('emitir un acta sin líneas → rechazado', () => db.acta.update({ where: { id: acta.id }, data: { estado: 'EMITIDA' } }), /no tiene líneas/);
 await db.conciliacionItem.updateMany({ where: { conciliacionId: conc.id }, data: { actaId: acta.id } });
 await rechaza('emitir sin el contenido certificado → rechazado', () => db.acta.update({ where: { id: acta.id }, data: { estado: 'EMITIDA' } }), /contenido certificado/);
@@ -157,13 +157,17 @@ const mf2 = await db.manifiesto.create({ data: { empresaId: E, tipo: 'DESCARGUE'
 const cierre = { horaLlegada: llegada, horaSalida: new Date(llegada.getTime() + 600e3), firmaUrl: 's3://f.png', firmaNombre: 'Tercero', firmaDocumento: '999', estado: 'REALIZADO' };
 await rechaza('descargue sin peso neto ni ARL/EPS del conductor → no se graba', () => db.manifiesto.update({ where: { id: mf2.id }, data: cierre }), /peso neto.*ARL y EPS del conductor/);
 await db.transporteTercero.update({ where: { id: tercero.id }, data: { conductorArlId: arl, conductorEpsId: eps } });
-await db.manifiesto.update({ where: { id: mf2.id }, data: { ...cierre, pesoNeto: 20 } });
-prueba('con báscula y seguridad social se graba', (await db.manifiesto.findUniqueOrThrow({ where: { id: mf2.id } })).estado === 'REALIZADO');
+await rechaza('descargue sin la firma del receptor de Terra Viva → no se graba', () => db.manifiesto.update({ where: { id: mf2.id }, data: { ...cierre, pesoNeto: 20 } }), /chk_mf_descargue_receptor/);
+await db.manifiesto.update({ where: { id: mf2.id }, data: { ...cierre, pesoNeto: 20, firmaReceptorUrl: 's3://r.png', receptorNombre: 'Receptor planta' } });
+prueba('con báscula, seguridad social y las dos firmas se graba', (await db.manifiesto.findUniqueOrThrow({ where: { id: mf2.id } })).estado === 'REALIZADO');
 await rechaza('anular sin causal ni motivo → rechazado', () => db.manifiesto.update({ where: { id: mf2.id }, data: { estado: 'ANULADO' } }), /chk_mf_anulado/);
 await db.manifiesto.update({ where: { id: mf2.id }, data: { estado: 'ANULADO', causalAnulacionId: causal } });
 const tras = await db.solicitudItem.findUniqueOrThrow({ where: { id: sol2.items[0].id } });
-prueba('anular: se borra la conciliación en borrador y la línea vuelve a PENDIENTE',
-  !(await db.conciliacion.findUnique({ where: { manifiestoId: mf2.id } })) && tras.estado === 'PENDIENTE' && tras.cantidadReal === null);
+const concAnulada = await db.conciliacion.findUnique({ where: { manifiestoId: mf2.id }, include: { items: true } });
+prueba('anular: la conciliación queda ANULADA (no se borra) y la línea vuelve a PENDIENTE',
+  concAnulada?.estado === 'ANULADA' && concAnulada.items.length === 1 && tras.estado === 'PENDIENTE' && tras.cantidadReal === null);
+await rechaza('una conciliación anulada no se modifica', () => db.conciliacionItem.update({ where: { id: concAnulada.items[0].id }, data: { cantidadConciliada: 1 } }), /está anulada/);
+await rechaza('ni se aprueba', () => db.conciliacion.update({ where: { id: concAnulada.id }, data: { estado: 'APROBADA' } }), /está anulada/);
 await rechaza('un manifiesto anulado no se modifica', () => db.manifiesto.update({ where: { id: mf2.id }, data: { observaciones: 'x' } }), /está anulado/);
 
 await db.$disconnect();

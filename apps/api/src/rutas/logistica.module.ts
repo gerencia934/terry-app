@@ -11,7 +11,8 @@ const FiltroSol = Rango.extend({
   clase: z.nativeEnum(ClaseSolicitud).optional(), operacion: z.nativeEnum(Operacion).optional(), numero: z.coerce.number().int().optional(),
 });
 const TransporteSol = z.object({
-  empresaTransportadora: z.string().trim().min(2).max(200), tipoVehiculo: z.string().max(40).optional(),
+  empresaTransportadora: z.string().trim().min(2).max(200), nit: z.string().trim().regex(/^\d{6,15}$/, 'NIT de la transportadora: solo números, sin dígito de verificación.').optional(),
+  tipoVehiculo: z.string().max(40).optional(),
   placa: z.string().trim().toUpperCase().regex(/^([A-Z]{3}\d{3}|[A-Z]{3}\d{2}[A-Z]|[RS]\d{5})$/, 'Placa inválida (ABC123).').optional(),
   conductorNombre: z.string().max(150).optional(), conductorDocumento: z.string().max(20).optional(), conductorArlId: z.string().uuid().optional(), conductorEpsId: z.string().uuid().optional(),
   auxiliarNombre: z.string().max(150).optional(), auxiliarDocumento: z.string().max(20).optional(), auxiliarArlId: z.string().uuid().optional(), auxiliarEpsId: z.string().uuid().optional(),

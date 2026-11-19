@@ -451,7 +451,7 @@ function Seccion({ titulo, icono, children }: { titulo: string; icono?: ReactNod
 }
 
 /** Firma táctil: se guarda como imagen PNG (fondo transparente, trazo oscuro). */
-function Firma({ valor, onChange }: { valor: string; onChange: (dataUrl: string) => void }) {
+export function Firma({ valor, onChange }: { valor: string; onChange: (dataUrl: string) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const dibujando = useRef(false);
   useEffect(() => {
