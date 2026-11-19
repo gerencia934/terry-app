@@ -15,6 +15,8 @@ const Filtros = z.object({
   estado: z.nativeEnum(EstadoDeclaracion).optional(), activa: z.enum(['true', 'false']).optional(), numero: z.coerce.number().int().optional(),
   q: z.string().optional(), codigo: z.string().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional(),
   peligroso: z.enum(['true', 'false']).optional(), // Los Pinos solo recibe residuos no peligrosos
+  // Tarifas: línea de servicio y condiciones del precio vigente o programado
+  lineaServicioId: z.string().uuid().optional(), negociacion: z.nativeEnum(TipoNegociacion).optional(), formaPago: z.nativeEnum(FormaPago).optional(),
 });
 const CambioEstado = z.object({ estado: z.enum(['AUTORIZADA', 'RECHAZADA']), causalId: z.string().uuid().optional(), observacion: z.string().max(300).optional() });
 const CambioActiva = z.object({ activa: z.boolean(), causalId: z.string().uuid().optional() });
@@ -120,22 +122,43 @@ export class DeclaracionesService {
     return { esPeligroso: q.peligroso === 'true', contieneHidrocarburos: q.hidrocarburos === 'true', caracterizacion: q.caracterizacion === 'true', tipoResiduoCodigo: tipo?.codigo ?? null };
   }
 
-  async listar(a: Actor, f: z.infer<typeof Filtros>) {
-    const { take, skip, pagina, porPagina } = paginar(f);
-    const where: Prisma.DeclaracionWhereInput = {
-      empresaId: a.empresaId, tipo: f.tipo, clienteId: f.clienteId, numero: f.numero,
+  private filtro(a: Actor, f: z.infer<typeof Filtros>): Prisma.DeclaracionWhereInput {
+    return {
+      empresaId: a.empresaId, tipo: f.tipo, clienteId: f.clienteId, numero: f.numero, lineaServicioId: f.lineaServicioId,
       estado: f.estado ?? { not: 'ANULADA' }, // las anuladas (cargue deshecho) solo con el filtro «Anulada»
       activa: f.activa ? f.activa === 'true' : undefined,
       esPeligroso: f.peligroso ? f.peligroso === 'true' : undefined,
       sucursales: f.sucursalId ? { some: { sucursalId: f.sucursalId } } : undefined,
       nombre: f.q ? { contains: f.q, mode: 'insensitive' } : undefined,
       codigoInterno: f.codigo ? { contains: f.codigo, mode: 'insensitive' } : undefined,
+      // Condiciones del precio abierto (el vigente o el programado, el que no tiene fecha de cierre)
+      tarifas: f.negociacion || f.formaPago ? { some: { vigenteHasta: null, tipoNegociacion: f.negociacion, formaPago: f.formaPago } } : undefined,
     };
+  }
+
+  async listar(a: Actor, f: z.infer<typeof Filtros>) {
+    const { take, skip, pagina, porPagina } = paginar(f);
+    const where = this.filtro(a, f);
+    const h = hoy();
     const [total, filas] = await this.db.$transaction([
       this.db.declaracion.count({ where }),
-      this.db.declaracion.findMany({ where, take, skip, orderBy: { numero: 'desc' }, include: { ...resumen, tarifas: { where: vigente(), orderBy: { vigenteDesde: 'desc' }, take: 1, include: { metrica: { select: { codigo: true, abreviacion: true } } } } } }),
+      this.db.declaracion.findMany({ where, take, skip, orderBy: { numero: 'desc' }, include: { ...resumen,
+        tarifas: { where: { OR: [vigente(), { vigenteHasta: null }] }, orderBy: { vigenteDesde: 'desc' }, take: 2, include: { metrica: { select: { codigo: true, abreviacion: true } } } } } }),
     ]);
-    return { total, pagina, porPagina, filas: filas.map(({ tarifas, ...d }) => ({ ...d, tarifaVigente: tarifas[0] ?? null })) };
+    return { total, pagina, porPagina, filas: filas.map(({ tarifas, ...d }) => ({ ...d,
+      tarifaVigente: tarifas.find((t) => t.vigenteDesde <= h && (!t.vigenteHasta || t.vigenteHasta >= h)) ?? null,
+      tarifaProgramada: tarifas.find((t) => t.vigenteDesde > h) ?? null, // precio que empieza a regir en una fecha futura
+    })) };
+  }
+
+  /** Ids de las declaraciones que cumplen el filtro (hasta 2.000): «seleccionar todas» en Tarifas. */
+  async ids(a: Actor, f: z.infer<typeof Filtros>) {
+    const where = this.filtro(a, f);
+    const [total, filas] = await this.db.$transaction([
+      this.db.declaracion.count({ where }),
+      this.db.declaracion.findMany({ where, take: 2000, orderBy: { numero: 'desc' }, select: { id: true } }),
+    ]);
+    return { total, ids: filas.map((d) => d.id) };
   }
 
   async obtener(a: Actor, id: string) {
@@ -144,7 +167,7 @@ export class DeclaracionesService {
       include: {
         ...resumen, tipoResiduo: true, catalogo: true, tipoEmbalaje: true, material: true, metricaDensidad: true,
         etiquetados: { include: { sistema: true } }, riesgos: { include: { riesgo: true } },
-        codigoY: true, codigoA: true, tarifas: { orderBy: { vigenteDesde: 'desc' }, include: { metrica: true } },
+        codigoY: true, codigoA: true, tarifas: { orderBy: { vigenteDesde: 'desc' }, include: { metrica: true, asignadoPor: { select: { nombre: true } } } },
         aceptadaPor: { select: { nombre: true } }, aprobadaPor: { select: { nombre: true } }, creadoPor: { select: { nombre: true } },
         cargue: { select: { id: true, archivo: true, creadoEn: true, estado: true, revertidoEn: true, motivoReversion: true, revertidoPor: { select: { nombre: true } } } },
       },
@@ -367,26 +390,48 @@ export class DeclaracionesService {
     return r;
   }
 
-  /** Asignación masiva: cierra la tarifa vigente y crea una nueva por declaración. Nunca sobrescribe precios. */
+  /**
+   * Asignación masiva de precios. Nunca cambia un precio que ya pudo facturarse:
+   * - rige desde hoy o una fecha futura;
+   * - si la declaración ya tiene un precio que empieza esa misma fecha (el de hoy o uno programado), lo corrige;
+   * - si tiene uno programado para después de esa fecha, pide una fecha igual o posterior;
+   * - un ajuste porcentual necesita un precio de base (el último asignado).
+   */
   async tarifasMasivas(a: Actor, b: z.infer<typeof Tarifas>) {
+    if (b.vigenteDesde < hoy()) throw new BadRequestException({ mensaje: 'Las tarifas nuevas rigen desde hoy o una fecha futura: un precio que ya pudo facturarse no se cambia.' });
     const decls = await this.db.declaracion.findMany({ where: { id: { in: b.declaraciones }, empresaId: a.empresaId }, include: { cliente: true, tarifas: { where: { vigenteHasta: null }, orderBy: { vigenteDesde: 'desc' }, take: 1 } } });
     if (decls.length !== b.declaraciones.length) throw new BadRequestException({ mensaje: 'Alguna declaración no existe o no es de su empresa.' });
+    const cuales = (xs: string[]) => xs.slice(0, 10).join(', ') + (xs.length > 10 ? ` y ${xs.length - 10} más` : '');
     const anuladas = decls.filter((d) => d.estado === 'ANULADA').map((d) => `N.° ${d.numero}`);
-    if (anuladas.length) throw new BadRequestException({ mensaje: `Declaraciones anuladas (cargue deshecho): ${anuladas.slice(0, 10).join(', ')}. Quítelas de la selección.` });
+    if (anuladas.length) throw new BadRequestException({ mensaje: `Declaraciones anuladas (cargue deshecho): ${cuales(anuladas)}. Quítelas de la selección.` });
+    const sinBase = b.modo === 'porcentaje' ? decls.filter((d) => !d.tarifas[0]).map((d) => `N.° ${d.numero}`) : [];
+    if (sinBase.length) throw new BadRequestException({ mensaje: `Sin precio para calcular el ajuste porcentual: ${cuales(sinBase)}. Asígneles un precio fijo o quítelas de la selección.` });
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const despues = decls.filter((d) => d.tarifas[0] && d.tarifas[0].vigenteDesde > b.vigenteDesde).map((d) => `N.° ${d.numero} (desde ${iso(d.tarifas[0].vigenteDesde)})`);
+    if (despues.length) throw new BadRequestException({ mensaje: `Ya tienen un precio programado para después de ${iso(b.vigenteDesde)}: ${cuales(despues)}. Elija esa fecha o una posterior.` });
     const lote = randomUUID();
     const dia = new Date(b.vigenteDesde.getTime() - 86_400_000);
+    let corregidas = 0;
     await this.db.$transaction(async (tx) => {
       for (const d of decls) {
         const actual = d.tarifas[0];
         const base = actual ? Number(actual.precioUnitario) : 0;
         const precio = b.modo === 'fijo' ? b.valor : Math.round(base * (1 + b.valor / 100) / 10) * 10;
         if (precio < 0) throw new BadRequestException({ mensaje: 'El precio resultante no puede ser negativo.' });
-        if (actual) await tx.tarifa.update({ where: { id: actual.id }, data: { vigenteHasta: dia } });
-        await tx.tarifa.create({ data: { declaracionId: d.id, precioUnitario: precio, metricaId: actual?.metricaId ?? null, tipoNegociacion: b.tipoNegociacion ?? actual?.tipoNegociacion ?? d.cliente.tipoNegociacion, formaPago: b.formaPago ?? actual?.formaPago ?? d.cliente.formaPago, vigenteDesde: b.vigenteDesde, loteAsignacionId: lote, asignadoPorId: a.id } });
+        const datos = { precioUnitario: precio, tipoNegociacion: b.tipoNegociacion ?? actual?.tipoNegociacion ?? d.cliente.tipoNegociacion,
+          formaPago: b.formaPago ?? actual?.formaPago ?? d.cliente.formaPago, loteAsignacionId: lote, asignadoPorId: a.id };
+        if (actual && actual.vigenteDesde.getTime() === b.vigenteDesde.getTime()) {
+          // Empieza el mismo día (hoy o programado): se corrige ese precio en vez de abrir otra vigencia
+          await tx.tarifa.update({ where: { id: actual.id }, data: datos });
+          corregidas++;
+        } else {
+          if (actual) await tx.tarifa.update({ where: { id: actual.id }, data: { vigenteHasta: dia } });
+          await tx.tarifa.create({ data: { ...datos, declaracionId: d.id, metricaId: actual?.metricaId ?? null, vigenteDesde: b.vigenteDesde } });
+        }
       }
-      await this.audit.registrar(a, 'tarifa', lote, 'ASIGNACION_MASIVA', undefined, { cantidad: decls.length, modo: b.modo, valor: b.valor }, tx);
+      await this.audit.registrar(a, 'tarifa', lote, 'ASIGNACION_MASIVA', undefined, { cantidad: decls.length, corregidas, modo: b.modo, valor: b.valor, vigenteDesde: iso(b.vigenteDesde) }, tx);
     });
-    return { lote, actualizadas: decls.length };
+    return { lote, actualizadas: decls.length, corregidas };
   }
 
   /** Servicios estándar del catálogo propio (alquiler de vacuum, trampas de grasa, fumigación…). */
@@ -486,6 +531,7 @@ class DeclaracionesController {
   @Get('catalogo-servicios') catalogoServicios(@ActorActual() a: Actor) { return this.s.catalogoServicios(a); }
   @Permiso('declaraciones.crear') @Post('catalogo-servicios') crearServicio(@ActorActual() a: Actor, @Body(new Zod(ServicioCatalogo)) b: z.infer<typeof ServicioCatalogo>) { return this.s.crearServicioCatalogo(a, b); }
   @Permiso('declaraciones.crear') @Post('asignacion-masiva') asignacion(@ActorActual() a: Actor, @Body(new Zod(Asignacion)) b: z.infer<typeof Asignacion>) { return this.s.asignacionMasiva(a, b); }
+  @Get('ids') ids(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.ids(a, f); }
   @Get('cobertura') async coberturaDe(@ActorActual() a: Actor, @Query(new Zod(ConsultaCobertura)) q: z.infer<typeof ConsultaCobertura>) {
     return this.s.coberturaDisposiciones(a.empresaId, q.disposiciones, undefined, await this.s.contextoCobertura(a, q));
   }

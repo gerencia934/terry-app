@@ -11,6 +11,8 @@ const ADMIN = { email: process.env.ADMIN_EMAIL ?? 'gerencia@terravivasas.com', c
 if (!ADMIN.clave) { console.error('Defina ADMIN_PASSWORD (o SEED_ADMIN_PASSWORD) con la contraseña del administrador sembrado.'); process.exit(1); }
 const db = new PrismaClient();
 let ok = 0, fallas = 0;
+/** Fecha en Colombia dentro de n días (AAAA-MM-DD): las pruebas de precios no se vencen con el calendario. */
+const fechaEn = (dias) => new Date(Date.now() + dias * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 const prueba = (nombre, cond, extra = '') => { if (cond) { ok++; console.log(`  ✓ ${nombre}`); } else { fallas++; console.log(`  ✗ ${nombre} ${extra}`); } };
 
 async function llamar(metodo, ruta, { token, cuerpo, form } = {}) {
@@ -178,7 +180,8 @@ r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T
 prueba('incineración con gestor aliado sin licencia vigente NO se autoriza', r.status === 403 && /licencia/.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 300));
 r = await llamar('PATCH', `/declaraciones/${aceite.id}/activa`, { token: T, cuerpo: { activa: false } });
 prueba('inactivar exige causal → 400', r.status === 400);
-r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id], modo: 'porcentaje', valor: 5, vigenteDesde: '2027-01-01' } });
+const desdeProgramado = fechaEn(45);
+r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id], modo: 'porcentaje', valor: 5, vigenteDesde: desdeProgramado } });
 prueba('tarifa masiva +5 % crea nueva vigencia', r.status === 201 && r.json.actualizadas === 1);
 const tarifas = await db.tarifa.findMany({ where: { declaracionId: lodo.id }, orderBy: { vigenteDesde: 'asc' } });
 prueba('el precio anterior se conserva con fecha de cierre', tarifas.length === 2 && tarifas[0].vigenteHasta && Number(tarifas[1].precioUnitario) === 820);
@@ -449,6 +452,42 @@ prueba('a un cliente inactivo no se le agregan sedes', r.status === 400 && /inac
 r = await llamar('GET', `/clientes/${cF1.id}`, { token: T });
 prueba('la ficha trae sedes con municipio y zona, y el resumen de declaraciones', r.status === 200 && r.json.sucursales.find((s) => s.id === sedeP1.id)?.municipio?.nombre === 'Sabana de Torres'
   && r.json._count.declaraciones === 1 && r.json.declaracionesActivas === 0 && r.json.asesor?.id === comercial.id, JSON.stringify(r.json).slice(0, 300));
+
+console.log('\n3d. Tarifas (fase 1c)');
+r = await llamar('GET', `/declaraciones?tipo=RESIDUO&estado=AUTORIZADA&activa=true&clienteId=${lodo.cliente.id}&negociacion=COBRO`, { token: T });
+const lodoTf = r.json.filas?.find((d) => d.id === lodo.id);
+prueba('tarifas: el listado trae el precio vigente (780) y el programado (820, en 45 días)', r.status === 200 && Number(lodoTf?.tarifaVigente?.precioUnitario) === 780
+  && Number(lodoTf?.tarifaProgramada?.precioUnitario) === 820 && lodoTf.tarifaProgramada.vigenteDesde.startsWith(desdeProgramado), JSON.stringify(lodoTf ?? r.json).slice(0, 300));
+r = await llamar('GET', `/declaraciones?tipo=RESIDUO&clienteId=${lodo.cliente.id}&negociacion=COMPRA`, { token: T });
+prueba('…y filtra por las condiciones del precio (ninguna en «Compra»)', r.status === 200 && r.json.total === 0, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', `/declaraciones/ids?tipo=RESIDUO&estado=AUTORIZADA&activa=true&clienteId=${lodo.cliente.id}`, { token: T });
+prueba('«seleccionar las filtradas» trae los ids de todas', r.status === 200 && r.json.ids.includes(lodo.id) && r.json.ids.length === r.json.total, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id], modo: 'fijo', valor: 900, vigenteDesde: fechaEn(-1) } });
+prueba('un precio nuevo no rige hacia atrás (lo que pudo facturarse no cambia) → 400', r.status === 400 && /hoy o una fecha futura/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id], modo: 'fijo', valor: 900, vigenteDesde: fechaEn(20) } });
+prueba('con un precio ya programado para después, pide esa fecha o una posterior → 400', r.status === 400 && /programado para después/.test(r.json.mensaje), JSON.stringify(r.json));
+const borradorSinPrecio = (await llamar('POST', '/declaraciones', { token: T, cuerpo: { tipo: 'RESIDUO', borrador: true, clienteId: cliente.id, nombre: 'Borrador sin precio', categoriaId: formulario.categoriaId, lineaServicioId: formulario.lineaServicioId } })).json;
+r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id, borradorSinPrecio.id], modo: 'porcentaje', valor: 10, vigenteDesde: desdeProgramado } });
+prueba('un ajuste porcentual necesita precio de base: dice cuáles no lo tienen → 400', r.status === 400 && /Sin precio/.test(r.json.mensaje) && r.json.mensaje.includes(`N.° ${borradorSinPrecio.numero}`), JSON.stringify(r.json));
+r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id], modo: 'fijo', valor: 900, vigenteDesde: desdeProgramado, formaPago: 'CREDITO_60' } });
+const tarifasLodo = await db.tarifa.findMany({ where: { declaracionId: lodo.id }, orderBy: { vigenteDesde: 'asc' } });
+prueba('en la misma fecha de un precio programado, lo corrige (no abre otra vigencia)', r.status === 201 && r.json.corregidas === 1 && tarifasLodo.length === 2
+  && Number(tarifasLodo[1].precioUnitario) === 900 && tarifasLodo[1].formaPago === 'CREDITO_60', JSON.stringify(r.json));
+r = await llamar('GET', `/declaraciones/${lodo.id}`, { token: T });
+prueba('el historial de precios dice quién asignó cada uno', r.status === 200 && r.json.tarifas.length === 2 && !!r.json.tarifas[0].asignadoPor?.nombre, JSON.stringify(r.json.tarifas?.map((t) => [t.vigenteDesde, t.precioUnitario, t.asignadoPor?.nombre])));
+r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: thseq, cuerpo: { declaraciones: [lodo.id], modo: 'porcentaje', valor: 1, vigenteDesde: desdeProgramado } });
+prueba('sin el permiso «tarifas.asignar» (HSEQ) no se cambian precios → 403', r.status === 403, String(r.status));
+// Cargue de precios desde Excel: la misma regla
+r = await llamar('POST', '/importacion/precios/vista-previa', { token: T, form: await excel('precios', [
+  { numero: String(lodo.numero), precio: '950', desde: fechaEn(-3) },
+  { numero: String(lodo.numero + 0), precio: '950', desde: desdeProgramado },
+]) });
+prueba('cargue de precios: una fecha pasada es un error de la fila', r.status === 201 && r.json.filas[0]?.errores.some((e) => /fecha futura/.test(e)), JSON.stringify(r.json.filas ?? r.json).slice(0, 300));
+r = await llamar('POST', '/importacion/precios/confirmar', { token: T, form: await excel('precios', [{ numero: String(lodo.numero), precio: '910', desde: desdeProgramado }]) });
+const programadoLodo = await db.tarifa.findFirst({ where: { declaracionId: lodo.id, vigenteHasta: null } });
+prueba('…en la misma fecha de un precio programado, lo corrige', r.status === 201 && r.json.actualizadas === 1 && Number(programadoLodo?.precioUnitario) === 910, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/importacion/precios/confirmar', { token: T, form: await excel('precios', [{ numero: String(lodo.numero), precio: '930', desde: fechaEn(10) }]) });
+prueba('…y si hay uno programado para después, no deja ponerlo antes → 400', r.status === 400 && /programado desde/.test(r.json.mensaje), JSON.stringify(r.json));
 
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });

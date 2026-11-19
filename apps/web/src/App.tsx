@@ -25,6 +25,7 @@ import { SolicitudesServidor } from './pages/torre/Solicitudes';
 import { RecepcionPlantaServidor } from './pages/torre/Recepcion';
 import { EmpresaServidor } from './pages/torre/Empresa';
 import { ClientesServidor } from './pages/ClientesServidor';
+import { TarifasServidor } from './pages/TarifasServidor';
 import Verificar from './pages/Verificar';
 
 function Screen() {
@@ -52,7 +53,7 @@ function Screen() {
       case 'inicio': return <Inicio />;
       case 'clientes': return MODO_REAL ? <ClientesServidor /> : <Clientes />;
       case 'declaraciones': return MODO_REAL ? <DeclaracionesServidor /> : <Declaraciones />;
-      case 'tarifas': return <Precios />;
+      case 'tarifas': return MODO_REAL ? <TarifasServidor /> : <Precios />;
       case 'exportar': return <Exportable />;
       case 'solicitudes': return MODO_REAL ? <SolicitudesServidor key="todas" /> : <Solicitudes />;
       case 'por-confirmar': return MODO_REAL ? <SolicitudesServidor key="por-confirmar" porConfirmar /> : <PorConfirmar />; // key: cada vista con sus filtros

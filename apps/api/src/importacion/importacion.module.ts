@@ -250,9 +250,15 @@ class ImportacionService {
         const decl = await tx.declaracion.findFirstOrThrow({ where: { empresaId: emp, numero: Number(d.numero), estado: { not: 'ANULADA' } }, include: { cliente: true, tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
         const desde = fecha(d.desde)!;
         const actual = decl.tarifas[0];
+        // Misma regla que la asignación masiva: desde hoy o una fecha futura (validado en la revisión); un precio
+        // programado para después pide esa fecha o una posterior; el mismo día de inicio, se corrige ese precio.
+        if (actual && actual.vigenteDesde > desde)
+          throw new BadRequestException({ mensaje: `La declaración ${decl.numero} ya tiene un precio programado desde ${actual.vigenteDesde.toISOString().slice(0, 10)}: use esa fecha o una posterior.` });
+        const datos = { precioUnitario: num(d.precio)!, asignadoPorId: a.id,
+          tipoNegociacion: negociacion(d.negociacion) ?? actual?.tipoNegociacion ?? decl.cliente.tipoNegociacion, formaPago: formaPago(d.pago) ?? actual?.formaPago ?? decl.cliente.formaPago };
+        if (actual && actual.vigenteDesde.getTime() === desde.getTime()) { await tx.tarifa.update({ where: { id: actual.id }, data: datos }); return 'actualizadas'; }
         if (actual) await tx.tarifa.update({ where: { id: actual.id }, data: { vigenteHasta: new Date(desde.getTime() - 86_400_000) } });
-        await tx.tarifa.create({ data: { declaracionId: decl.id, precioUnitario: num(d.precio)!, metricaId: actual?.metricaId ?? null, vigenteDesde: desde, asignadoPorId: a.id,
-          tipoNegociacion: negociacion(d.negociacion) ?? actual?.tipoNegociacion ?? decl.cliente.tipoNegociacion, formaPago: formaPago(d.pago) ?? actual?.formaPago ?? decl.cliente.formaPago } });
+        await tx.tarifa.create({ data: { ...datos, declaracionId: decl.id, metricaId: actual?.metricaId ?? null, vigenteDesde: desde } });
         return 'creadas';
       }
       case 'vehiculos': {

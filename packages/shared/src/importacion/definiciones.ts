@@ -111,6 +111,8 @@ const aDisposiciones = (v: string, _f: Record<string, string>, c: Contexto) => {
   const sin = lista(v).filter((x) => c.catalogos.disposiciones.has(x.toUpperCase()) && !c.disposicionesCubiertas.has(x.toUpperCase()));
   return sin.length ? `Sin permiso ni licencia vigente hoy: ${sin.join(', ')}. La declaración quedará pendiente y no se podrá autorizar.` : null;
 };
+/** Fecha de hoy en Colombia (AAAA-MM-DD), sin importar la zona horaria del equipo o del servidor. */
+export const hoyColombia = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 export const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
 
 export const PLANTILLAS: Plantilla[] = [
@@ -237,7 +239,8 @@ export const PLANTILLAS: Plantilla[] = [
       { key: 'precio', header: 'Precio unitario', requerido: true, tipo: 'numero', ejemplo: 820, ayuda: 'COP, sin IVA.', ancho: 14, validar: (v) => Number(v) < 0 ? 'El precio no puede ser negativo.' : null },
       { key: 'negociacion', header: 'Tipo de negociación', tipo: 'lista', opciones: L.negociacion, ejemplo: 'Cobro', ayuda: 'Vacío = conserva el actual.', ancho: 18 },
       { key: 'pago', header: 'Forma de pago', tipo: 'lista', opciones: L.formaPago, ejemplo: 'Crédito 30 días', ayuda: 'Vacío = conserva la actual.', ancho: 18 },
-      { key: 'desde', header: 'Vigente desde', requerido: true, tipo: 'fecha', ejemplo: '2027-01-01', ayuda: 'AAAA-MM-DD', ancho: 14 },
+      { key: 'desde', header: 'Vigente desde', requerido: true, tipo: 'fecha', ejemplo: '2027-01-01', ayuda: 'AAAA-MM-DD, desde hoy o una fecha futura', ancho: 14,
+        validar: (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v) && v < hoyColombia() ? 'Rige desde hoy o una fecha futura: un precio que ya pudo facturarse no se cambia.' : null) },
     ],
   },
   {
