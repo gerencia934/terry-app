@@ -54,10 +54,10 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 
 | Requisito | Estado | Ajuste |
 |---|---|---|
-| Rol `CLIENTE` ligado a un `cliente_id` (administrador del cliente y consulta; sedes opcionales) | ❌ No existe todavía: es el portal de clientes (paso 3 del orden) | Usuario con `cliente_id`, perfil y sedes permitidas |
-| Doble barrera: filtro en el API y RLS en la base | ⚠️ El API filtra por empresa en cada consulta (probado). Falta el filtro por cliente y la RLS | RLS por empresa y por cliente en las tablas con datos de clientes; el API fija la empresa y el cliente en cada transacción |
-| Pruebas: el cliente A recibe 403/404 en cada endpoint al pedir datos de B | ⚠️ Hay pruebas entre empresas, no entre clientes | Prueba automática que recorre todos los endpoints (listados, detalle, descargas y filtros) |
-| Descargas solo con URL firmada de corta vida; almacenamiento nunca público | ⚠️ Es privado y verifica la empresa, pero sin URL firmada | Ver §1 |
+| Rol `CLIENTE` ligado a un `cliente_id` (administrador del cliente y consulta; sedes opcionales) | ✅ Usuario del portal con `cliente_id`, perfil Administrador o Consulta y sedes opcionales. La oficina da el primer acceso desde la ficha del cliente y el administrador del cliente invita a los demás (un administrador limitado a unas sedes no da más acceso del que tiene) | — |
+| Doble barrera: filtro en el API y RLS en la base | ✅ por cliente. API: el usuario del portal solo usa las rutas del portal y cada consulta filtra por el cliente del token y sus sedes. Base: RLS con `app.cliente_id` en cada transacción del portal (clientes, sedes, declaraciones, solicitudes, manifiestos, conciliaciones, actas, cargues, usuarios y sus tablas hijas, con FORCE) | Queda la RLS por empresa para el personal interno (hoy el API filtra la empresa en cada consulta, probado) |
+| Pruebas: el cliente A recibe 403/404 en cada endpoint al pedir datos de B | ✅ e2e: el cliente B recibe 403 o 404 en el detalle, las descargas y los usuarios de A, y sus listados, filtros e informes no traen nada de A; el usuario del portal recibe 403 en las rutas de oficina; la RLS se prueba directo en la base (leer y escribir) | — |
+| Descargas solo con URL firmada de corta vida; almacenamiento nunca público | ✅ en el portal: enlace firmado de 5 minutos, con clave propia, que se entrega después de verificar el permiso; en desarrollo lo sirve el API | Con S3 en producción, el enlace lo firma el almacenamiento (ver §1) |
 | UUID en las URL; el consecutivo es solo un dato visible | ✅ | — |
 
 ## 3. Conservación e integridad

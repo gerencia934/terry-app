@@ -34,6 +34,8 @@ const ROLES = {
   Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo'],
   Conductor: ['rutas.operar', 'manifiestos.operar'],
   Auxiliar: ['rutas.operar', 'manifiestos.operar'],
+  // Portal de clientes: sin permisos de oficina; lo que ve lo decide su cliente y su perfil (apps/api/src/portal)
+  'Cliente (portal)': [],
 };
 /** Upsert por (empresa, código) de un catálogo paramétrico del módulo Declaraciones. */
 async function porEmpresa(modelo, empresaId, items, datos = (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null })) {

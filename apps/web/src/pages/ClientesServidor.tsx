@@ -10,6 +10,8 @@ import { PieLista, horaColumna, useApi, usePaginado } from '../lib/servidor';
 import { useRouter } from '../lib/router';
 import { cx } from '../lib/format';
 import { verDeclaracionesDe } from './DeclaracionesServidor';
+import { FormUsuarioPortal, ListaUsuariosPortal, type UsuarioPortal } from './portal/UsuariosPortal';
+import type { SedePortal } from './portal/PortalApp';
 
 type Tipo = 'DIRECTO' | 'GESTOR';
 interface Zona { id: string; nombre: string; color: string }
@@ -28,7 +30,8 @@ interface Sede {
 interface ClienteDetalle extends Omit<ClienteFila, 'sucursales' | '_count'> {
   sucursales: Sede[]; _count: { declaraciones: number; solicitudes: number; manifiestos: number }; declaracionesActivas: number;
 }
-type Panel = { vista: 'detalle'; id: string } | { vista: 'cliente'; id?: string } | { vista: 'sede'; clienteId: string; sedeId?: string };
+type Panel = { vista: 'detalle'; id: string } | { vista: 'cliente'; id?: string } | { vista: 'sede'; clienteId: string; sedeId?: string }
+  | { vista: 'portal'; clienteId: string; sedes: SedePortal[]; usuario?: UsuarioPortal; primero?: boolean };
 
 const NEGOCIACION: Record<string, string> = { COBRO: 'Cobro', COMPRA: 'Compra', SIN_COSTO: 'Sin costo', CONTRATO: 'Por contrato' };
 const PAGO: Record<string, string> = { CONTADO: 'Contado', CREDITO_30: 'Crédito 30 días', CREDITO_60: 'Crédito 60 días', CREDITO_90: 'Crédito 90 días' };
@@ -72,7 +75,8 @@ export function ClientesServidor() {
     { key: 'est', header: 'Estado', render: (c) => <Badge tone={c.activo ? 'ok' : 'neutral'}>{c.activo ? 'Activo' : 'Inactivo'}</Badge>, priority: 3 },
   ];
   const cerrar = () => setPanel(null);
-  const titulo = !panel ? '' : panel.vista === 'detalle' ? 'Cliente' : panel.vista === 'cliente' ? (panel.id ? 'Editar cliente' : 'Nuevo cliente') : panel.sedeId ? 'Editar sede' : 'Nueva sede';
+  const titulo = !panel ? '' : panel.vista === 'detalle' ? 'Cliente' : panel.vista === 'cliente' ? (panel.id ? 'Editar cliente' : 'Nuevo cliente')
+    : panel.vista === 'portal' ? (panel.usuario ? 'Usuario del portal' : 'Dar acceso al portal') : panel.sedeId ? 'Editar sede' : 'Nueva sede';
 
   return (
     <>
@@ -98,6 +102,13 @@ export function ClientesServidor() {
           alGuardar={(id) => { lista.recargar(); setPanel({ vista: 'detalle', id }); }} />}
         {panel?.vista === 'sede' && <FormularioSede clienteId={panel.clienteId} sedeId={panel.sedeId} volver={() => setPanel({ vista: 'detalle', id: panel.clienteId })}
           alGuardar={() => { lista.recargar(); setPanel({ vista: 'detalle', id: panel.clienteId }); }} />}
+        {panel?.vista === 'portal' && (
+          <div className="flex flex-col gap-4">
+            <button onClick={() => setPanel({ vista: 'detalle', id: panel.clienteId })} className="inline-flex items-center gap-1.5 self-start text-[13px] font-medium text-muted hover:text-fg"><ArrowLeft size={15} /> Volver al cliente</button>
+            {!panel.usuario && <p className="rounded-lg bg-surface-2 p-3 text-[13px] text-muted">El usuario recibe un correo para crear su contraseña y entra al portal a consultar y descargar solo lo de este cliente. Si es administrador, él mismo invita después a las demás personas de su empresa.</p>}
+            <FormUsuarioPortal base={`/clientes/${panel.clienteId}/usuarios-portal`} sedes={panel.sedes} u={panel.usuario} perfilInicial={panel.primero ? 'ADMIN' : 'CONSULTA'} listo={() => setPanel({ vista: 'detalle', id: panel.clienteId })} />
+          </div>
+        )}
       </Sheet>
     </>
   );
@@ -133,6 +144,23 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
         {!c.sucursales.length && <p className="text-[13px] text-muted">Sin sedes. Agregue al menos una: las declaraciones y los servicios se programan por sede.</p>}
         <ul className="flex flex-col gap-2">{c.sucursales.map((s) => <TarjetaSede key={s.id} s={s} gestor={c.tipo === 'GESTOR'} editar={puedeEditar ? () => abrir({ vista: 'sede', clienteId: c.id, sedeId: s.id }) : undefined} />)}</ul>
       </div>
+      <SeccionPortal c={c} puedeEditar={puedeEditar} abrir={abrir} />
+    </div>
+  );
+}
+
+/** Quién del cliente entra al portal. La oficina da el primer acceso; después el administrador del cliente invita a los demás. */
+function SeccionPortal({ c, puedeEditar, abrir }: { c: ClienteDetalle; puedeEditar: boolean; abrir: (p: Panel) => void }) {
+  const lista = useApi<UsuarioPortal[]>(`/clientes/${c.id}/usuarios-portal`);
+  const sedes: SedePortal[] = c.sucursales.filter((s) => s.activa).map((s) => ({ id: s.id, codigo: s.codigo, nombre: s.nombre, municipio: s.municipio ? { nombre: s.municipio.nombre } : null }));
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-[15px] font-semibold">Portal de clientes</h3>
+        {puedeEditar && c.activo && <Button size="sm" onClick={() => abrir({ vista: 'portal', clienteId: c.id, sedes, primero: !lista.datos?.some((u) => u.activo && u.perfilPortal === 'ADMIN') })}><Plus size={14} /> Dar acceso</Button>}
+      </div>
+      <ListaUsuariosPortal lista={lista} abrir={puedeEditar ? (u) => abrir({ vista: 'portal', clienteId: c.id, sedes, usuario: u }) : undefined}
+        vacio="Este cliente aún no entra al portal. Dé acceso a su primer administrador: él invita después a las demás personas de su empresa." />
     </div>
   );
 }

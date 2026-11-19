@@ -318,6 +318,12 @@ export class ManifiestosService {
     };
   }
 
+  /** PDF del manifiesto como archivo (lo usa también la descarga del portal de clientes). */
+  async pdfBuffer(a: Actor, id: string) {
+    const d = await this.datosPdf(a, id);
+    return { numero: d.numero, buf: await pdfManifiesto(d) };
+  }
+
   async pdf(a: Actor, id: string, res: Response, recibo: boolean) {
     const d = await this.datosPdf(a, id);
     const buf = recibo ? await pdfRecibo(d) : await pdfManifiesto(d);

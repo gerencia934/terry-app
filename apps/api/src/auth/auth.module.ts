@@ -5,7 +5,7 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import { InjectThrottlerOptions, InjectThrottlerStorage, Throttle, ThrottlerGuard, ThrottlerStorage, type ThrottlerModuleOptions } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
-import { ActorActual, LimiteCredenciales, PERMISO, PUBLICO, Publico, SIN_DATOS, SinAceptarDatos, Zod, type Actor } from '../common/http';
+import { ActorActual, LimiteCredenciales, PERMISO, PERMITE_PORTAL, PUBLICO, PermitePortal, Publico, SIN_DATOS, SOLO_PORTAL, SinAceptarDatos, Zod, type Actor } from '../common/http';
 import type { Config } from '../config';
 import { AuthService } from './auth.service';
 
@@ -32,13 +32,13 @@ class AuthController {
   @Publico() @Post('salir') @HttpCode(204)
   salir(@Body(new Zod(Token)) b: z.infer<typeof Token>) { return this.auth.salir(b.refreshToken); }
 
-  @SinAceptarDatos() @Get('yo') yo(@ActorActual() a: Actor) { return this.auth.yo(a); }
+  @SinAceptarDatos() @PermitePortal() @Get('yo') yo(@ActorActual() a: Actor) { return this.auth.yo(a); }
 
   /** Ley 1581: aceptar la política de tratamiento de datos personales (primer ingreso o versión nueva). */
-  @SinAceptarDatos() @Post('aceptar-datos') @HttpCode(200)
+  @SinAceptarDatos() @PermitePortal() @Post('aceptar-datos') @HttpCode(200)
   aceptarDatos(@ActorActual() a: Actor, @Body(new Zod(AceptarDatos)) b: z.infer<typeof AceptarDatos>, @Req() req: Request) { return this.auth.aceptarDatos(a, b.version, meta(req)); }
 
-  @SinAceptarDatos() @Post('salir-todos') @HttpCode(204)
+  @SinAceptarDatos() @PermitePortal() @Post('salir-todos') @HttpCode(204)
   salirTodos(@ActorActual() a: Actor) { return this.auth.salirTodos(a); }
 
   @Publico() @LimiteCredenciales(5) @Post('recuperar') @HttpCode(202)
@@ -61,10 +61,16 @@ class GuardAutenticacion implements CanActivate {
     const req = ctx.switchToHttp().getRequest<Request & { actor?: Actor }>();
     const [tipo, token] = (req.headers.authorization ?? '').split(' ');
     if (tipo !== 'Bearer' || !token) throw new UnauthorizedException({ mensaje: 'Debe iniciar sesión.' });
-    let p: { sub: string; emp: string; rol: string; prm: string[]; nom: string; sid: string; dat?: boolean };
+    let p: { sub: string; emp: string; rol: string; prm: string[]; nom: string; sid: string; dat?: boolean; cli?: string; pp?: 'ADMIN' | 'CONSULTA' };
     try { p = await this.jwt.verifyAsync(token); } catch { throw new UnauthorizedException({ mensaje: 'La sesión venció. Renueve el token.' }); }
     if (!(await this.auth.sesionActiva(p.sid))) throw new UnauthorizedException({ mensaje: 'La sesión fue cerrada. Ingrese de nuevo.' });
-    req.actor = { id: p.sub, empresaId: p.emp, rol: p.rol, permisos: p.prm, nombre: p.nom, sesionId: p.sid };
+    req.actor = { id: p.sub, empresaId: p.emp, rol: p.rol, permisos: p.prm, nombre: p.nom, sesionId: p.sid, ...(p.cli ? { clienteId: p.cli, perfilPortal: p.pp ?? 'CONSULTA' } : {}) };
+    // Portal de clientes (requisitos de producción §2): el usuario de un cliente solo usa las rutas hechas para él.
+    // Todo lo demás (incluidos los listados de oficina sin permiso propio) le responde 403.
+    const soloPortal = this.reflector.getAllAndOverride<boolean>(SOLO_PORTAL, objetivo);
+    if (p.cli && !soloPortal && !this.reflector.getAllAndOverride<boolean>(PERMITE_PORTAL, objetivo))
+      throw new ForbiddenException({ mensaje: 'Esta sección no está disponible en el portal de clientes.', codigo: 'PORTAL' });
+    if (soloPortal && !p.cli) throw new ForbiddenException({ mensaje: 'Esta sección es solo para los usuarios del portal de clientes.' });
     if (p.dat !== true && !this.reflector.getAllAndOverride<boolean>(SIN_DATOS, objetivo))
       throw new ForbiddenException({ mensaje: 'Para continuar debe aceptar la política de tratamiento de datos personales.', codigo: 'ACEPTAR_DATOS' });
     const requerido = this.reflector.getAllAndOverride<string>(PERMISO, objetivo);

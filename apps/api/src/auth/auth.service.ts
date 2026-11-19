@@ -55,18 +55,21 @@ export class AuthService {
 
   /** Crea una sesión: token de acceso corto (JWT) + token de renovación opaco «sesionId.secreto». */
   private async emitir(usuarioId: string, meta: { ip?: string; ua?: string }) {
-    const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId }, include: { rol: { include: { permisos: { include: { permiso: true } } } }, empresa: true } });
+    const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId }, include: { rol: { include: { permisos: { include: { permiso: true } } } }, empresa: true, clientePortal: { select: { id: true, razonSocial: true, nit: true, activo: true } } } });
     const secreto = randomBytes(32).toString('base64url');
     const sesion = await this.db.sesion.create({ data: { usuarioId, tokenHash: sha256(secreto), ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), expiraEn: new Date(Date.now() + this.cfg.get('REFRESH_DIAS', { infer: true }) * 86_400_000) } });
-    const permisos = u.rol.permisos.map((p) => p.permiso.codigo);
+    // Un usuario del portal no lleva permisos de oficina, aunque su rol los tuviera
+    const permisos = u.clienteId ? [] : u.rol.permisos.map((p) => p.permiso.codigo);
     // Ley 1581: sin la versión vigente de la política aceptada, el token solo sirve para aceptarla (ver el guard)
     const version = this.cfg.get('POLITICA_DATOS_VERSION', { infer: true });
     const aceptada = u.datosPoliticaVersion === version;
-    const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id, dat: aceptada });
+    const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id, dat: aceptada,
+      ...(u.clienteId ? { cli: u.clienteId, pp: u.perfilPortal } : {}) });
     return {
       accessToken, refreshToken: `${sesion.id}.${secreto}`, expiraEnSeg: this.cfg.get('JWT_ACCESS_MIN', { infer: true }) * 60,
       usuario: { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol.nombre, permisos, empresa: { id: u.empresa.id, razonSocial: u.empresa.razonSocial, nit: u.empresa.nit },
-        requiereAceptarDatos: !aceptada, politicaDatos: { version, url: this.cfg.get('POLITICA_DATOS_URL', { infer: true }) || null } },
+        requiereAceptarDatos: !aceptada, politicaDatos: { version, url: this.cfg.get('POLITICA_DATOS_URL', { infer: true }) || null },
+        ...(u.clientePortal ? { cliente: { id: u.clientePortal.id, razonSocial: u.clientePortal.razonSocial, nit: u.clientePortal.nit }, perfilPortal: u.perfilPortal } : {}) },
     };
   }
 
@@ -115,17 +118,21 @@ export class AuthService {
   }
 
   async yo(actor: Actor) {
-    return this.db.usuario.findUniqueOrThrow({ where: { id: actor.id }, select: { id: true, nombre: true, email: true, telefono: true, esConductor: true, rol: { select: { nombre: true } }, empresa: { select: { razonSocial: true, nit: true } } } });
+    return this.db.usuario.findUniqueOrThrow({ where: { id: actor.id }, select: { id: true, nombre: true, email: true, telefono: true, esConductor: true, perfilPortal: true, rol: { select: { nombre: true } }, empresa: { select: { razonSocial: true, nit: true } },
+      clientePortal: { select: { id: true, razonSocial: true, nit: true } } } });
   }
 
   /** Invitación a un usuario nuevo (o reenvío): enlace para crear su contraseña, válido 72 horas y una sola vez. */
   async invitar(usuarioId: string) {
-    const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId } });
+    const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId }, include: { clientePortal: { select: { razonSocial: true } } } });
     const token = randomBytes(32).toString('base64url');
     await this.db.passwordReset.create({ data: { usuarioId: u.id, tokenHash: sha256(token), expiraEn: new Date(Date.now() + 72 * 3_600_000) } });
     const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
-    await this.correo.enviar(u.email, 'Bienvenido a TERRY-GO · cree su contraseña',
-      `Hola ${u.nombre}:\n\nTerra Viva le creó un usuario en TERRY-GO. Para crear su contraseña abra este enlace (vence en 72 horas y sirve una sola vez):\n${url}\n\nSi no esperaba este correo, ignórelo.`);
+    const que = u.clientePortal
+      ? `Le dimos acceso al portal de clientes de Terra Viva, a nombre de ${u.clientePortal.razonSocial}. Allí consulta y descarga sus declaraciones, manifiestos, certificados e informes.`
+      : 'Terra Viva le creó un usuario en TERRY-GO.';
+    await this.correo.enviar(u.email, u.clientePortal ? 'Portal de clientes de Terra Viva · cree su contraseña' : 'Bienvenido a TERRY-GO · cree su contraseña',
+      `Hola ${u.nombre}:\n\n${que} Para crear su contraseña abra este enlace (vence en 72 horas y sirve una sola vez):\n${url}\n\nSi no esperaba este correo, ignórelo.`);
   }
 
   /** Siempre responde igual para no revelar si el correo existe. */

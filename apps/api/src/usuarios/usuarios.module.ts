@@ -39,7 +39,7 @@ class UsuariosService {
   async listar(a: Actor, f: z.infer<typeof Filtros>) {
     const { take, skip, pagina, porPagina } = paginar(f);
     const where: Prisma.UsuarioWhereInput = {
-      empresaId: a.empresaId, rolId: f.rolId, activo: f.activo ? f.activo === 'true' : undefined,
+      empresaId: a.empresaId, clienteId: null, rolId: f.rolId, activo: f.activo ? f.activo === 'true' : undefined, // los del portal se ven en la ficha de su cliente
       ...(f.q ? { OR: [{ nombre: { contains: f.q, mode: 'insensitive' } }, { email: { contains: f.q, mode: 'insensitive' } }, { documento: { contains: f.q } }] } : {}),
     };
     const [total, filas] = await this.db.$transaction([
@@ -52,14 +52,14 @@ class UsuariosService {
   /** Roles de la empresa con sus permisos y cuántos usuarios activos tienen (matriz de permisos). */
   async roles(a: Actor) {
     const [roles, permisos] = await Promise.all([
-      this.db.rol.findMany({ where: { empresaId: a.empresaId }, orderBy: { nombre: 'asc' }, include: { permisos: { include: { permiso: { select: { codigo: true } } } }, _count: { select: { usuarios: { where: { activo: true } } } } } }),
+      this.db.rol.findMany({ where: { empresaId: a.empresaId, nombre: { not: 'Cliente (portal)' } }, orderBy: { nombre: 'asc' }, include: { permisos: { include: { permiso: { select: { codigo: true } } } }, _count: { select: { usuarios: { where: { activo: true, clienteId: null } } } } } }),
       this.db.permiso.findMany({ orderBy: { codigo: 'asc' }, select: { codigo: true, nombre: true } }),
     ]);
     return { permisos, roles: roles.map((r) => ({ id: r.id, nombre: r.nombre, usuariosActivos: r._count.usuarios, permisos: r.permisos.map((p) => p.permiso.codigo) })) };
   }
 
   private async rolDe(a: Actor, rolId: string) {
-    const r = await this.db.rol.findFirst({ where: { id: rolId, empresaId: a.empresaId }, include: { permisos: { include: { permiso: { select: { codigo: true } } } } } });
+    const r = await this.db.rol.findFirst({ where: { id: rolId, empresaId: a.empresaId, nombre: { not: 'Cliente (portal)' } }, include: { permisos: { include: { permiso: { select: { codigo: true } } } } } });
     if (!r) throw new BadRequestException({ mensaje: 'Rol no válido.' });
     return { ...r, codigos: r.permisos.map((p) => p.permiso.codigo) };
   }
@@ -76,7 +76,7 @@ class UsuariosService {
 
   async editar(a: Actor, id: string, b: z.infer<typeof Editar>) {
     const { desbloquear, ...datos } = b;
-    const u = await this.db.usuario.findFirst({ where: { id, empresaId: a.empresaId }, include: { rol: { include: { permisos: { include: { permiso: { select: { codigo: true } } } } } } } });
+    const u = await this.db.usuario.findFirst({ where: { id, empresaId: a.empresaId, clienteId: null }, include: { rol: { include: { permisos: { include: { permiso: { select: { codigo: true } } } } } } } });
     if (!u) throw new NotFoundException({ mensaje: 'Usuario no encontrado.' });
     const cambiaRol = !!datos.rolId && datos.rolId !== u.rolId;
     if (id === a.id && (datos.activo === false || cambiaRol)) throw new BadRequestException({ mensaje: 'Nadie se inactiva ni se cambia el rol a sí mismo: pídaselo a otro administrador.' });
@@ -100,7 +100,7 @@ class UsuariosService {
   }
 
   async reenviar(a: Actor, id: string) {
-    const u = await this.db.usuario.findFirst({ where: { id, empresaId: a.empresaId } });
+    const u = await this.db.usuario.findFirst({ where: { id, empresaId: a.empresaId, clienteId: null } });
     if (!u) throw new NotFoundException({ mensaje: 'Usuario no encontrado.' });
     if (!u.activo) throw new BadRequestException({ mensaje: 'El usuario está inactivo: actívelo antes de enviarle la invitación.' });
     await this.auth.invitar(u.id);

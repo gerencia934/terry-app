@@ -205,6 +205,12 @@ enum TipoActa {
   APROVECHAMIENTO
 }
 
+/// Portal de clientes: el administrador del cliente crea los usuarios de su empresa; «consulta» solo ve y descarga.
+enum PerfilPortal {
+  ADMIN
+  CONSULTA
+}
+
 enum EstadoPermiso {
   VIGENTE
   POR_VENCER
@@ -301,31 +307,37 @@ model RolPermiso {
 }
 
 model Usuario {
-  id                   String    @id @default(uuid()) @db.Uuid
-  empresaId            String    @map("empresa_id") @db.Uuid
-  rolId                String    @map("rol_id") @db.Uuid
-  nombre               String    @db.VarChar(150)
-  documento            String    @db.VarChar(20)
-  email                String    @unique @db.VarChar(150)
-  passwordHash         String    @map("password_hash")
-  telefono             String?   @db.VarChar(20)
-  esConductor          Boolean   @default(false) @map("es_conductor")
-  esAuxiliar           Boolean   @default(false) @map("es_auxiliar")
-  licenciaCat          String?   @map("licencia_cat") @db.VarChar(5)
-  licenciaVence        DateTime? @map("licencia_vence") @db.Date
-  cursoMpVence         DateTime? @map("curso_mp_vence") @db.Date // Res. 1223/2014
-  arlId                String?   @map("arl_id") @db.Uuid // seguridad social: requisito de ingreso a planta
-  epsId                String?   @map("eps_id") @db.Uuid
-  activo               Boolean   @default(true)
-  ultimoLogin          DateTime? @map("ultimo_login") @db.Timestamptz
+  id                   String        @id @default(uuid()) @db.Uuid
+  empresaId            String        @map("empresa_id") @db.Uuid
+  rolId                String        @map("rol_id") @db.Uuid
+  nombre               String        @db.VarChar(150)
+  documento            String        @db.VarChar(20)
+  email                String        @unique @db.VarChar(150)
+  passwordHash         String        @map("password_hash")
+  telefono             String?       @db.VarChar(20)
+  esConductor          Boolean       @default(false) @map("es_conductor")
+  esAuxiliar           Boolean       @default(false) @map("es_auxiliar")
+  licenciaCat          String?       @map("licencia_cat") @db.VarChar(5)
+  licenciaVence        DateTime?     @map("licencia_vence") @db.Date
+  cursoMpVence         DateTime?     @map("curso_mp_vence") @db.Date // Res. 1223/2014
+  arlId                String?       @map("arl_id") @db.Uuid // seguridad social: requisito de ingreso a planta
+  epsId                String?       @map("eps_id") @db.Uuid
+  activo               Boolean       @default(true)
+  ultimoLogin          DateTime?     @map("ultimo_login") @db.Timestamptz
   // Ley 1581 de 2012: aceptación de la política de tratamiento de datos (versión, fecha e IP)
-  datosPoliticaVersion String?   @map("datos_politica_version") @db.VarChar(20)
-  datosAceptadosEn     DateTime? @map("datos_aceptados_en") @db.Timestamptz
-  datosAceptadosIp     String?   @map("datos_aceptados_ip") @db.VarChar(64)
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  datosPoliticaVersion String?       @map("datos_politica_version") @db.VarChar(20)
+  datosAceptadosEn     DateTime?     @map("datos_aceptados_en") @db.Timestamptz
+  datosAceptadosIp     String?       @map("datos_aceptados_ip") @db.VarChar(64)
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  // Portal de clientes: usuario de un cliente, con su perfil (ver migración 20261126000000_portal_clientes).
+  // Sin sedes en usuario_sucursales, ve todas las del cliente.
+  clienteId            String?       @map("cliente_id") @db.Uuid
+  perfilPortal         PerfilPortal? @map("perfil_portal")
 
   empresa                 Empresa                  @relation(fields: [empresaId], references: [id])
   rol                     Rol                      @relation(fields: [rolId], references: [id])
+  clientePortal           Cliente?                 @relation("UsuarioPortal", fields: [clienteId], references: [id], onDelete: Restrict)
+  sedesPortal             UsuarioSucursal[]
   arl                     EntidadSeguridadSocial?  @relation("UsuarioArl", fields: [arlId], references: [id])
   eps                     EntidadSeguridadSocial?  @relation("UsuarioEps", fields: [epsId], references: [id])
   rutasConductor          Ruta[]                   @relation("RutaConductor")
@@ -410,14 +422,15 @@ model Cliente {
   activo           Boolean         @default(true)
   camposExtra      Json            @default("{}") @map("campos_extra")
 
-  empresa       Empresa        @relation(fields: [empresaId], references: [id])
-  asesor        Usuario?       @relation("ClienteAsesor", fields: [asesorId], references: [id])
-  sucursales    Sucursal[]
-  declaraciones Declaracion[]
-  solicitudes   Solicitud[]
-  manifiestos   Manifiesto[]
-  actas         Acta[]
-  cargues       CargueMasivo[]
+  empresa        Empresa        @relation(fields: [empresaId], references: [id])
+  asesor         Usuario?       @relation("ClienteAsesor", fields: [asesorId], references: [id])
+  sucursales     Sucursal[]
+  declaraciones  Declaracion[]
+  solicitudes    Solicitud[]
+  manifiestos    Manifiesto[]
+  actas          Acta[]
+  cargues        CargueMasivo[]
+  usuariosPortal Usuario[]      @relation("UsuarioPortal")
 
   @@unique([empresaId, nit])
   @@map("clientes")
@@ -457,6 +470,7 @@ model Sucursal {
   solicitudItems  SolicitudItem[]
   paradas         RutaParada[]
   manifiestoItems ManifiestoItem[] // como generador de la línea
+  usuariosPortal  UsuarioSucursal[] // usuarios del portal restringidos a esta sede
 
   @@unique([clienteId, codigo])
   @@map("sucursales")
@@ -503,6 +517,17 @@ model Zona {
   rutas      Ruta[]
 
   @@map("zonas")
+}
+
+/// Sedes que puede ver un usuario del portal (sin filas: todas las de su cliente).
+model UsuarioSucursal {
+  usuarioId  String   @map("usuario_id") @db.Uuid
+  sucursalId String   @map("sucursal_id") @db.Uuid
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  @@id([usuarioId, sucursalId])
+  @@map("usuario_sucursales")
 }
 
 model Bodega {

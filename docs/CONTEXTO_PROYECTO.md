@@ -66,7 +66,7 @@ para clientes directos. Se trabaja por fases y **se espera el visto bueno del us
   - Excel o CSV, con el separador y la codificación detectados; valida los códigos paramétricos, guarda el lote en una
     transacción y deja el historial en `cargues_masivos` con el hash, el formato y el separador del archivo.
   - Deshacer un cargue de declaraciones: quedan ANULADAS (nada se borra) y sus códigos quedan libres.
-  - Falta el cargue por el propio cliente desde su portal, cuando exista el portal (fase 3).
+  - Falta el cargue por el propio cliente desde su portal (el portal ya existe para consultar y descargar).
 
 Las 7 preguntas de la fase A están respondidas. Ver la tabla en `docs/declaraciones/MODELO_DATOS.md`:
 - **ACU:** lo amparan los dos actos, el OF-311-21 y la Res. 316 de 2018.
@@ -91,5 +91,7 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
 - Inventario con saldo por tratar y edición de catálogos: esperan las respuestas F1 y F2 (`docs/PREGUNTAS_GERENCIA.md`).
 - Exportar e Informes (descargas en Excel) siguen de ejemplo.
 - Certificados: campos del Anexo VI del Decreto 0766 de 2026 y códigos D/R (`docs/declaraciones/MODELO_DATOS.md` §9).
-- Portal del cliente (fase 3): cargue de sus propias declaraciones y consulta de certificados.
+- Portal de clientes (fase 3, paso 3 del orden de la gerencia): ✅ consulta y descarga el 19-11-2026, con doble barrera
+  (API + RLS), enlace firmado de 5 minutos, usuarios del cliente (administrador y consulta, sedes opcionales) e informe
+  anual en Excel. Siguen: el cargue de sus propias declaraciones y los pedidos de servicio desde el portal.
 - Docker no se probó en el entorno de Claude: el usuario lo levanta en su equipo.

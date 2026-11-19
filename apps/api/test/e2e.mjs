@@ -966,6 +966,158 @@ prueba('inicio: cadena del mes, agenda, obligaciones y cifras del mes para quien
 r = await llamar('GET', '/informes/inicio', { token: tAux });
 prueba('…quien no ve informes recibe la operación, sin cifras de dinero', r.status === 200 && r.json.negocio === null && typeof r.json.cadena?.programadas === 'number', JSON.stringify(r.json).slice(0, 200));
 
+console.log('\n9. Portal de clientes: doble barrera (requisitos de producción §2)');
+const clienteA = await db.cliente.findUnique({ where: { id: suc.clienteId } });
+const hashFijo = async (clave) => (await import('@node-rs/argon2')).hash(clave, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
+const entrarPortal = async (email, clave) => (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email, clave } })).json));
+// La oficina da acceso al portal: el primer administrador del cliente A
+r = await llamar('POST', `/clientes/${clienteA.id}/usuarios-portal`, { token: tcom, cuerpo: { email: 'Portal.A@cliente-a.test', nombre: 'Administradora Cliente A', documento: '52111222', perfil: 'ADMIN' } });
+const portalA = r.json;
+prueba('la oficina (Comercial) da acceso al portal: usuario del cliente con invitación para crear su contraseña', r.status === 201 && portalA.email === 'portal.a@cliente-a.test'
+  && !!(await db.passwordReset.findFirst({ where: { usuarioId: portalA.id } })), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/clientes/${clienteA.id}/usuarios-portal`, { token: thseq, cuerpo: { email: 'otro@cliente-a.test', nombre: 'Otro Usuario', documento: '52111333' } });
+prueba('…sin «clientes.editar» (HSEQ) no se da acceso → 403', r.status === 403, String(r.status));
+await db.usuario.update({ where: { id: portalA.id }, data: { passwordHash: await hashFijo('PortalA2026!') } });
+const sesionA = await entrarPortal('portal.a@cliente-a.test', 'PortalA2026!');
+const tPA = sesionA.accessToken;
+prueba('al ingresar, la sesión dice que es del portal, de qué cliente y con qué perfil', sesionA.usuario?.cliente?.id === clienteA.id && sesionA.usuario.perfilPortal === 'ADMIN'
+  && sesionA.usuario.permisos.length === 0, JSON.stringify(sesionA.usuario ?? sesionA).slice(0, 200));
+// Cliente B con su propio usuario del portal
+const clienteB = (await llamar('POST', '/clientes', { token: T8, cuerpo: { nit: '901777666', razonSocial: 'Cliente B del Portal S.A.S.' } })).json;
+const sedeB = (await llamar('POST', `/clientes/${clienteB.id}/sucursales`, { token: T8, cuerpo: { nombre: 'Planta B', codigo: 'B1', municipioDane: '68001' } })).json;
+const declB = (await llamar('POST', '/declaraciones', { token: T8, cuerpo: { ...formulario, clienteId: clienteB.id, alcanceSedes: 'TODAS', codigoInterno: 'B-01', nombre: 'Residuo del cliente B' } })).json;
+r = await llamar('POST', `/clientes/${clienteB.id}/usuarios-portal`, { token: T8, cuerpo: { email: 'portal.b@cliente-b.test', nombre: 'Consulta Cliente B', documento: '52999888', perfil: 'CONSULTA' } });
+const portalB = r.json;
+await db.usuario.update({ where: { id: portalB.id }, data: { passwordHash: await hashFijo('PortalB2026!') } });
+const tPB = (await entrarPortal('portal.b@cliente-b.test', 'PortalB2026!')).accessToken;
+prueba('(cliente B con su sede, una declaración y un usuario de consulta)', !!sedeB.id && !!declB.id && !!tPB, JSON.stringify({ sedeB: sedeB.id, declB: declB.id }));
+
+// Barrera 1a: el usuario del portal no usa ninguna ruta de oficina
+const rutasOficina = ['/declaraciones', '/clientes', `/clientes/${clienteA.id}`, '/solicitudes', '/manifiestos', '/actas', '/conciliaciones', '/informes/inicio', '/alertas', '/vehiculos',
+  '/permisos-ambientales', '/declaraciones/catalogos', '/importacion/historial', '/archivos?clave=x', '/zonas', '/municipios?q=bu', `/clientes/${clienteA.id}/usuarios-portal`,
+  '/programacion/pendientes', '/empresa', '/usuarios', '/gestores-aliados', '/inspecciones?desde=2026-01-01&hasta=2026-12-31', '/informes/indicadores?desde=2026-01-01&hasta=2026-12-31'];
+const fugas = [];
+for (const ruta of rutasOficina) { const x = await llamar('GET', ruta, { token: tPA }); if (x.status !== 403 || x.json.codigo !== 'PORTAL') fugas.push(`${ruta} → ${x.status}`); }
+prueba(`el usuario del portal recibe 403 en las ${rutasOficina.length} rutas de oficina probadas (listados, detalle, archivos e informes)`, fugas.length === 0, fugas.join(', '));
+r = await llamar('PATCH', `/declaraciones/${declB.id}/estado`, { token: tPA, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…ni las de escritura (autorizar una declaración) → 403', r.status === 403, String(r.status));
+r = await llamar('GET', '/portal/resumen', { token: T8 });
+prueba('…y el personal de Terra Viva no usa las rutas del portal → 403', r.status === 403, String(r.status));
+
+// Lo suyo: el cliente A ve sus declaraciones, solicitudes, manifiestos y certificados
+const [declsA, mfsA, actasA] = await Promise.all([
+  db.declaracion.count({ where: { clienteId: clienteA.id, estado: { not: 'ANULADA' } } }),
+  db.manifiesto.findMany({ where: { clienteId: clienteA.id, estado: 'REALIZADO' }, select: { id: true } }),
+  db.acta.findMany({ where: { clienteId: clienteA.id, estado: 'EMITIDA' }, select: { id: true } }),
+]);
+r = await llamar('GET', '/portal/yo', { token: tPA });
+prueba('portal: «quién soy» trae su cliente, su perfil y sus sedes', r.status === 200 && r.json.cliente.id === clienteA.id && r.json.perfil === 'ADMIN' && r.json.sedes.length >= 1, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', '/portal/declaraciones?porPagina=200', { token: tPA });
+prueba('…ve todas sus declaraciones (y solo las suyas)', r.status === 200 && r.json.total === declsA && r.json.filas.every((d) => d.id !== declB.id), `${r.json.total} vs ${declsA}`);
+const unaDeclA = r.json.filas[0];
+r = await llamar('GET', '/portal/manifiestos?porPagina=200', { token: tPA });
+prueba('…sus manifiestos grabados', r.status === 200 && mfsA.length > 0 && mfsA.every((m) => r.json.filas.some((x) => x.id === m.id)), `${r.json.total} vs ${mfsA.length}`);
+r = await llamar('GET', '/portal/certificados?porPagina=200', { token: tPA });
+prueba('…y sus certificados emitidos', r.status === 200 && actasA.length > 0 && r.json.total === actasA.length, `${r.json.total} vs ${actasA.length}`);
+r = await llamar('GET', '/portal/resumen', { token: tPA });
+prueba('…con su resumen', r.status === 200 && r.json.declaraciones.autorizadas >= 1 && typeof r.json.certificadosDelAnio === 'number', JSON.stringify(r.json).slice(0, 200));
+// Informe del año: vale lo conciliado (conciliación aprobada) y, mientras tanto, lo del manifiesto
+const anioA = (await db.manifiesto.findUnique({ where: { id: mfsA[0].id }, select: { fechaServicio: true } })).fechaServicio.getUTCFullYear();
+const gestionado = async (extra = {}) => (await db.manifiestoItem.findMany({
+  where: { ...extra, manifiesto: { clienteId: clienteA.id, estado: 'REALIZADO', fechaServicio: { gte: new Date(Date.UTC(anioA, 0, 1)), lt: new Date(Date.UTC(anioA + 1, 0, 1)) } } },
+  select: { cantidad: true, conciliacion: { select: { cantidadConciliada: true, conciliacion: { select: { estado: true } } } } },
+})).reduce((s, i) => s + Number(i.conciliacion?.conciliacion.estado === 'APROBADA' && i.conciliacion.cantidadConciliada !== null ? i.conciliacion.cantidadConciliada : i.cantidad), 0);
+const sumaInforme = (j) => j.lineas.reduce((s, l) => s + l.total, 0);
+const esperadoA = await gestionado();
+r = await llamar('GET', `/portal/informe?anio=${anioA}`, { token: tPA });
+prueba('…y su informe del año: por residuo y por mes, con lo conciliado en planta', r.status === 200 && r.json.lineas.length > 0 && Math.abs(sumaInforme(r.json) - esperadoA) < 0.05
+  && r.json.lineas.every((l) => l.meses.length === 12 && Math.abs(l.meses.reduce((s, x) => s + x, 0) - l.total) < 0.05), `${r.status} ${r.json.lineas ? sumaInforme(r.json) : JSON.stringify(r.json)} vs ${esperadoA}`);
+
+// Barrera 1b: el cliente B pide datos del cliente A (detalle, descargas y filtros)
+const pruebasB = [
+  ['GET', `/portal/declaraciones/${unaDeclA.id}`], ['POST', `/portal/manifiestos/${mfsA[0].id}/enlace`], ['POST', `/portal/certificados/${actasA[0].id}/enlace`],
+  ['PATCH', `/portal/usuarios/${portalA.id}`],
+];
+const cruzadas = [];
+for (const [m, ruta] of pruebasB) { const x = await llamar(m, ruta, { token: tPB, cuerpo: m === 'PATCH' ? { activo: false } : undefined }); if (![403, 404].includes(x.status)) cruzadas.push(`${m} ${ruta} → ${x.status}`); }
+prueba('el cliente B recibe 403 o 404 al pedir el detalle, la descarga o los usuarios del cliente A', cruzadas.length === 0, cruzadas.join(', '));
+const [lB1, lB2, lB3, lB4, lB5] = await Promise.all([
+  llamar('GET', `/portal/declaraciones?q=${encodeURIComponent(unaDeclA.nombre)}`, { token: tPB }), llamar('GET', '/portal/manifiestos', { token: tPB }),
+  llamar('GET', '/portal/certificados?anio=2026', { token: tPB }), llamar('GET', '/portal/usuarios', { token: tPB }), llamar('GET', `/portal/informe?anio=${anioA}`, { token: tPB }),
+]);
+prueba('…y en sus listados, filtros e informes no aparece nada del cliente A', lB1.json.total === 0 && lB2.json.total === 0 && lB3.json.total === 0
+  && lB4.json.every((u) => u.id !== portalA.id) && lB5.json.lineas.length === 0, JSON.stringify([lB1.json.total, lB2.json.total, lB3.json.total, lB4.json.length, lB5.json.lineas?.length]));
+
+// Barrera 2: la base de datos (RLS) no deja ver otro cliente aunque la consulta lo pida
+const conCliente = (clienteId, fn) => db.$transaction(async (tx) => { await tx.$executeRaw`SELECT set_config('app.cliente_id', ${clienteId}, true)`; return fn(tx); });
+const vistoPorB = await conCliente(clienteB.id, async (tx) => ({
+  declsA: await tx.declaracion.count({ where: { clienteId: clienteA.id } }), mfsA: await tx.manifiesto.count({ where: { clienteId: clienteA.id } }),
+  actasA: await tx.acta.count({ where: { clienteId: clienteA.id } }), clientes: await tx.cliente.count(), itemsA: await tx.manifiestoItem.count({ where: { manifiesto: { clienteId: clienteA.id } } }),
+  conciliaciones: await tx.conciliacion.count(), suyas: await tx.declaracion.count(),
+}));
+prueba('RLS: con la sesión del cliente B, la base no devuelve filas del cliente A aunque la consulta las pida', vistoPorB.declsA === 0 && vistoPorB.mfsA === 0 && vistoPorB.actasA === 0
+  && vistoPorB.itemsA === 0 && vistoPorB.conciliaciones === 0 && vistoPorB.clientes === 1 && vistoPorB.suyas === 1, JSON.stringify(vistoPorB));
+let rlsEscritura = false;
+try { await conCliente(clienteB.id, (tx) => tx.solicitud.create({ data: { empresaId: clienteA.empresaId, clase: 'FORMAL', clienteId: clienteA.id, fechaSolicitada: new Date() } })); }
+catch (e) { rlsEscritura = /row-level security|seguridad de registros/i.test(String(e)); }
+prueba('…ni deja escribir a nombre del cliente A', rlsEscritura);
+prueba('…y sin sesión de portal (personal de Terra Viva) se ve todo, como antes', (await db.declaracion.count({ where: { clienteId: clienteA.id } })) > 0);
+
+// Descargas con enlace firmado de 5 minutos
+r = await llamar('POST', `/portal/certificados/${actasA[0].id}/enlace`, { token: tPA });
+const enlace = r.json;
+const bajada = await fetch(API + enlace.url);
+const bytes = Buffer.from(await bajada.arrayBuffer());
+prueba('descarga: enlace firmado de 5 minutos y el PDF del certificado sin sesión', r.status === 201 && /^\/descargas\//.test(enlace.url) && new Date(enlace.vence) - Date.now() <= 5 * 60_000
+  && bajada.status === 200 && bytes.subarray(0, 4).toString() === '%PDF', `${r.status} ${bajada.status} ${bytes.subarray(0, 8).toString()}`);
+const falsa = await fetch(API + enlace.url.slice(0, -4) + 'abcd');
+prueba('…un enlace alterado no sirve → 403', falsa.status === 403, String(falsa.status));
+r = await llamar('POST', `/portal/manifiestos/${mfsA[0].id}/enlace`, { token: tPA });
+const bajadaMf = await fetch(API + r.json.url);
+prueba('…también el PDF de sus manifiestos', bajadaMf.status === 200 && Buffer.from(await bajadaMf.arrayBuffer()).subarray(0, 4).toString() === '%PDF', String(bajadaMf.status));
+
+// Usuarios del portal: el administrador del cliente gestiona los de su empresa
+const sedeC002 = await db.sucursal.findFirst({ where: { clienteId: clienteA.id, codigo: 'C002' } });
+r = await llamar('POST', '/portal/usuarios', { token: tPA, cuerpo: { email: 'bodega@cliente-a.test', nombre: 'Jefe de Bodega A', documento: '52111444', perfil: 'CONSULTA', sucursalIds: [sedeC002.id] } });
+const consultaA = r.json;
+prueba('el administrador del cliente crea un usuario de consulta limitado a una sede', r.status === 201 && consultaA.perfilPortal === 'CONSULTA', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/portal/usuarios', { token: tPA, cuerpo: { email: 'intruso@cliente-a.test', nombre: 'Intruso', documento: '52111555', sucursalIds: [sedeB.id] } });
+prueba('…no puede darle una sede de otro cliente', r.status === 400 && /sede/.test(r.json.mensaje), JSON.stringify(r.json));
+await db.usuario.update({ where: { id: consultaA.id }, data: { passwordHash: await hashFijo('BodegaA2026!') } });
+const tBodega = (await entrarPortal('bodega@cliente-a.test', 'BodegaA2026!')).accessToken;
+const declsC002 = await db.declaracion.count({ where: { clienteId: clienteA.id, estado: { not: 'ANULADA' }, sucursales: { some: { sucursalId: sedeC002.id } } } });
+r = await llamar('GET', '/portal/declaraciones?porPagina=200', { token: tBodega });
+prueba('…ese usuario solo ve las declaraciones de su sede', r.status === 200 && r.json.total === declsC002 && declsC002 < declsA, `${r.json.total} vs ${declsC002} de ${declsA}`);
+const esperadoC002 = await gestionado({ sucursalId: sedeC002.id });
+r = await llamar('GET', `/portal/informe?anio=${anioA}`, { token: tBodega });
+prueba('…y su informe solo suma lo recogido en su sede', r.status === 200 && Math.abs(sumaInforme(r.json) - esperadoC002) < 0.05 && esperadoC002 < esperadoA, `${r.json.lineas ? sumaInforme(r.json) : r.status} vs ${esperadoC002} de ${esperadoA}`);
+r = await llamar('POST', '/portal/usuarios', { token: tBodega, cuerpo: { email: 'otro2@cliente-a.test', nombre: 'Otro Más', documento: '52111666' } });
+prueba('…y como es de consulta, no crea usuarios → 403', r.status === 403, String(r.status));
+r = await llamar('PATCH', `/portal/usuarios/${portalA.id}`, { token: tPA, cuerpo: { activo: false } });
+prueba('el administrador del cliente no se inactiva a sí mismo', r.status === 400, JSON.stringify(r.json));
+r = await llamar('PATCH', `/portal/usuarios/${consultaA.id}`, { token: tPA, cuerpo: { activo: false } });
+const trasPortal = await llamar('GET', '/portal/yo', { token: tBodega });
+prueba('…inactiva a otro de su empresa y su sesión se cierra de inmediato', r.status === 200 && r.json.activo === false && trasPortal.status === 401, `${r.status} ${trasPortal.status}`);
+r = await llamar('GET', '/usuarios?q=cliente-a', { token: T8 });
+prueba('los usuarios del portal no aparecen en Usuarios y roles de la oficina (se ven en la ficha del cliente)', r.status === 200 && r.json.total === 0, JSON.stringify(r.json).slice(0, 150));
+r = await llamar('GET', `/clientes/${clienteA.id}/usuarios-portal`, { token: T8 });
+prueba('…donde la oficina ve los usuarios del portal del cliente', r.status === 200 && r.json.length === 2 && r.json.some((u) => u.id === portalA.id), JSON.stringify(r.json).slice(0, 150));
+// Un administrador limitado a una sede no da (ni se da, con otro correo) más acceso del que tiene
+r = await llamar('POST', '/portal/usuarios', { token: tPA, cuerpo: { email: 'sede.admin@cliente-a.test', nombre: 'Administrador Sede C002', documento: '52111777', perfil: 'ADMIN', sucursalIds: [sedeC002.id] } });
+const adminSede = r.json;
+await db.usuario.update({ where: { id: adminSede.id }, data: { passwordHash: await hashFijo('SedeA2026!') } });
+const tAdminSede = (await entrarPortal('sede.admin@cliente-a.test', 'SedeA2026!')).accessToken;
+const [s1, s2, s3, s4] = await Promise.all([
+  llamar('POST', '/portal/usuarios', { token: tAdminSede, cuerpo: { email: 'todas@cliente-a.test', nombre: 'Sin Límite', documento: '52111888' } }),
+  llamar('PATCH', `/portal/usuarios/${portalA.id}`, { token: tAdminSede, cuerpo: { perfil: 'CONSULTA' } }),
+  llamar('PATCH', `/portal/usuarios/${adminSede.id}`, { token: tAdminSede, cuerpo: { sucursalIds: [] } }),
+  llamar('GET', '/portal/usuarios', { token: tAdminSede }),
+]);
+prueba('un administrador limitado a una sede no crea usuarios sin límite, no ve ni edita a los demás y no se quita el límite', s1.status === 403 && s2.status === 404 && s3.status === 403
+  && s4.status === 200 && s4.json.every((u) => u.id !== portalA.id), JSON.stringify([s1.status, s2.status, s3.status, s4.json.length]));
+r = await llamar('POST', '/portal/usuarios', { token: tAdminSede, cuerpo: { email: 'auxiliar.c002@cliente-a.test', nombre: 'Auxiliar Sede C002', documento: '52111999', sucursalIds: [sedeC002.id] } });
+prueba('…pero sí crea usuarios de su misma sede', r.status === 201, JSON.stringify(r.json).slice(0, 150));
+
 // Límite de peticiones (al final: deja la IP de la prueba sin poder ingresar durante un minuto).
 // El ingreso cuenta por correo y por IP: una oficina sale a internet por una sola IP y no debe bloquearse entera.
 let r11;

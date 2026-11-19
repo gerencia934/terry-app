@@ -10,7 +10,9 @@ export interface Sesion {
   accessToken: string; refreshToken: string; expiraEnSeg: number;
   usuario: { id: string; nombre: string; email: string; rol: string; permisos: string[]; empresa: { razonSocial: string; nit: string };
     /** Ley 1581: falta aceptar la versión vigente de la política de tratamiento de datos. */
-    requiereAceptarDatos?: boolean; politicaDatos?: { version: string; url: string | null } };
+    requiereAceptarDatos?: boolean; politicaDatos?: { version: string; url: string | null };
+    /** Usuario del portal de clientes: su empresa y su perfil (administrador o consulta). La oficina no lo trae. */
+    cliente?: { id: string; razonSocial: string; nit: string }; perfilPortal?: 'ADMIN' | 'CONSULTA' | null };
 }
 export class ErrorApi extends Error {
   constructor(public status: number, mensaje: string, public datos?: unknown) { super(mensaje); }

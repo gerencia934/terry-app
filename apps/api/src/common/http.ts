@@ -8,7 +8,11 @@ import type { Request, Response } from 'express';
 import { ZodError, type ZodSchema } from 'zod';
 
 /** Usuario autenticado (lo pone el guard a partir del token). */
-export interface Actor { id: string; empresaId: string; rol: string; permisos: string[]; nombre: string; sesionId?: string }
+/**
+ * Quién hace la petición. Un usuario del portal de clientes lleva su `clienteId` y su perfil: solo puede usar las rutas
+ * marcadas @PermitePortal() o @SoloPortal() (el guard global lo impide en todas las demás).
+ */
+export interface Actor { id: string; empresaId: string; rol: string; permisos: string[]; nombre: string; sesionId?: string; clienteId?: string; perfilPortal?: 'ADMIN' | 'CONSULTA' }
 export const ActorActual = createParamDecorator((_: unknown, ctx: ExecutionContext): Actor => ctx.switchToHttp().getRequest().actor);
 
 export const PUBLICO = 'publico';
@@ -20,6 +24,12 @@ export const SIN_DATOS = 'sinAceptarDatos';
 export const SinAceptarDatos = () => SetMetadata(SIN_DATOS, true);
 /** Exige un permiso del rol, p. ej. @Permiso('declaraciones.autorizar'). */
 export const Permiso = (codigo: string) => SetMetadata(PERMISO, codigo);
+export const PERMITE_PORTAL = 'permitePortal';
+export const SOLO_PORTAL = 'soloPortal';
+/** La ruta también la puede usar un usuario del portal de clientes (ver quién soy, aceptar la política, salir). */
+export const PermitePortal = () => SetMetadata(PERMITE_PORTAL, true);
+/** Ruta solo para usuarios del portal de clientes (el personal de Terra Viva recibe 403). */
+export const SoloPortal = () => SetMetadata(SOLO_PORTAL, true);
 
 export const TECHO_IP = 'techoPorIp';
 /**
@@ -66,6 +76,12 @@ export class FiltroErrores implements ExceptionFilter {
       if (m) { status = 409; cuerpo = { mensaje: m }; }
     } else if (err instanceof ZodError) {
       status = 400; cuerpo = { mensaje: 'Datos inválidos', detalles: err.issues };
+    }
+    // Segunda barrera del portal (RLS): la base rechazó leer o escribir datos de otro cliente. Se registra como error
+    // (el API debió impedirlo antes) y al usuario solo se le dice que no tiene acceso.
+    if (err instanceof Error && /row-level security|seguridad de registros/i.test(err.message)) {
+      this.log.error(`RLS bloqueó ${req.method} ${req.url}`, err.stack);
+      status = 403; cuerpo = { mensaje: 'No tiene acceso a ese registro.' };
     }
     if (status >= 500) this.log.error(`${req.method} ${req.url}`, err instanceof Error ? err.stack : String(err));
     res.status(status).json(cuerpo);

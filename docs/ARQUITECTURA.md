@@ -40,6 +40,7 @@ certificado ante la CAS o el cliente.
 | Informes | `informes/inicio` (cadena del mes, operación de hoy, agenda, obligaciones; cifras de dinero solo con «informes.ver»), `informes/indicadores` (toneladas, facturado, comprado y servicios por mes; por cliente, destino, tratamiento, vehículo y conductor; inspecciones y diferencia de báscula), `informes/recepcion-planta` (lo que entró a Los Pinos por tratamiento), `informes/rutas/rendimiento`, `informes/rutas/costos` | Sobre las conciliaciones no anuladas; toneladas solo de líneas en masa (factor a kg); lo facturado coincide con el consolidado de conciliaciones; fletes en Excel |
 | Empresa | `empresa`, `PATCH empresa/configuracion`, `PATCH empresa/consecutivos/:documento`, `empresa/textos-legales` (versiones) | Numeración TV/PSAP (el último número solo sube); textos legales con versión que salen según la disposición |
 | Archivos | `archivos?clave=` | Carpeta local por empresa (S3/R2 en producción); tipo real validado |
+| Portal de clientes | Solo usuarios de un cliente: `GET portal/yo · resumen · declaraciones[/:id] · solicitudes · manifiestos · certificados · informe?anio=`, `POST portal/manifiestos/:id/enlace · certificados/:id/enlace`, `GET/POST portal/usuarios`, `PATCH portal/usuarios/:id`, `POST portal/usuarios/:id/invitacion`. Oficina: `GET/POST clientes/:id/usuarios-portal`, `PATCH …/:uid`, `POST …/:uid/invitacion` (`clientes.editar`). Pública: `GET descargas/:token` | Ver «Portal de clientes» abajo |
 
 Detalle de la cadena operativa: `docs/operacion/MODELO_OPERACION.md`.
 
@@ -57,7 +58,25 @@ por minuto en cada ruta. En ingreso, recuperar y restablecer la contraseña hay 
 - 10 o 5 intentos por minuto para cada correo desde una IP;
 - un techo por IP para todos los correos juntos, `LIMITE_INGRESOS_IP_MIN` (60), contra el rociado de contraseñas.
 
-Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar.
+Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar y Cliente (portal).
+
+**Portal de clientes (requisitos de producción §2).** Un usuario del portal está ligado a un cliente (`usuarios.cliente_id`),
+con perfil **Administrador** (invita y gestiona a los de su empresa) o **Consulta**, y opcionalmente limitado a algunas
+sedes (`usuario_sucursales`). Consulta y descarga solo lo suyo, con doble barrera:
+1. **API.** El token lleva el cliente y el perfil. El guard global le responde 403 (`codigo: PORTAL`) en toda ruta que no
+   sea del portal, y el personal de Terra Viva recibe 403 en las del portal. Cada consulta filtra por el cliente del token
+   (nunca por un id que mande el navegador) y por sus sedes; un documento de otro cliente responde 404.
+2. **Base de datos (RLS).** Las consultas del portal corren en una transacción con `app.cliente_id`; las políticas
+   `rls_portal_cliente` (clientes, sedes, declaraciones, solicitudes, manifiestos, conciliaciones, actas, cargues,
+   usuarios y sus tablas hijas, con FORCE) solo dejan ver y escribir las filas de ese cliente, aunque el API tuviera
+   un error. Sin `app.cliente_id` (personal de Terra Viva) todo se ve como antes.
+
+Las descargas usan un **enlace firmado de 5 minutos** (`/descargas/<token>`, clave propia distinta de la de las
+sesiones), que el API entrega solo después de verificar que el documento es del cliente y de sus sedes; al servirlo
+vuelve a verificar con RLS y deja la descarga en la auditoría. Un administrador limitado a unas sedes solo ve y gestiona
+usuarios de esas mismas sedes: no puede dar (ni darse con otro correo) más acceso del que tiene. La oficina da el primer
+acceso desde la ficha del cliente. Las pruebas automáticas (e2e y de reglas) verifican que un cliente reciba 403 o 404
+en cada listado, detalle, descarga, filtro e informe de otro.
 
 ## 4. Base de datos (`packages/db`)
 
@@ -79,6 +98,10 @@ Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Condu
   (descargas), con el aviso de «datos de ejemplo» en modo servidor.
 - Navegación lateral por procesos (Comercial, Logística, Campo y HSEQ, Planta, Cumplimiento, Análisis,
   Ajustes) y buscador con Ctrl + K.
+- Portal de clientes (`pages/portal/`, rutas `#portal…`): inicio con su resumen y próximos servicios, declaraciones,
+  solicitudes, manifiestos (cargado en la sede y pesado en planta), certificados con su verificación pública, informe
+  del año por residuo y por mes (Excel) y usuarios (solo el administrador del cliente). Un usuario del portal no ve la
+  oficina, y la oficina no entra al portal.
 - Móvil: tablas que se vuelven tarjetas, filtros en hoja inferior, calendario que pasa a agenda,
   app del conductor con botones grandes.
 
@@ -91,4 +114,5 @@ Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Condu
 | 1b / 3 | Núcleo operativo: modelo y reglas (3-A), API (3-B), app del conductor sin señal (3-C) y torre de control (3-D) | ✅ |
 | 1c | Conectar a la API lo que aún era de ejemplo: clientes, tarifas, permisos, inspecciones, flota, usuarios, inicio, indicadores, inventario (entradas) y catálogos | ✅ (falta el saldo de inventario y editar catálogos: preguntas F1 y F2) |
 | 2 | PDF de manifiestos y certificados, fotos y firmas en S3, tarea diaria de alertas por correo | |
-| 3 | Factura electrónica DIAN, RNDC, portal del cliente | |
+| 3 | Portal de clientes: consulta y descarga con doble barrera (API + RLS), usuarios del cliente e informe anual | ✅ (siguen: cargue de declaraciones y pedidos de servicio desde el portal) |
+| 3+ | Factura electrónica DIAN, RNDC | |

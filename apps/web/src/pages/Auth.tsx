@@ -49,7 +49,7 @@ export function Login() {
     if (!clave) return setErr('Escriba su contraseña.');
     if (!MODO_REAL) return go('inicio');
     setEnviando(true);
-    try { const s = await ingresar(email, clave); go(s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'campo' : 'inicio'); }
+    try { const s = await ingresar(email, clave); go(s.usuario.cliente ? 'portal' : s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'campo' : 'inicio'); }
     catch (e) { setErr(e instanceof ErrorApi ? e.message : 'No se pudo ingresar.'); }
     finally { setEnviando(false); }
   };
@@ -57,7 +57,7 @@ export function Login() {
     <AuthLayout>
       <Logo className="h-12" />
       <h2 className="mt-8 text-2xl font-bold text-brand-strong">Ingresar</h2>
-      <p className="mt-1 text-muted">Con su correo de Terra Viva. Conductores y auxiliares entran directo a su app de campo.</p>
+      <p className="mt-1 text-muted">Con su correo registrado. Conductores y auxiliares entran directo a su app de campo, y los clientes, a su portal.</p>
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
         <Field label="Correo" id="login-email"><Input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@terravivasas.com" /></Field>
         <Field label="Contraseña" id="login-pass">

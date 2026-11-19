@@ -32,6 +32,15 @@ import { UsuariosServidor } from './pages/UsuariosServidor';
 import { IndicadoresServidor, InicioServidor } from './pages/IndicadoresServidor';
 import { CatalogosServidor, InventarioServidor } from './pages/CatalogosServidor';
 import Verificar from './pages/Verificar';
+import { PortalApp } from './pages/portal/PortalApp';
+import { useEffect } from 'react';
+import type { RouteName } from './lib/router';
+
+/** Cambia de ruta sin dejar la anterior en el historial. */
+function IrA({ ruta }: { ruta: RouteName }) {
+  useEffect(() => { location.replace(`#${ruta}`); }, [ruta]);
+  return null;
+}
 
 function Screen() {
   const { route } = useRouter();
@@ -46,6 +55,10 @@ function Screen() {
   if (MODO_REAL && !sesion) return <Login />;
   // Ley 1581: antes de usar el sistema (oficina o app del conductor) se acepta la política de datos personales
   if (MODO_REAL && sesion?.usuario.requiereAceptarDatos) return <AceptarDatos />;
+  // Portal de clientes: el usuario de un cliente solo ve su portal (cualquier otra ruta lo lleva al inicio del portal),
+  // y el personal de Terra Viva no entra al portal. El servidor lo exige igual: esto solo evita pantallas vacías.
+  if (MODO_REAL && sesion?.usuario.cliente) return <PortalApp />;
+  if (route.startsWith('portal')) return <IrA ruta="inicio" />;
   switch (route) {
     // App del conductor: conectada al API (con cola sin señal) o de demostración
     case 'campo': return MODO_REAL ? <CampoRutaServidor /> : <CampoHoy />;

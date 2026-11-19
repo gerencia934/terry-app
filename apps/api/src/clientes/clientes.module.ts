@@ -181,7 +181,7 @@ class ClientesService {
 
   /** Personas que pueden figurar como asesor comercial: usuarios activos de oficina. */
   asesores(a: Actor) {
-    return this.db.usuario.findMany({ where: { empresaId: a.empresaId, activo: true, esConductor: false, esAuxiliar: false }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true, rol: { select: { nombre: true } } } });
+    return this.db.usuario.findMany({ where: { empresaId: a.empresaId, activo: true, esConductor: false, esAuxiliar: false, clienteId: null }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true, rol: { select: { nombre: true } } } });
   }
   /** Sectores ya usados, para sugerirlos al escribir. */
   async sectores(a: Actor) {

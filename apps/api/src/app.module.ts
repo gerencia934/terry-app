@@ -19,6 +19,7 @@ import { ActasModule } from './actas/actas.module';
 import { InformesModule } from './informes/informes.module';
 import { EmpresaModule } from './empresa/empresa.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
+import { PortalModule } from './portal/portal.module';
 
 @Module({
   imports: [
@@ -36,7 +37,7 @@ import { UsuariosModule } from './usuarios/usuarios.module';
     }),
     PrismaModule, ComunModule, ArchivosModule, AuthModule,
     ClientesModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
-    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule,
+    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: FiltroErrores },

@@ -222,6 +222,18 @@ await rechaza('…y el historial no se modifica', () => db.obligacionCumplimient
 await rechaza('…ni se borra', () => db.obligacionCumplimiento.delete({ where: { id: cumR.id } }), /no se modifica ni se borra/);
 await rechaza('…ni se borra la obligación que lo tiene', () => db.obligacionPermiso.delete({ where: { id: oblR.id } }), /Foreign key|violates|obligacion_cumplimientos/i);
 
+console.log('\n10. Portal de clientes: usuarios del cliente y barrera en la base');
+const rolPortal = await db.rol.findFirstOrThrow({ where: { empresaId: E, nombre: 'Cliente (portal)' } });
+const datosPortal = (x) => ({ empresaId: E, rolId: rolPortal.id, nombre: 'Portal reglas', documento: '9' + sufijo, email: `portal.${x}.${sufijo}@reglas.test`, passwordHash: 'x', clienteId: cliente.id, perfilPortal: 'CONSULTA' });
+await rechaza('un usuario del portal lleva su perfil (y uno de oficina no lo lleva)', () => db.usuario.create({ data: { ...datosPortal('a'), perfilPortal: null } }), /chk_usuario_portal/);
+await rechaza('un usuario del portal no es conductor ni auxiliar', () => db.usuario.create({ data: { ...datosPortal('b'), esConductor: true } }), /chk_usuario_portal_campo/);
+const otroCliente = await db.cliente.create({ data: { empresaId: E, nit: `8${sufijo}02`, razonSocial: `Otro cliente reglas ${sufijo}` } });
+const sedeOtro = await db.sucursal.create({ data: { clienteId: otroCliente.id, nombre: 'Sede de otro cliente' } });
+const usuarioPortal = await db.usuario.create({ data: datosPortal('c') });
+await rechaza('no se le asigna una sede de otro cliente', () => db.usuarioSucursal.create({ data: { usuarioId: usuarioPortal.id, sucursalId: sedeOtro.id } }), /no es del cliente/);
+const vista = await db.$transaction(async (tx) => { await tx.$executeRaw`SELECT set_config('app.cliente_id', ${otroCliente.id}, true)`; return { suyos: await tx.sucursal.count(), ajenas: await tx.declaracion.count({ where: { clienteId: cliente.id } }) }; });
+prueba('RLS: con la sesión de un cliente, la base solo muestra sus filas', vista.suyos === 1 && vista.ajenas === 0, JSON.stringify(vista));
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);
