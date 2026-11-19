@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, Injectable } from '@nestjs/common';
-import { FormaPago, TipoNegociacion } from '@prisma/client';
+import { BadRequestException, Body, Controller, Get, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, Injectable } from '@nestjs/common';
+import { ClasificacionSede, FormaPago, TipoCliente, TipoNegociacion } from '@prisma/client';
 import { z } from 'zod';
 import { dvNit } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,12 +9,18 @@ import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
 const Filtros = z.object({ q: z.string().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
 const Crear = z.object({
   nit: z.string().regex(/^\d{6,10}$/, 'NIT sin puntos ni DV (6 a 10 dígitos)'), razonSocial: z.string().min(2).max(200), sector: z.string().max(60).optional(),
+  tipo: z.nativeEnum(TipoCliente).default('DIRECTO'),
   tipoNegociacion: z.nativeEnum(TipoNegociacion).default('COBRO'), formaPago: z.nativeEnum(FormaPago).default('CONTADO'), emailFacturacion: z.string().email().optional(),
 });
+const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora HH:MM').transform((h) => new Date(`1970-01-01T${h}:00Z`));
 const CrearSucursal = z.object({
-  nombre: z.string().min(2).max(150), direccion: z.string().max(250).optional(), municipioDane: z.string().length(5).optional(), zonaId: z.string().uuid().optional(),
+  nombre: z.string().min(2).max(150), codigo: z.string().regex(/^[A-Za-z0-9-]{1,20}$/).transform((s) => s.toUpperCase()).optional(),
+  esPrincipal: z.boolean().default(false), clasificacion: z.nativeEnum(ClasificacionSede).optional(),
+  generadorNit: z.string().regex(/^\d{6,10}$/).optional(), generadorNombre: z.string().max(200).optional(),
+  direccion: z.string().max(300).optional(), municipioDane: z.string().regex(/^\d{5}$/, 'Código DANE de 5 dígitos').optional(), zonaId: z.string().uuid().optional(),
   latitud: z.number().min(-5).max(14).optional(), longitud: z.number().min(-82).max(-66).optional(), registroRespel: z.string().max(50).optional(),
-  contacto: z.string().max(150).optional(), telefono: z.string().max(20).optional(), horario: z.string().max(100).optional(),
+  contacto: z.string().max(150).optional(), telefono: z.string().max(20).optional(), celular: z.string().max(20).optional(), emails: z.string().max(200).optional(),
+  atencionLvDesde: hora.optional(), atencionLvHasta: hora.optional(), atencionFdDesde: hora.optional(), atencionFdHasta: hora.optional(), observaciones: z.string().max(1000).optional(),
 });
 
 @Injectable()
@@ -40,8 +46,12 @@ class ClientesService {
     return c;
   }
   async crearSucursal(a: Actor, clienteId: string, b: z.infer<typeof CrearSucursal>) {
-    await this.obtener(a, clienteId);
-    const s = await this.db.sucursal.create({ data: { ...b, clienteId } });
+    const c = await this.obtener(a, clienteId);
+    if (b.municipioDane && !(await this.db.municipio.findUnique({ where: { codigoDane: b.municipioDane } })))
+      throw new BadRequestException({ mensaje: `El municipio ${b.municipioDane} no está en la lista DIVIPOLA cargada.` });
+    if (c.tipo === 'GESTOR' && !b.generadorNit) throw new BadRequestException({ mensaje: 'En un cliente gestor, cada sede debe indicar el NIT del generador.' });
+    // La primera sede del cliente queda como principal si no se indicó otra.
+    const s = await this.db.sucursal.create({ data: { ...b, esPrincipal: b.esPrincipal || !c.sucursales.length, clienteId } });
     await this.audit.registrar(a, 'sucursal', s.id, 'CREAR', undefined, s);
     return s;
   }

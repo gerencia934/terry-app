@@ -1,5 +1,6 @@
 import type ExcelJSNS from 'exceljs';
 import type { Plantilla } from './definiciones';
+import { CODIGOS_BASE } from '../declaraciones/catalogos';
 
 // ExcelJS se carga solo cuando se usa (no pesa en el arranque de la app web; en el API se carga una vez).
 type ExcelJS = typeof ExcelJSNS;
@@ -23,9 +24,12 @@ export async function construirPlantilla(p: Plantilla): Promise<ArrayBuffer> {
   const listas = wb.addWorksheet('Listas', { state: 'veryHidden' });
   const rangoLista: Record<string, string> = {};
   let li = 1;
-  p.columnas.filter((c) => c.opciones).forEach((c) => {
-    c.opciones!.forEach((o, i) => { listas.getCell(i + 1, li).value = o; });
-    rangoLista[c.key] = `Listas!$${colLetra(li)}$1:$${colLetra(li)}$${c.opciones!.length}`;
+  // Columnas de código de un solo valor: desplegable con los códigos iniciales (el servidor valida contra los vigentes).
+  const valores = (c: Plantilla['columnas'][number]) => c.opciones ?? (c.tipo === 'codigo' && !c.multiple && c.catalogo ? CODIGOS_BASE[c.catalogo] : undefined);
+  p.columnas.filter((c) => valores(c)).forEach((c) => {
+    const ops = valores(c)!;
+    ops.forEach((o, i) => { listas.getCell(i + 1, li).value = o; });
+    rangoLista[c.key] = `Listas!$${colLetra(li)}$1:$${colLetra(li)}$${ops.length}`;
     li++;
   });
 
@@ -51,7 +55,7 @@ export async function construirPlantilla(p: Plantilla): Promise<ArrayBuffer> {
     const L = colLetra(i + 1);
     for (let r = 2; r <= FILAS_VALIDACION; r++) {
       const cell = ws.getCell(`${L}${r}`);
-      if (rangoLista[c.key]) cell.dataValidation = { type: 'list', allowBlank: !c.requerido, formulae: [rangoLista[c.key]], showErrorMessage: true, errorTitle: c.header, error: 'Elija un valor de la lista.' };
+      if (rangoLista[c.key]) cell.dataValidation = { type: 'list', allowBlank: !c.requerido, formulae: [rangoLista[c.key]], showErrorMessage: c.tipo !== 'codigo' /* un código nuevo del catálogo no debe bloquearse en Excel */, errorTitle: c.header, error: 'Elija un valor de la lista.' };
       else if (c.tipo === 'numero') cell.dataValidation = { type: 'decimal', operator: 'greaterThanOrEqual', allowBlank: true, formulae: [-1e12], showErrorMessage: true, error: 'Escriba un número.' };
       else if (c.tipo === 'fecha') cell.numFmt = 'yyyy-mm-dd';
       else if (c.tipo === 'texto') cell.numFmt = '@';
@@ -72,7 +76,9 @@ export async function construirPlantilla(p: Plantilla): Promise<ArrayBuffer> {
   const hi = ins.addRow(['Columna', 'Obligatoria', 'Formato', 'Instrucción', 'Valores permitidos']);
   hi.eachCell((c) => { c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: VERDE } }; });
   p.columnas.forEach((c) => {
-    const r = ins.addRow([c.header, c.requerido ? 'Sí' : 'No', { texto: 'Texto', numero: 'Número', fecha: 'AAAA-MM-DD', lista: 'Lista', email: 'Correo', si_no: 'Sí / No' }[c.tipo], c.ayuda, c.opciones?.join(' · ') ?? '']);
+    const formato = { texto: 'Texto', numero: 'Número', fecha: 'AAAA-MM-DD', lista: 'Lista', email: 'Correo', si_no: 'Sí / No', codigo: c.multiple ? 'Códigos separados por ;' : 'Código' }[c.tipo];
+    const permitidos = c.opciones?.join(' · ') ?? (c.catalogo ? CODIGOS_BASE[c.catalogo].join(' · ') : '');
+    const r = ins.addRow([c.header, c.requerido ? 'Sí' : 'No', formato, c.ayuda, permitidos]);
     r.alignment = { wrapText: true, vertical: 'top' };
   });
   wb.views = [{ activeTab: 1, x: 0, y: 0, width: 20000, height: 12000, firstSheet: 0, visibility: 'visible' }];

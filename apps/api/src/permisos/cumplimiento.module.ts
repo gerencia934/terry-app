@@ -12,7 +12,7 @@ class CumplimientoService {
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
 
   permisos(a: Actor) {
-    return this.db.permisoAmbiental.findMany({ where: { empresaId: a.empresaId }, orderBy: { acto: 'asc' }, include: { obligaciones: { orderBy: { proximaFecha: 'asc' } } } });
+    return this.db.permisoAmbiental.findMany({ where: { empresaId: a.empresaId }, orderBy: { acto: 'asc' }, include: { obligaciones: { orderBy: { proximaFecha: 'asc' } }, disposiciones: { include: { disposicion: { select: { codigo: true, nombre: true } } } } } });
   }
 
   async cumplirObligacion(a: Actor, id: string) {
@@ -57,7 +57,7 @@ class CumplimientoService {
     return this.db.catalogoItem.findMany({ where: { empresaId: a.empresaId, tipo: tipo?.toUpperCase(), activo: true }, orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }] });
   }
   residuos(a: Actor) {
-    return this.db.catalogoResiduo.findMany({ where: { empresaId: a.empresaId }, orderBy: { codigo: 'asc' }, include: { lineaServicio: { select: { nombre: true } }, tipoManejo: { select: { nombre: true } } } });
+    return this.db.catalogoResiduo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { codigo: 'asc' }, include: { lineaServicio: { select: { codigo: true, nombre: true } } } });
   }
   vehiculos(a: Actor) { return this.db.vehiculo.findMany({ where: { empresaId: a.empresaId }, orderBy: { placa: 'asc' } }); }
   estadosRecorrido(a: Actor) { return this.db.estadoRecorrido.findMany({ where: { empresaId: a.empresaId }, orderBy: { orden: 'asc' } }); }

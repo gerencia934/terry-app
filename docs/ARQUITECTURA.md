@@ -16,7 +16,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 32 tablas, 2 migraciones, reglas en la base |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 50 tablas, 5 migraciones, reglas en la base |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Fase 2 |
@@ -29,7 +29,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Auth | `POST auth/login · renovar · salir · recuperar · restablecer`, `GET auth/yo` | argon2id; token de acceso 15 min; token de renovación rotativo (reuso ⇒ cierra todas las sesiones); bloqueo 15 min tras 5 intentos; respuestas que no revelan si un correo existe |
 | Clientes | `GET/POST clientes`, `POST clientes/:id/sucursales` | DV del NIT calculado (DIAN) |
-| Declaraciones | `GET/POST declaraciones`, `PATCH :id/estado`, `POST tarifas/masivas` | No autoriza si ningún permiso vigente cubre el tratamiento; tarifas con vigencias |
+| Declaraciones | `GET/POST declaraciones`, `GET declaraciones/catalogos`, `PATCH :id/estado`, `PATCH :id/activa`, `POST tarifas/masivas` | Una declaración por residuo y cliente, con N sedes y N disposiciones. No autoriza si alguna disposición no está cubierta por permiso de la CAS, licencia vigente del gestor aliado u objeto social (regla también en la base); peligroso exige FDS; tarifas con vigencias. Ver `docs/declaraciones/MODELO_DATOS.md` |
 | Logística | `solicitudes`, `rutas`, `PATCH rutas/:id/estado`, `preoperacionales`, `PATCH paradas/:id` | Solo residuos autorizados (trigger); la ruta no inicia sin inspección aprobada (trigger); cancelar siempre se permite |
 | Cumplimiento | `permisos-ambientales`, `PATCH obligaciones/:id/cumplida`, `alertas`, `catalogos`, `vehiculos`, `estados-recorrido`, `elementos-chequeo`, `salud` | Alertas de obligaciones, SOAT/RTM/póliza, licencias y curso MP, rutas sin inspección |
 | Importación | `GET importacion/plantillas[/:id/archivo]`, `POST importacion/:id/vista-previa · confirmar`, `GET historial` | Revalida todo en servidor; guarda en una transacción; registra el cargue |

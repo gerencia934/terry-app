@@ -1,14 +1,27 @@
-# Módulo Declaraciones — Modelo de datos (Fase A, para revisión)
+# Módulo Declaraciones — Modelo de datos (Fase A)
 
-Estado: **propuesta**. Validada en PostgreSQL 16 (migración + reglas + catálogos + 14 pruebas de reglas).
-Aún no reemplaza `packages/db/prisma/schema.prisma`: se adopta cuando Terra Viva la apruebe.
+Estado: **aprobado y adoptado** (19-11-2026). La API, la importación de Excel y la web ya lo usan; 52 pruebas e2e OK.
 
-| Archivo | Contenido |
+| Dónde | Contenido |
 |---|---|
-| `schema.prisma` | Esquema completo propuesto (50 tablas: las 32 actuales + 18 nuevas/rehechas) |
-| `migracion.sql` | SQL que genera Prisma desde el esquema actual |
-| `reglas.sql` | CHECK y triggers: obligatorios, coherencia, **cobertura de permisos**, solicitudes |
-| `catalogos_iniciales.sql` | Catálogos con los datos reales de Terra Viva (idempotente) |
+| `packages/db/prisma/schema.prisma` | Esquema completo (50 tablas: las 32 anteriores + 18 nuevas/rehechas) |
+| `packages/db/prisma/migrations/20261119000000_declaraciones` | Tablas nuevas y cambios sobre el esquema de la fase 1 |
+| `packages/db/prisma/migrations/20261119000100_declaraciones_reglas` | CHECK y triggers: obligatorios, coherencia, **cobertura de permisos**, solicitudes |
+| `packages/db/prisma/migrations/20261119000200_declaraciones_fds` | FDS obligatoria para autorizar un residuo peligroso |
+| `packages/shared/src/declaraciones/catalogos.ts` | Catálogos con los datos reales de Terra Viva (los usan el seed, las plantillas y la demo) |
+| `packages/shared/src/declaraciones/esquema.ts` | Validación zod del formulario de 8 secciones (API y web) |
+
+## Decisiones sobre las preguntas abiertas (19-11-2026)
+
+| # | Pregunta | Decisión |
+|---|---|---|
+| 1 | ¿El ACU lo ampara el OF-311-21 o la Res. 316 de 2018 CAS? | **Pendiente.** Se dejó OF-311-21, marcado VERIFICAR. Se corrige en datos, sin tocar código |
+| 2 | Lista real de categorías del declarado | **Pendiente.** Siguen las 5 provisionales (catálogo editable) |
+| 3 | ¿FDS obligatoria para peligrosos? | **Sí, para autorizar** (Dec. 1079/2015). Se puede enviar sin ella; no se autoriza sin ella |
+| 4 | ¿Etiquetado de selección múltiple? | **Sí** (`declaracion_etiquetados`) |
+| 5 | ¿Recurrencia = solicitud automática? | **Sí** (`solicitud_automatica` + `frecuencia_dias`) |
+| 6 | ¿Residuos de inventario? | **Se aplaza** al módulo de inventario |
+| 7 | ¿Datos reales cargados? | **No.** La migración no convierte datos |
 
 ## 1. Mapa de tablas
 
@@ -137,5 +150,14 @@ números internos. Son más fáciles de diligenciar y no dependen de los ID de n
   - hash del archivo, para avisar si el mismo archivo se sube dos veces;
   - estado y la relación con las declaraciones que creó.
 
-Al adoptar: se ajustan la API (`declaraciones`, `importacion`, `clientes`), `seed.mjs` y la importación de Excel.
-Si ya hay datos cargados en su equipo, la migración incluirá su conversión (sede y manejo actuales → tablas nuevas).
+## 6. API después de la adopción
+
+| Ruta | Qué hace |
+|---|---|
+| `GET declaraciones` | Listado con sedes, categoría, línea/unidad, disposiciones y tarifa vigente. Filtros: tipo, cliente, sede, estado, activa, nombre, código |
+| `GET declaraciones/catalogos` | Listas del formulario de 8 secciones (solo activas) |
+| `GET declaraciones/:id` | Detalle completo + cobertura legal de cada disposición |
+| `POST declaraciones` | Crea desde el formulario (BORRADOR o PENDIENTE) en una transacción; valida con `EsquemaDeclaracion` |
+| `PATCH declaraciones/:id/estado` | AUTORIZADA (exige sede, disposición, precio, FDS si es peligroso y cobertura) o RECHAZADA |
+| `PATCH declaraciones/:id/activa` | Activa o inactiva (con causal) una declaración autorizada |
+| `POST importacion/decl-residuos · decl-servicios` | Cargue por códigos; el lote queda en `cargues_masivos` con hash del archivo |

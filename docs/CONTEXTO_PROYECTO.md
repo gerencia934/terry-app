@@ -25,7 +25,7 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 |---|---|---|
 | 0 | Prototipo web, esquema y plantillas de Excel | `apps/web`, `docs/plantillas` |
 | 1 | API NestJS + Prisma + PostgreSQL. 37 pruebas e2e OK. Web conectada en ingreso, declaraciones e importación | rama `master` |
-| 2-A | **Modelo de datos de Declaraciones (propuesta)**: 50 tablas, reglas en la base y catálogos reales; 14 pruebas SQL OK | rama `fase-2-declaraciones`, `docs/declaraciones/` (leer `MODELO_DATOS.md`) |
+| 2-A | **Modelo de datos de Declaraciones: aprobado y adoptado** (19-11-2026). 50 tablas, 3 migraciones, reglas en la base, catálogos reales en `packages/shared`, API e importación ajustadas; 52 pruebas e2e OK | rama `fase-2-declaraciones` (leer `docs/declaraciones/MODELO_DATOS.md`) |
 
 Stack:
 - Monorepo con npm workspaces.
@@ -36,33 +36,32 @@ Stack:
 
 Para levantar el proyecto, ver `README.md`.
 
+En el equipo de Diego (Windows, sin Docker) hay Git, Node 22 y PostgreSQL 16 instalados de forma nativa. El repositorio está en
+`Documentos\terry-app`, con la base local `terraviva` (usuario y clave `terraviva`). Los archivos `apps/api/.env` y
+`packages/db/.env` son locales y no se suben a git.
+
 ## Encargo en curso: módulo «Declaraciones»
 
 Es la parametrización de residuos y servicios por cliente. Tiene un formulario de 8 secciones y un cargue masivo
 para clientes directos. Se trabaja por fases y **se espera el visto bueno del usuario entre fases**:
 
-- **A. Esquema de base de datos.** Entregado y pendiente de comentarios.
-- **B.** Árbol de componentes del formulario de 8 secciones, más el estado y la validación con react-hook-form + zod.
-  Se empieza solo después de que el usuario apruebe la fase A.
-- **C.** Algoritmo de cargue masivo de clientes directos (CSV o Excel):
-  - validar que los códigos paramétricos existan;
-  - guardar el lote en una transacción;
-  - guardar el historial en `cargues_masivos`.
+- **A. Esquema de base de datos.** ✅ Aprobado el 19-11-2026 y adoptado.
+- **B. Siguiente.** Árbol de componentes del formulario de 8 secciones, más el estado y la validación con react-hook-form + zod.
+  - El esquema zod ya existe: `packages/shared/src/declaraciones/esquema.ts` (`EsquemaDeclaracion`).
+  - La API ya existe: `POST /declaraciones` y `GET /declaraciones/catalogos`.
+  - Falta la interfaz. Se presenta el árbol y se espera el visto bueno antes de construirla.
+- **C.** Cargue masivo de clientes directos:
+  - Ya hecho para Excel: valida los códigos paramétricos, guarda el lote en una transacción y deja el historial en
+    `cargues_masivos` con el hash del archivo.
+  - Falta:
+    - leer CSV (con su delimitador);
+    - permitir el cargue por cliente desde su portal;
+    - revertir un lote.
 
-Preguntas abiertas de la fase A (el usuario aún no respondió):
-1. ¿El acto que ampara el ACU es el OF-311-21 o la Res. 316 de 2018 CAS?
-2. ¿Cuál es la lista real de categorías del declarado? Hoy hay 5 provisionales.
-3. ¿La ficha de datos de seguridad será obligatoria para peligrosos? Se recomendó que sí, por el Decreto 1079 de 2015.
-4. ¿El sistema de etiquetado será de selección múltiple? Se recomendó que sí.
-5. ¿«Recurrencia» es lo mismo que «solicitud automática»?
-6. ¿«Residuos de inventario» se aplaza al módulo de inventario?
-7. ¿Ya hay datos reales cargados? Si los hay, la migración debe convertirlos.
-
-Al aprobar la fase A, adoptar el esquema:
-- pasar `docs/declaraciones/schema.prisma` a `packages/db/prisma/schema.prisma`;
-- convertir `migracion.sql` y `reglas.sql` en migraciones;
-- pasar los catálogos al seed;
-- ajustar la API (`declaraciones`, `importacion`, `clientes`) y `packages/shared`.
+Respuestas a las 7 preguntas de la fase A: ver la tabla en `docs/declaraciones/MODELO_DATOS.md`.
+Las preguntas 1 (acto del ACU) y 2 (categorías reales) siguen pendientes. Son datos, no código:
+- se corrigen en `packages/shared/src/declaraciones/catalogos.ts`;
+- luego se vuelve a correr el seed.
 
 ## Fuentes del usuario
 

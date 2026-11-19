@@ -40,15 +40,15 @@ class LogisticaService {
       this.db.solicitud.count({ where }),
       this.db.solicitud.findMany({ where, take, skip, orderBy: { numero: 'desc' }, include: {
         cliente: { select: { razonSocial: true } }, sucursal: { select: { nombre: true, municipioDane: true } },
-        items: { include: { declaracion: { include: { residuo: { select: { codigo: true, nombre: true, unidad: true } }, tipoManejo: { select: { nombre: true } } } } } },
+        items: { include: { declaracion: { select: { numero: true, nombre: true, codigoInterno: true, disposiciones: { where: { principal: true }, select: { disposicion: { select: { nombre: true } } } } } } } },
       } }),
     ]);
     return { total, pagina, porPagina, filas };
   }
 
   async crearSolicitud(a: Actor, b: z.infer<typeof CrearSol>) {
-    const decls = await this.db.declaracion.findMany({ where: { id: { in: b.items.map((i) => i.declaracionId) }, empresaId: a.empresaId, sucursalId: b.sucursalId }, include: { tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
-    if (decls.length !== b.items.length) throw new BadRequestException({ mensaje: 'Alguna declaración no pertenece a esa sucursal.' });
+    const decls = await this.db.declaracion.findMany({ where: { id: { in: b.items.map((i) => i.declaracionId) }, empresaId: a.empresaId, clienteId: b.clienteId, sucursales: { some: { sucursalId: b.sucursalId } } }, include: { tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
+    if (decls.length !== b.items.length) throw new BadRequestException({ mensaje: 'Alguna declaración no está asignada a esa sede.' });
     return this.db.$transaction(async (tx) => {
       const s = await tx.solicitud.create({ data: {
         empresaId: a.empresaId, clase: b.clase, operacion: b.operacion, clienteId: b.clienteId, sucursalId: b.sucursalId, fechaSolicitada: b.fechaSolicitada, franjaHoraria: b.franjaHoraria, creadoPorId: a.id,

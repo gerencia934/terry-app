@@ -2,13 +2,19 @@
 // La usan: (1) el navegador para generar/leer el Excel y previsualizar, (2) scripts/generar-plantillas.ts
 // para producir los .xlsx del repositorio y (3) el API, que vuelve a validar todo antes de guardar.
 
-export type TipoCol = 'texto' | 'numero' | 'fecha' | 'lista' | 'email' | 'si_no';
+import { CODIGOS_BASE, ESTADOS_FISICOS, type ClaveCatalogo } from '../declaraciones/catalogos';
+
+export type TipoCol = 'texto' | 'numero' | 'fecha' | 'lista' | 'email' | 'si_no' | 'codigo';
 export interface Columna {
   key: string;
   header: string;
   requerido?: boolean;
   tipo: TipoCol;
   opciones?: string[];
+  /** Solo tipo «codigo»: catálogo contra el que se valida el código escrito. */
+  catalogo?: ClaveCatalogo;
+  /** Solo tipo «codigo»: admite varios códigos separados por punto y coma (BIO;ASP). */
+  multiple?: boolean;
   ejemplo: string | number;
   ayuda: string;
   ancho?: number;
@@ -29,14 +35,25 @@ export interface Plantilla {
 /** Datos ya existentes en el sistema contra los cuales se cruzan las filas. */
 export interface Contexto {
   nitsClientes: Set<string>;
+  /** Por NIT: nombres de sede normalizados y códigos de sede (C001) normalizados. */
   sucursalesPorNit: Map<string, Set<string>>;
   placas: Set<string>;
   emails: Set<string>;
-  manejosConPermiso: Set<string>;
-  manejosAliados: Set<string>;
   numerosDeclaracion: Set<string>;
+  /** Código interno (en mayúsculas) de las declaraciones autorizadas y activas. */
   codigosInternos: Set<string>;
+  /** Códigos vigentes por catálogo, en mayúsculas. */
+  catalogos: Record<ClaveCatalogo, Set<string>>;
+  /** Disposiciones (código en mayúsculas) cubiertas hoy por un permiso, una licencia o el objeto social. */
+  disposicionesCubiertas: Set<string>;
 }
+
+/** Contexto de catálogos con los datos iniciales (modo demostración). */
+export const catalogosBase = (): Record<ClaveCatalogo, Set<string>> =>
+  Object.fromEntries(Object.entries(CODIGOS_BASE).map(([k, v]) => [k, new Set(v.map((x) => x.toUpperCase()))])) as Record<ClaveCatalogo, Set<string>>;
+
+/** Separa una celda de varios valores: «BIO; ASP» → ['BIO', 'ASP']. */
+export const lista = (v?: string) => (v ?? '').split(';').map((x) => x.trim()).filter(Boolean);
 
 // ---------------- Listas ----------------
 export const L = {
@@ -44,37 +61,15 @@ export const L = {
   negociacion: ['Cobro', 'Compra', 'Sin costo'],
   formaPago: ['Contado', 'Crédito 30 días', 'Crédito 60 días', 'Crédito 90 días'],
   tipoPersona: ['Jurídica', 'Natural'],
-  estadoFisico: ['Sólido', 'Líquido', 'Semisólido / lodo', 'Gaseoso'],
-  categoria: ['Peligroso (RESPEL)', 'No peligroso', 'Aprovechable', 'Especial (RCD, RAEE, ACU)', 'Hospitalario / biosanitario'],
+  tipoCliente: ['Directo', 'Gestor'],
+  estadoFisico: ESTADOS_FISICOS.map(([etiqueta]) => etiqueta),
   unidad: ['kg', 't', 'm³', 'gal', 'L', 'und'],
-  frecuencia: ['Diaria', 'Semanal', 'Quincenal', 'Mensual', 'Bimestral', 'Trimestral', 'Eventual'],
-  lineaServicio: ['RESPEL', 'Ordinarios', 'Aprovechables', 'RAEE', 'Aceite usado de motor', 'RCD', 'Hospitalarios y biomédicos',
-    'ARD', 'ARnD', 'Lodos', 'Unidades sanitarias portátiles', 'Lavado de tanques', 'Manejo integrado de plagas', 'Paisajismo'],
-  unidadNegocio: ['Gestión de residuos', 'Tratamiento de aguas', 'Servicios ambientales', 'Saneamiento básico'],
-  manejo: ['Biorremediación (landfarming)', 'Tratamiento y vertimiento a suelo de aguas residuales, lodos, cortes y salmueras',
-    'Tratamiento fisicoquímico', 'Disposición final RCD (escombrera)', 'Aprovechamiento / valorización', 'Gestión de aceite de cocina usado',
-    'Incineración (gestor aliado)', 'Regeneración de aceite (gestor aliado)', 'Celda de seguridad (gestor aliado)', 'Desensamble RAEE (gestor aliado)'],
-  embalaje: ['Caneca 55 gal', 'Big bag 1 m³', 'Bolsa roja', 'Guardián', 'Bidón 20 L', 'Estiba', 'Carrotanque', 'Volqueta carpada', 'A granel'],
   tipoVehiculo: ['Furgón', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta', 'Tractocamión'],
   rol: ['Administrador', 'Logística', 'HSEQ', 'Comercial', 'Facturación', 'Conductor', 'Auxiliar', 'Cliente (portal)'],
   licencia: ['B1', 'B2', 'B3', 'C1', 'C2', 'C3'],
   tipoSolicitud: ['Recolección en sede', 'Entrega en planta'],
   jornada: ['AM', 'PM'],
   departamento: ['Santander', 'Norte de Santander', 'Boyacá', 'Cesar', 'Antioquia', 'Bolívar', 'Cundinamarca', 'Meta', 'Casanare', 'Otro'],
-};
-
-// Correspondencia nombre de manejo (Excel) → código interno (permisos)
-export const MANEJO_COD: Record<string, string> = {
-  'Biorremediación (landfarming)': 'BIO',
-  'Tratamiento y vertimiento a suelo de aguas residuales, lodos, cortes y salmueras': 'ASP',
-  'Tratamiento fisicoquímico': 'FQ',
-  'Disposición final RCD (escombrera)': 'ESC',
-  'Aprovechamiento / valorización': 'APR',
-  'Gestión de aceite de cocina usado': 'ACU',
-  'Incineración (gestor aliado)': 'INC',
-  'Regeneración de aceite (gestor aliado)': 'REG',
-  'Celda de seguridad (gestor aliado)': 'CEL',
-  'Desensamble RAEE (gestor aliado)': 'DES',
 };
 
 // ---------------- Validadores ----------------
@@ -93,6 +88,20 @@ const vSucursalExiste = (v: string, f: Record<string, string>, c: Contexto) => {
   const s = c.sucursalesPorNit.get(soloDigitos(f.nit ?? ''));
   return !s ? null : s.has(norm(v)) ? null : `La sede "${v}" no existe para ese cliente.`;
 };
+/** Sedes de una declaración: TODAS, PRINCIPAL o códigos/nombres de sede separados por «;». */
+const vSedes = (v: string, f: Record<string, string>, c: Contexto) => {
+  if (['todas', 'principal'].includes(norm(v))) return null;
+  const s = c.sucursalesPorNit.get(soloDigitos(f.nit ?? ''));
+  if (!s) return null;
+  const malas = lista(v).filter((x) => !s.has(norm(x)));
+  return malas.length ? `Sedes que no existen para ese cliente: ${malas.join(', ')}.` : null;
+};
+const si = (v?: string) => norm(v ?? '') === 'si';
+/** Advierte (no bloquea) si alguna disposición no tiene hoy permiso o licencia vigente: no se podrá autorizar. */
+const aDisposiciones = (v: string, _f: Record<string, string>, c: Contexto) => {
+  const sin = lista(v).filter((x) => c.catalogos.disposiciones.has(x.toUpperCase()) && !c.disposicionesCubiertas.has(x.toUpperCase()));
+  return sin.length ? `Sin permiso ni licencia vigente hoy: ${sin.join(', ')}. La declaración quedará pendiente y no se podrá autorizar.` : null;
+};
 export const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
 
 export const PLANTILLAS: Plantilla[] = [
@@ -105,6 +114,7 @@ export const PLANTILLAS: Plantilla[] = [
         validar: (v, f) => v && soloDigitos(f.nit ?? '') && dvNit(f.nit) !== soloDigitos(v) ? `El DV no corresponde al NIT (debería ser ${dvNit(f.nit)}).` : null },
       { key: 'razon', header: 'Razón social', requerido: true, tipo: 'texto', ejemplo: 'Agroindustrial La Esperanza S.A.S.', ayuda: 'Como aparece en el RUT.', ancho: 38 },
       { key: 'persona', header: 'Tipo de persona', tipo: 'lista', opciones: L.tipoPersona, ejemplo: 'Jurídica', ayuda: '', ancho: 16 },
+      { key: 'tipo', header: 'Tipo de cliente', tipo: 'lista', opciones: L.tipoCliente, ejemplo: 'Directo', ayuda: 'Directo = el cliente genera el residuo. Gestor = cada sede es un generador tercero. Vacío = Directo.', ancho: 14 },
       { key: 'sector', header: 'Sector', tipo: 'texto', ejemplo: 'Palma de aceite', ayuda: 'Hidrocarburos, salud, construcción…', ancho: 20 },
       { key: 'negociacion', header: 'Tipo de negociación', requerido: true, tipo: 'lista', opciones: L.negociacion, ejemplo: 'Cobro', ayuda: 'Compra = Terra Viva paga por el material.', ancho: 18 },
       { key: 'pago', header: 'Forma de pago', requerido: true, tipo: 'lista', opciones: L.formaPago, ejemplo: 'Crédito 30 días', ayuda: '', ancho: 18 },
@@ -120,6 +130,9 @@ export const PLANTILLAS: Plantilla[] = [
     columnas: [
       { key: 'nit', header: 'NIT cliente', requerido: true, tipo: 'texto', ejemplo: '900112345', ayuda: 'Debe estar ya registrado como cliente.', validar: (v, f, c) => vNit(v) ?? vClienteExiste(v, f, c), ancho: 14 },
       { key: 'nombre', header: 'Nombre de la sede', requerido: true, tipo: 'texto', ejemplo: 'Planta extractora', ayuda: '', ancho: 26 },
+      { key: 'codigo', header: 'Código de la sede', tipo: 'texto', ejemplo: 'C001', ayuda: 'Corto y único por cliente. Con él se asignan las sedes en las declaraciones.', ancho: 12,
+        validar: (v) => v && !/^[A-Za-z0-9-]{1,20}$/.test(v) ? 'Use letras, números o guion (máximo 20).' : null },
+      { key: 'principal', header: 'Sede principal', tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: 'Solo una por cliente.', ancho: 10 },
       { key: 'direccion', header: 'Dirección', requerido: true, tipo: 'texto', ejemplo: 'Km 4 vía Puerto Wilches', ayuda: '', ancho: 30 },
       { key: 'municipio', header: 'Municipio', requerido: true, tipo: 'texto', ejemplo: 'Puerto Wilches', ayuda: '', ancho: 18 },
       { key: 'depto', header: 'Departamento', requerido: true, tipo: 'lista', opciones: L.departamento, ejemplo: 'Santander', ayuda: '', ancho: 16 },
@@ -134,49 +147,74 @@ export const PLANTILLAS: Plantilla[] = [
     ],
   },
   {
-    id: 'decl-residuos', nombre: 'Declaraciones de residuos', archivo: 'TV_plantilla_declaraciones_residuos.xlsx', llave: ['nit', 'sucursal', 'codigo'],
-    descripcion: 'Residuos que cada sucursal tiene autorizado entregar. Se validan contra los permisos ambientales.',
+    id: 'decl-residuos', nombre: 'Declaraciones de residuos', archivo: 'TV_plantilla_declaraciones_residuos.xlsx', llave: ['nit', 'codigo', 'residuo'],
+    descripcion: 'Residuos que cada cliente tiene autorizado entregar y en qué sedes. Los catálogos se escriben con su código (hoja «Instrucciones»). Las disposiciones se validan contra los permisos ambientales.',
     columnas: [
       { key: 'nit', header: 'NIT cliente', requerido: true, tipo: 'texto', ejemplo: '900112345', ayuda: '', validar: (v, f, c) => vNit(v) ?? vClienteExiste(v, f, c), ancho: 14 },
-      { key: 'sucursal', header: 'Sede', requerido: true, tipo: 'texto', ejemplo: 'Planta extractora', ayuda: 'Nombre exacto de la sucursal.', validar: vSucursalExiste, ancho: 22 },
-      { key: 'codigo', header: 'Código interno', requerido: true, tipo: 'texto', ejemplo: 'RP-018', ayuda: 'Código del catálogo de residuos.', ancho: 12 },
+      { key: 'sedes', header: 'Sedes', requerido: true, tipo: 'texto', ejemplo: 'C001;C002', ayuda: 'TODAS, PRINCIPAL o códigos (o nombres) de sede separados por punto y coma.', validar: vSedes, ancho: 18 },
+      { key: 'codigo', header: 'Código interno', tipo: 'texto', ejemplo: 'RP-018', ayuda: 'Código del cliente para este residuo. Único por cliente; con él se programan solicitudes.', ancho: 12 },
       { key: 'residuo', header: 'Residuo', requerido: true, tipo: 'texto', ejemplo: 'Lodos aceitosos de trampa de grasas', ayuda: '', ancho: 34 },
+      { key: 'categoria', header: 'Categoría', requerido: true, tipo: 'codigo', catalogo: 'categorias', ejemplo: 'RESPEL', ayuda: 'Código de la categoría del declarado.', ancho: 12 },
+      { key: 'tipoResiduo', header: 'Tipo de residuo', requerido: true, tipo: 'codigo', catalogo: 'tiposResiduo', ejemplo: 'IND', ayuda: '', ancho: 12 },
+      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'codigo', catalogo: 'lineas', ejemplo: '01', ayuda: 'Código de la línea; la unidad de negocio se deduce de ella.', ancho: 10 },
+      { key: 'peligroso', header: 'Peligroso', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: '', ancho: 10 },
+      { key: 'corrienteY', header: 'Corriente Y', tipo: 'codigo', catalogo: 'corrientesY', ejemplo: 'Y18', ayuda: 'Anexo I Dec. 1076/2015.', ancho: 11,
+        validar: (v, f) => !v && si(f.peligroso) && !f.codigoA ? 'Un residuo peligroso necesita corriente Y o código A.' : null },
+      { key: 'codigoA', header: 'Código A', tipo: 'codigo', catalogo: 'codigosA', ejemplo: '', ayuda: 'Anexo II Dec. 1076/2015.', ancho: 11 },
+      { key: 'codigoUn', header: 'Código UN', tipo: 'texto', ejemplo: 'UN3082', ayuda: 'Formato UN y 4 dígitos.', ancho: 10,
+        validar: (v) => v && !/^UN\d{4}$/i.test(v.trim()) ? 'Use el formato UN3082.' : null },
+      { key: 'riesgos', header: 'Riesgos', tipo: 'codigo', catalogo: 'riesgos', multiple: true, ejemplo: 'T;I', ayuda: 'CRETIB y RAD, separados por punto y coma.', ancho: 10 },
+      { key: 'etiquetado', header: 'Etiquetado', tipo: 'codigo', catalogo: 'etiquetado', multiple: true, ejemplo: 'ONU;SGA', ayuda: 'Separados por punto y coma.', ancho: 12 },
+      { key: 'proceso', header: 'Proceso que lo generó', requerido: true, tipo: 'texto', ejemplo: 'Limpieza de trampa de grasas', ayuda: '', ancho: 28 },
+      { key: 'composicion', header: 'Composición fisicoquímica', tipo: 'texto', ejemplo: 'Agua 60 %, grasas 30 %, sólidos 10 %', ayuda: 'Obligatoria si es peligroso.', ancho: 28,
+        validar: (v, f) => !v && si(f.peligroso) ? 'Obligatoria para residuos peligrosos.' : null },
+      { key: 'embalaje', header: 'Tipo de embalaje', requerido: true, tipo: 'codigo', catalogo: 'embalajes', ejemplo: 'CANECA', ayuda: '', ancho: 12 },
+      { key: 'otroEmbalaje', header: 'Otro embalaje', tipo: 'texto', ejemplo: '', ayuda: 'Obligatorio si el tipo es OTRO.', ancho: 14,
+        validar: (v, f) => !v && norm(f.embalaje ?? '') === 'otro' ? 'Indique cuál es el otro embalaje.' : null },
+      { key: 'presentacion', header: 'Presentación', tipo: 'texto', ejemplo: '55 gal', ayuda: 'Tamaño del embalaje.', ancho: 12 },
+      { key: 'material', header: 'Material del embalaje', requerido: true, tipo: 'codigo', catalogo: 'materiales', ejemplo: 'MET', ayuda: '', ancho: 12 },
+      { key: 'otroMaterial', header: 'Otro material', tipo: 'texto', ejemplo: '', ayuda: 'Obligatorio si el material es OTRO.', ancho: 14,
+        validar: (v, f) => !v && norm(f.material ?? '') === 'otro' ? 'Indique cuál es el otro material.' : null },
       { key: 'estadoFisico', header: 'Estado físico', requerido: true, tipo: 'lista', opciones: L.estadoFisico, ejemplo: 'Semisólido / lodo', ayuda: '', ancho: 16 },
-      { key: 'categoria', header: 'Clase de residuo', tipo: 'lista', opciones: L.categoria, ejemplo: 'Peligroso (RESPEL)', ayuda: '', ancho: 22 },
-      { key: 'tipoResiduo', header: 'Origen', tipo: 'texto', ejemplo: 'Industrial', ayuda: '', ancho: 14 },
-      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'lista', opciones: L.lineaServicio, ejemplo: 'Lodos', ayuda: '', ancho: 20 },
-      { key: 'unidadNegocio', header: 'Unidad de negocio', tipo: 'lista', opciones: L.unidadNegocio, ejemplo: 'Gestión de residuos', ayuda: '', ancho: 20 },
-      { key: 'manejo', header: 'Tratamiento', requerido: true, tipo: 'lista', opciones: L.manejo, ejemplo: 'Biorremediación (landfarming)', ayuda: 'Se verifica contra los permisos de la CAS.', ancho: 34,
-        advertir: (v, _f, c) => { const cod = MANEJO_COD[v]; if (!cod) return null; if (c.manejosAliados.has(cod)) return 'Va a gestor aliado: exigir licencia y certificado del gestor.'; return c.manejosConPermiso.has(cod) ? null : 'Ningún permiso vigente cubre este manejo.'; } },
-      { key: 'embalaje', header: 'Embalaje', tipo: 'lista', opciones: L.embalaje, ejemplo: 'Big bag 1 m³', ayuda: '', ancho: 16 },
-      { key: 'peligroso', header: 'Peligroso', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: '', ancho: 12 },
-      { key: 'corrienteY', header: 'Corriente Y', tipo: 'texto', ejemplo: 'Y18', ayuda: 'Anexo I Dec. 1076/2015 (Y1 a Y45).', ancho: 11,
-        validar: (v, f) => v ? (/^Y([1-9]|[1-3]\d|4[0-5])$/i.test(v.trim()) ? null : 'Corriente Y inválida (Y1 a Y45).') : (f.peligroso === 'Sí' && !f.corrienteA ? 'Un residuo peligroso necesita corriente Y o A.' : null) },
-      { key: 'corrienteA', header: 'Corriente A', tipo: 'texto', ejemplo: '', ayuda: 'Anexo II (A1010 a A4160).', ancho: 11,
-        validar: (v) => !v || /^A[1-4]\d{3}$/i.test(v.trim()) ? null : 'Corriente A inválida (formato A1010).' },
-      { key: 'inflamable', header: 'Inflamable', tipo: 'si_no', opciones: L.siNo, ejemplo: 'No', ayuda: '', ancho: 12 },
-      { key: 'unidad', header: 'Unidad', requerido: true, tipo: 'lista', opciones: L.unidad, ejemplo: 'kg', ayuda: '', ancho: 8 },
-      { key: 'cantidad', header: 'Cantidad habitual', tipo: 'numero', ejemplo: 8000, ayuda: 'Por frecuencia.', ancho: 12 },
-      { key: 'frecuencia', header: 'Frecuencia', tipo: 'lista', opciones: L.frecuencia, ejemplo: 'Mensual', ayuda: '', ancho: 12 },
-      { key: 'precio', header: 'Precio unitario', tipo: 'numero', ejemplo: 780, ayuda: 'COP por unidad, sin IVA.', ancho: 12 },
+      { key: 'inflamable', header: 'Inflamable', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'No', ayuda: '', ancho: 10 },
+      { key: 'estupefacientes', header: 'Sustancia controlada (FNE)', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'No', ayuda: 'Controlada por el Fondo Nacional de Estupefacientes.', ancho: 12 },
+      { key: 'disposiciones', header: 'Disposición', requerido: true, tipo: 'codigo', catalogo: 'disposiciones', multiple: true, ejemplo: 'BIO', ayuda: 'Una o varias separadas por punto y coma; la primera es la principal.', ancho: 12, advertir: aDisposiciones },
+      { key: 'frecuenciaDias', header: 'Frecuencia (días)', tipo: 'numero', ejemplo: 30, ayuda: 'Cada cuántos días se recoge (1 a 366).', ancho: 10,
+        validar: (v) => v && !(Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 366) ? 'Entero entre 1 y 366.' : null },
+      { key: 'cantidad', header: 'Cantidad por frecuencia', tipo: 'numero', ejemplo: 8000, ayuda: 'En la métrica del precio.', ancho: 12,
+        validar: (v) => v && Number(v.replace(',', '.')) <= 0 ? 'Debe ser mayor que cero.' : null },
+      { key: 'metrica', header: 'Métrica del precio', tipo: 'codigo', catalogo: 'metricasPrecio', ejemplo: 'kg', ayuda: 'Vacío = precio global por servicio.', ancho: 10 },
+      { key: 'precio', header: 'Precio unitario', tipo: 'numero', ejemplo: 780, ayuda: 'COP sin IVA. Sin precio la declaración no se puede autorizar.', ancho: 12,
+        validar: (v) => v && Number(v.replace(',', '.')) < 0 ? 'El precio no puede ser negativo.' : null },
+      { key: 'fds', header: 'Ficha de datos de seguridad (enlace)', tipo: 'texto', ejemplo: 'https://…/fds-lodos.pdf', ayuda: 'Obligatoria para autorizar un residuo peligroso (Dec. 1079 de 2015).', ancho: 24 },
+      { key: 'responsabilidad', header: 'Responsabilidad aceptada', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: 'Confirma que el generador firmó la declaración de veracidad de la información. Sin ella no se carga.', ancho: 12,
+        validar: (v) => v && !si(v) ? 'El generador debe aceptar la declaración de responsabilidad.' : null },
       { key: 'observacion', header: 'Observación', tipo: 'texto', ejemplo: '', ayuda: '', ancho: 24 },
     ],
   },
   {
-    id: 'decl-servicios', nombre: 'Declaraciones de servicios', archivo: 'TV_plantilla_declaraciones_servicios.xlsx', llave: ['nit', 'sucursal', 'codigo'],
-    descripcion: 'USP, lavado de tanques, MIP, paisajismo y succión con vactor por sucursal.',
+    id: 'decl-servicios', nombre: 'Declaraciones de servicios', archivo: 'TV_plantilla_declaraciones_servicios.xlsx', llave: ['nit', 'codigo', 'servicio'],
+    descripcion: 'Unidades sanitarias, lavado de tanques, fumigación, hidrolimpieza y demás servicios por cliente y sede.',
     columnas: [
       { key: 'nit', header: 'NIT cliente', requerido: true, tipo: 'texto', ejemplo: '900778123', ayuda: '', validar: (v, f, c) => vNit(v) ?? vClienteExiste(v, f, c), ancho: 14 },
-      { key: 'sucursal', header: 'Sede', requerido: true, tipo: 'texto', ejemplo: 'Obra Torres del Parque', ayuda: '', validar: vSucursalExiste, ancho: 22 },
-      { key: 'codigo', header: 'Código interno', requerido: true, tipo: 'texto', ejemplo: 'SV-USP', ayuda: '', ancho: 12 },
-      { key: 'servicio', header: 'Servicio', requerido: true, tipo: 'texto', ejemplo: 'Alquiler unidad sanitaria portátil', ayuda: '', ancho: 32 },
-      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'lista', opciones: L.lineaServicio, ejemplo: 'Unidades sanitarias portátiles', ayuda: '', ancho: 22 },
-      { key: 'unidadNegocio', header: 'Unidad de negocio', tipo: 'lista', opciones: L.unidadNegocio, ejemplo: 'Saneamiento básico', ayuda: '', ancho: 20 },
-      { key: 'frecuencia', header: 'Frecuencia', tipo: 'lista', opciones: L.frecuencia, ejemplo: 'Semanal', ayuda: '', ancho: 14 },
-      { key: 'progAuto', header: 'Se programa sola', tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: 'Crea las solicitudes según la frecuencia.', ancho: 14 },
-      { key: 'cantidad', header: 'Cantidad habitual', tipo: 'numero', ejemplo: 12, ayuda: '', ancho: 12 },
-      { key: 'precio', header: 'Precio unitario', tipo: 'numero', ejemplo: 420000, ayuda: 'COP, sin IVA.', ancho: 12 },
-      { key: 'descripcion', header: 'Descripción', tipo: 'texto', ejemplo: 'Incluye 2 mantenimientos semanales', ayuda: '', ancho: 30 },
+      { key: 'sedes', header: 'Sedes', requerido: true, tipo: 'texto', ejemplo: 'TODAS', ayuda: 'TODAS, PRINCIPAL o códigos (o nombres) de sede separados por punto y coma.', validar: vSedes, ancho: 18 },
+      { key: 'codigo', header: 'Código interno', tipo: 'texto', ejemplo: 'SV-USP', ayuda: 'Único por cliente.', ancho: 12 },
+      { key: 'servicio', header: 'Servicio', requerido: true, tipo: 'texto', ejemplo: 'Mantenimiento de unidad sanitaria portátil', ayuda: '', ancho: 32 },
+      { key: 'categoria', header: 'Categoría', requerido: true, tipo: 'codigo', catalogo: 'categorias', ejemplo: 'SERV', ayuda: '', ancho: 10 },
+      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'codigo', catalogo: 'lineas', ejemplo: '12', ayuda: 'Código de la línea; la unidad de negocio se deduce de ella.', ancho: 10 },
+      { key: 'descripcion', header: 'Descripción del servicio', requerido: true, tipo: 'texto', ejemplo: 'Incluye 2 mantenimientos semanales', ayuda: 'Máximo 1.000 caracteres.', ancho: 30,
+        validar: (v) => v.length > 1000 ? 'Máximo 1.000 caracteres.' : null },
+      { key: 'frecuenciaDias', header: 'Frecuencia (días)', tipo: 'numero', ejemplo: 7, ayuda: 'Cada cuántos días se presta (1 a 366).', ancho: 10,
+        validar: (v) => v && !(Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 366) ? 'Entero entre 1 y 366.' : null },
+      { key: 'progAuto', header: 'Solicitud automática', tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: 'Crea la solicitud cada «Frecuencia (días)». Exige la frecuencia.', ancho: 12,
+        validar: (v, f) => si(v) && !f.frecuenciaDias ? 'Indique la frecuencia en días.' : null },
+      { key: 'cantidad', header: 'Cantidad por frecuencia', tipo: 'numero', ejemplo: 12, ayuda: '', ancho: 12,
+        validar: (v) => v && Number(v.replace(',', '.')) <= 0 ? 'Debe ser mayor que cero.' : null },
+      { key: 'metrica', header: 'Métrica del precio', tipo: 'codigo', catalogo: 'metricasPrecio', ejemplo: 'und', ayuda: 'Vacío = precio global por servicio.', ancho: 10 },
+      { key: 'precio', header: 'Precio unitario', tipo: 'numero', ejemplo: 420000, ayuda: 'COP, sin IVA.', ancho: 12,
+        validar: (v) => v && Number(v.replace(',', '.')) < 0 ? 'El precio no puede ser negativo.' : null },
+      { key: 'responsabilidad', header: 'Responsabilidad aceptada', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: 'Confirma que el cliente firmó la declaración de veracidad de la información.', ancho: 12,
+        validar: (v) => v && !si(v) ? 'El cliente debe aceptar la declaración de responsabilidad.' : null },
     ],
   },
   {
@@ -258,6 +296,14 @@ export function validarFilas(p: Plantilla, filas: Record<string, string>[], ctx:
         if (c.tipo === 'fecha' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) errores.push(`${c.header}: use el formato AAAA-MM-DD.`);
         if (c.tipo === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) errores.push(`${c.header}: correo inválido.`);
         if ((c.tipo === 'lista' || c.tipo === 'si_no') && c.opciones && !c.opciones.some((o) => norm(o) === norm(v))) errores.push(`${c.header}: "${v}" no está en la lista.`);
+        if (c.tipo === 'codigo' && c.catalogo) {
+          const valores = c.multiple ? lista(v) : [v];
+          if (!c.multiple && v.includes(';')) errores.push(`${c.header}: admite un solo código.`);
+          else {
+            const malos = valores.filter((x) => !ctx.catalogos[c.catalogo!].has(x.toUpperCase()));
+            if (malos.length) errores.push(`${c.header}: ${malos.map((x) => `"${x}"`).join(', ')} no existe en el catálogo.`);
+          }
+        }
       }
       const e = c.validar?.(v, datos, ctx);
       // "ya existe; se actualizarán" es informativo, no bloquea

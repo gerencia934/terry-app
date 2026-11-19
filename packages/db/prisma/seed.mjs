@@ -5,7 +5,8 @@ import { hash } from '@node-rs/argon2';
 import { randomBytes } from 'node:crypto';
 import shared from '@terraviva/shared';
 
-const { L, MANEJO_COD } = shared;
+const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
+  PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
@@ -25,7 +26,10 @@ const ROLES = {
   Conductor: ['rutas.operar'],
   Auxiliar: ['rutas.operar'],
 };
-const PROPIOS = new Set(['BIO', 'ASP', 'FQ', 'ESC', 'APR', 'ACU']);
+/** Upsert por (empresa, código) de un catálogo paramétrico del módulo Declaraciones. */
+async function porEmpresa(modelo, empresaId, items, datos = (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null })) {
+  for (const x of items) await db[modelo].upsert({ where: { empresaId_codigo: { empresaId, codigo: x.codigo } }, update: datos(x), create: { empresaId, codigo: x.codigo, ...datos(x) } });
+}
 
 async function catalogo(empresaId, tipo, nombres, extra = () => ({})) {
   for (const [i, nombre] of nombres.entries()) {
@@ -47,24 +51,35 @@ async function main() {
     }
   }
 
-  // Catálogos operativos (los nombres coinciden con las listas de las plantillas de Excel)
-  await catalogo(E, 'TIPO_MANEJO', [...L.manejo, 'Servicio en sitio'], (n) => ({ codigo: MANEJO_COD[n] ?? 'SRV', meta: n === 'Servicio en sitio' ? { servicio: true } : MANEJO_COD[n] === 'APR' ? { propio: true, requierePermiso: false } : { propio: PROPIOS.has(MANEJO_COD[n]) } }));
-  await catalogo(E, 'LINEA_SERVICIO', L.lineaServicio);
-  await catalogo(E, 'UNIDAD_NEGOCIO', L.unidadNegocio);
-  await catalogo(E, 'EMBALAJE', L.embalaje);
+  // Listas simples
   await catalogo(E, 'CAUSAL', ['Cliente no disponible en sitio', 'Vehículo no apto (preoperacional)', 'Residuo sin embalar o sin rotular', 'Clima o vía cerrada', 'Ficha de seguridad incompleta', 'Cliente cambió de operador']);
-  await catalogo(E, 'RIESGO', ['Corrosivo', 'Reactivo', 'Explosivo', 'Tóxico', 'Inflamable', 'Biológico-infeccioso'], (n) => ({ codigo: n === 'Explosivo' ? 'E' : n[0] }));
 
-  // Permisos ambientales (portafolio 2026). ⚠ Las obligaciones y fechas son de ejemplo: ajústelas al acto administrativo.
-  const PERM = [
-    ['Resolución 0235-2024', 'Disposición final de residuos de construcción y demolición (RCD)', ['ESC'], ['Informe semestral de volúmenes recibidos en escombrera', 'semestral', '2026-12-15']],
-    ['Resolución 0632-2023', 'Vertimientos a suelo y manejo de aguas residuales industriales, domésticas y lodos', ['BIO', 'ASP', 'FQ'], ['Caracterización del vertimiento a suelo (laboratorio acreditado IDEAM)', 'semestral', '2026-11-30']],
-    ['Auto SAA No. 0244-21', 'Plan de contingencia para transporte de hidrocarburos, derivados y residuos peligrosos', ['TRANS'], ['Simulacro anual del plan de contingencia', 'anual', '2026-12-05']],
-    ['OF-311-21', 'Gestión de aceite de cocina usado', ['ACU'], ['Reporte trimestral de volúmenes de ACU gestionados', 'trimestral', '2027-01-10']],
-  ];
-  for (const [acto, alcance, manejos, [desc, per, f]] of PERM) {
+  // Catálogos normativos (globales)
+  for (const x of RIESGOS) await db.riesgo.upsert({ where: { codigo: x.codigo }, update: { nombre: x.nombre }, create: x });
+  for (const x of SISTEMAS_ETIQUETADO) await db.sistemaEtiquetado.upsert({ where: { codigo: x.codigo }, update: { nombre: x.nombre }, create: x });
+  for (const x of CODIGOS_CLASIFICACION) await db.codigoClasificacion.upsert({ where: { codigo: x.codigo }, update: { descripcion: x.nombre }, create: { tipo: x.tipo, codigo: x.codigo, descripcion: x.nombre } });
+  for (const x of MUNICIPIOS) await db.municipio.upsert({ where: { codigoDane: x.codigoDane }, update: { nombre: x.nombre, departamento: x.departamento }, create: x });
+
+  // Catálogos del módulo Declaraciones (por empresa). Fuente: packages/shared/src/declaraciones/catalogos.ts
+  await porEmpresa('categoriaDeclarado', E, CATEGORIAS);
+  await porEmpresa('tipoResiduo', E, TIPOS_RESIDUO, (x) => ({ nombre: x.nombre }));
+  await porEmpresa('unidadNegocio', E, UNIDADES_NEGOCIO, (x) => ({ nombre: x.nombre, sigla: x.sigla }));
+  const unidades = Object.fromEntries((await db.unidadNegocio.findMany({ where: { empresaId: E } })).map((u) => [u.codigo, u.id]));
+  await porEmpresa('lineaServicio', E, LINEAS_SERVICIO, (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null, unidadNegocioId: unidades[x.unidad] }));
+  await porEmpresa('metrica', E, METRICAS, (x) => ({ nombre: x.nombre, abreviacion: x.abreviacion, uso: x.uso, factorAKg: x.factorAKg }));
+  await porEmpresa('tipoEmbalaje', E, TIPOS_EMBALAJE, (x) => ({ nombre: x.nombre, esOtro: !!x.esOtro }));
+  await porEmpresa('materialEmbalaje', E, MATERIALES_EMBALAJE, (x) => ({ nombre: x.nombre, esOtro: !!x.esOtro }));
+  await porEmpresa('disposicion', E, DISPOSICIONES, (x) => ({ nombre: x.nombre, requierePermiso: x.requierePermiso, propia: x.propia, soporteLegal: x.soporteLegal }));
+
+  // Permisos ambientales de la CAS y qué disposiciones ampara cada uno.
+  // ⚠ Las obligaciones y fechas son de ejemplo: ajústelas al acto administrativo.
+  for (const { acto, alcance, disposiciones, obligacion: [desc, per, f] } of PERMISOS_CAS) {
     let p = await db.permisoAmbiental.findFirst({ where: { empresaId: E, acto } });
-    if (!p) p = await db.permisoAmbiental.create({ data: { empresaId: E, acto, autoridad: 'CAS', alcance, manejosCubiertos: manejos, estado: 'VIGENTE' } });
+    if (!p) p = await db.permisoAmbiental.create({ data: { empresaId: E, acto, autoridad: 'CAS', alcance, estado: 'VIGENTE' } });
+    for (const codigo of disposiciones) {
+      const d = await db.disposicion.findUniqueOrThrow({ where: { empresaId_codigo: { empresaId: E, codigo } } });
+      await db.permisoDisposicion.upsert({ where: { permisoId_disposicionId: { permisoId: p.id, disposicionId: d.id } }, update: {}, create: { permisoId: p.id, disposicionId: d.id } });
+    }
     if (!(await db.obligacionPermiso.count({ where: { permisoId: p.id } })))
       await db.obligacionPermiso.create({ data: { permisoId: p.id, descripcion: `${desc} (VERIFICAR fecha y periodicidad en el acto)`, periodicidad: per, proximaFecha: new Date(f) } });
   }

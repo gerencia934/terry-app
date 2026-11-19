@@ -18,15 +18,15 @@ async function llamar(metodo, ruta, { token, cuerpo, form } = {}) {
   let json; try { json = JSON.parse(texto); } catch { json = texto; }
   return { status: r.status, json };
 }
-async function excel(id, filas) {
+async function excelBuf(id, filas) {
   const p = plantilla(id);
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await construirPlantilla(p));
   const ws = wb.getWorksheet('Plantilla');
   filas.forEach((f, i) => { ws.getRow(3 + i).values = p.columnas.map((c) => f[c.key] ?? ''); });
-  const form = new FormData();
-  form.append('archivo', new Blob([await wb.xlsx.writeBuffer()]), `${id}.xlsx`);
-  return form;
+  return wb.xlsx.writeBuffer();
 }
+const formDe = (buf, nombre) => { const form = new FormData(); form.append('archivo', new Blob([buf]), nombre); return form; };
+const excel = async (id, filas) => formDe(await excelBuf(id, filas), `${id}.xlsx`);
 
 console.log('\n1. Salud y autenticación');
 let r = await llamar('GET', '/salud');
@@ -50,14 +50,30 @@ r = await llamar('POST', '/importacion/clientes/vista-previa', { token: T, form:
 prueba('vista previa: 1 válida y 1 con error de DV', r.status === 201 && r.json.resumen.validas === 1 && r.json.resumen.conErrores === 1, JSON.stringify(r.json).slice(0, 300));
 r = await llamar('POST', '/importacion/clientes/confirmar', { token: T, form: await excel('clientes', [{ nit: NIT, razon: 'Agroindustrial Prueba S.A.S.', negociacion: 'Cobro', pago: 'Crédito 30 días' }]) });
 prueba('confirmar clientes guarda en la base', r.status === 201 && r.json.creadas + r.json.actualizadas === 1, JSON.stringify(r.json));
-r = await llamar('POST', '/importacion/sucursales/confirmar', { token: T, form: await excel('sucursales', [{ nit: NIT, nombre: 'Planta extractora', direccion: 'Km 4', municipio: 'Puerto Wilches', depto: 'Santander', zona: 'Magdalena Medio', contacto: 'Laura' }]) });
-prueba('confirmar sucursales', r.status === 201, JSON.stringify(r.json));
-r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: T, form: await excel('decl-residuos', [
-  { nit: NIT, sucursal: 'Planta extractora', codigo: 'RP-018', residuo: 'Lodos aceitosos', estadoFisico: 'Semisólido / lodo', linea: 'Lodos', manejo: 'Biorremediación (landfarming)', peligroso: 'Sí', corrienteY: 'Y18', unidad: 'kg', cantidad: '8000', precio: '780' },
-  { nit: NIT, sucursal: 'Planta extractora', codigo: 'AR-IND', residuo: 'Agua residual industrial', estadoFisico: 'Líquido', linea: 'ARnD', manejo: 'Tratamiento fisicoquímico', peligroso: 'Sí', corrienteY: 'Y9', unidad: 'm³', cantidad: '60', precio: '165000' },
-  { nit: NIT, sucursal: 'Sucursal que no existe', codigo: 'RP-009', residuo: 'X', estadoFisico: 'Sólido', linea: 'RESPEL', manejo: 'Biorremediación (landfarming)', peligroso: 'Sí', corrienteY: 'Y9', unidad: 'kg' },
+r = await llamar('POST', '/importacion/sucursales/confirmar', { token: T, form: await excel('sucursales', [
+  { nit: NIT, nombre: 'Planta extractora', codigo: 'C001', principal: 'Sí', direccion: 'Km 4', municipio: 'Puerto Wilches', depto: 'Santander', zona: 'Magdalena Medio', contacto: 'Laura' },
+  { nit: NIT, nombre: 'Bodega Sabana', codigo: 'C002', direccion: 'Calle 10', municipio: 'Sabana de Torres', depto: 'Santander' },
 ]) });
-prueba('declaraciones: 2 guardadas, 1 rechazada por sucursal inexistente', r.status === 201 && r.json.creadas === 2 && r.json.rechazadas === 1, JSON.stringify(r.json).slice(0, 300));
+prueba('confirmar sedes con código y sede principal', r.status === 201 && r.json.creadas + r.json.actualizadas === 2, JSON.stringify(r.json));
+const sedeImportada = await db.sucursal.findFirst({ where: { codigo: 'C002', cliente: { nit: NIT } } });
+prueba('la sede queda con su municipio DIVIPOLA', sedeImportada?.municipioDane === '68655');
+// Fila base de una declaración de residuo peligroso (columnas con códigos de catálogo)
+const filaResiduo = (x) => ({ nit: NIT, sedes: 'C001', categoria: 'RESPEL', tipoResiduo: 'IND', linea: '01', peligroso: 'Sí', proceso: 'Limpieza de trampa de grasas',
+  composicion: 'Agua 60 %, grasas 30 %, sólidos 10 %', embalaje: 'CANECA', presentacion: '55 gal', material: 'MET', estadoFisico: 'Semisólido / lodo', inflamable: 'No', estupefacientes: 'No',
+  riesgos: 'T', etiquetado: 'ONU;SGA', fds: 'https://docs.terravivasas.com/fds/demo.pdf', responsabilidad: 'Sí', ...x });
+const libroDecl = await excelBuf('decl-residuos', [
+  filaResiduo({ codigo: 'RP-018', residuo: 'Lodos aceitosos', corrienteY: 'Y18', disposiciones: 'BIO', frecuenciaDias: '30', cantidad: '8000', metrica: 'kg', precio: '780' }),
+  filaResiduo({ codigo: 'AR-IND', residuo: 'Agua residual industrial', sedes: 'C001;C002', corrienteY: 'Y9', estadoFisico: 'Líquido', disposiciones: 'ASP', metrica: 'm3', precio: '165000' }),
+  filaResiduo({ codigo: 'RP-009', residuo: 'X', sedes: 'Sede que no existe', corrienteY: 'Y9', disposiciones: 'BIO', precio: '100' }),
+  filaResiduo({ codigo: 'RP-010', residuo: 'Y', corrienteY: 'Y9', embalaje: 'BARRIL', disposiciones: 'BIO', precio: '100' }),
+]);
+r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: T, form: formDe(libroDecl, 'decl.xlsx') });
+prueba('declaraciones: 2 guardadas; rechazadas la de sede inexistente y la de código de catálogo inexistente', r.status === 201 && r.json.creadas === 2 && r.json.rechazadas === 2
+  && JSON.stringify(r.json.filasRechazadas).includes('BARRIL'), JSON.stringify(r.json).slice(0, 400));
+const lote = await db.cargueMasivo.findUnique({ where: { id: r.json.cargueId }, include: { _count: { select: { declaraciones: true } } } });
+prueba('el lote queda en cargues_masivos con hash del archivo y sus declaraciones', lote?.estado === 'CONFIRMADO' && lote.archivoHash?.length === 64 && lote._count.declaraciones === 2 && lote.tipoCargue === 'DECLARACIONES');
+r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: formDe(libroDecl, 'decl.xlsx') });
+prueba('subir otra vez el mismo archivo avisa y rechaza los códigos internos ya usados', r.status === 201 && r.json.avisos.length === 1 && r.json.resumen.validas === 0, JSON.stringify(r.json).slice(0, 300));
 r = await llamar('GET', '/importacion/historial', { token: T });
 prueba('el historial registra los cargues', r.status === 200 && r.json.length >= 3);
 r = await llamar('POST', '/importacion/clientes/confirmar', { token: T, form: (() => { const f = new FormData(); f.append('archivo', new Blob(['hola']), 'malo.csv'); return f; })() });
@@ -65,15 +81,58 @@ prueba('archivo que no es .xlsx → 400', r.status === 400);
 
 console.log('\n3. Declaraciones y permisos ambientales');
 r = await llamar('GET', `/declaraciones?estado=PENDIENTE`, { token: T });
-const lodo = r.json.filas.find((d) => d.residuo.codigo === 'RP-018');
-const agua = r.json.filas.find((d) => d.residuo.codigo === 'AR-IND');
-prueba('listado trae las declaraciones con tarifa vigente', lodo && agua && Number(lodo.tarifaVigente?.precioUnitario) === 780);
+const lodo = r.json.filas.find((d) => d.codigoInterno === 'RP-018');
+const agua = r.json.filas.find((d) => d.codigoInterno === 'AR-IND');
+prueba('listado trae las declaraciones con sedes, disposición y tarifa vigente', lodo && agua && Number(lodo.tarifaVigente?.precioUnitario) === 780
+  && agua.sucursales.length === 2 && lodo.disposiciones[0]?.disposicion.codigo === 'BIO' && lodo.lineaServicio.unidadNegocio.sigla === 'TTR', JSON.stringify(lodo ?? r.json).slice(0, 300));
 r = await llamar('PATCH', `/declaraciones/${lodo.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
-prueba('autorizar biorremediación (cubierta por Res. 0632-2023)', r.status === 200 && r.json.estado === 'AUTORIZADA');
+prueba('autorizar biorremediación (cubierta por Res. 0632-2023) la deja activa', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa === true, JSON.stringify(r.json));
 await db.permisoAmbiental.updateMany({ where: { acto: 'Resolución 0632-2023' }, data: { estado: 'VENCIDO' } });
 r = await llamar('PATCH', `/declaraciones/${agua.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
-prueba('con el permiso vencido, NO deja autorizar el tratamiento fisicoquímico', r.status === 403 && /permiso/.test(r.json.mensaje), JSON.stringify(r.json));
+prueba('con el permiso vencido, NO deja autorizar el tratamiento a suelo (API)', r.status === 403 && /permiso/.test(r.json.mensaje), JSON.stringify(r.json));
+let bloqueada = false;
+try { await db.declaracion.update({ where: { id: agua.id }, data: { estado: 'AUTORIZADA', activa: true } }); } catch (e) { bloqueada = /ningún permiso/.test(String(e)); }
+prueba('…ni escribiendo directo en la base: la regla del trigger la rechaza', bloqueada);
 await db.permisoAmbiental.updateMany({ where: { acto: 'Resolución 0632-2023' }, data: { estado: 'VIGENTE' } });
+
+// Formulario de 8 secciones (POST /declaraciones)
+const cat = (await llamar('GET', '/declaraciones/catalogos', { token: T })).json;
+const idDe = (lista, codigo) => lista.find((x) => x.codigo === codigo)?.id;
+prueba('catálogos del formulario', cat.lineas?.length === 15 && cat.disposiciones?.length === 15 && cat.metricasDensidad?.length === 5);
+const cliente = await db.cliente.findFirst({ where: { nit: NIT } });
+const formulario = {
+  tipo: 'RESIDUO', clienteId: cliente.id, alcanceSedes: 'TODAS', nombre: 'Aceite usado de motor', codigoInterno: 'AU-01',
+  categoriaId: idDe(cat.categorias, 'RESPEL'), tipoResiduoId: idDe(cat.tiposResiduo, 'IND'), lineaServicioId: idDe(cat.lineas, '01'), esPeligroso: true,
+  codigoYId: idDe(cat.corrientesY, 'Y8'), codigoUn: 'UN1202', riesgoIds: [idDe(cat.riesgos, 'T'), idDe(cat.riesgos, 'I')], etiquetadoIds: [idDe(cat.etiquetado, 'ONU')],
+  descripcionProceso: 'Cambio de aceite de la flota', composicion: 'Aceite mineral con trazas metálicas',
+  tipoEmbalajeId: idDe(cat.tiposEmbalaje, 'CANECA'), materialEmbalajeId: idDe(cat.materiales, 'MET'), estadoFisico: 'LIQUIDO', inflamable: true, controladaEstupefacientes: false,
+  densidad: 0.88, metricaDensidadId: idDe(cat.metricasDensidad, 'g/mL'),
+  disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'APR') }], precio: { precioUnitario: 500, metricaId: idDe(cat.metricasPrecio, 'gal') },
+  responsabilidadAceptada: true,
+};
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...formulario, responsabilidadAceptada: false } });
+prueba('enviar sin aceptar la responsabilidad → 400', r.status === 400 && JSON.stringify(r.json).includes('responsabilidad'), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { tipo: 'RESIDUO', borrador: true, clienteId: cliente.id, nombre: 'Borrador a medias', categoriaId: formulario.categoriaId, lineaServicioId: formulario.lineaServicioId } });
+prueba('el borrador se guarda a medias', r.status === 201 && r.json.estado === 'BORRADOR', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: formulario });
+prueba('el formulario completo crea la declaración PENDIENTE con todas las sedes', r.status === 201 && r.json.estado === 'PENDIENTE', JSON.stringify(r.json).slice(0, 300));
+const aceite = r.json;
+prueba('…alcance TODAS asigna las 2 sedes del cliente', (await db.declaracionSucursal.count({ where: { declaracionId: aceite.id } })) === 2);
+r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('peligroso sin ficha de datos de seguridad NO se autoriza → 400', r.status === 400 && /ficha de datos de seguridad/.test(r.json.mensaje), JSON.stringify(r.json));
+await db.declaracion.update({ where: { id: aceite.id }, data: { fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf' } });
+r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('con la FDS se autoriza (aprovechamiento: objeto social)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json));
+r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede nueva', codigo: 'C003', municipioDane: '68001' } });
+prueba('una sede nueva se suma sola a las declaraciones con alcance TODAS', r.status === 201 && (await db.declaracionSucursal.count({ where: { declaracionId: aceite.id } })) === 3, JSON.stringify(r.json));
+r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede rara', municipioDane: '99999' } });
+prueba('municipio que no está en DIVIPOLA → 400', r.status === 400);
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...formulario, codigoInterno: 'AU-02', fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf', disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'INCH') }] } });
+const incineracion = r.json;
+r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('incineración con gestor aliado sin licencia vigente NO se autoriza', r.status === 403 && /licencia/.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('PATCH', `/declaraciones/${aceite.id}/activa`, { token: T, cuerpo: { activa: false } });
+prueba('inactivar exige causal → 400', r.status === 400);
 r = await llamar('POST', '/declaraciones/tarifas/masivas', { token: T, cuerpo: { declaraciones: [lodo.id], modo: 'porcentaje', valor: 5, vigenteDesde: '2027-01-01' } });
 prueba('tarifa masiva +5 % crea nueva vigencia', r.status === 201 && r.json.actualizadas === 1);
 const tarifas = await db.tarifa.findMany({ where: { declaracionId: lodo.id }, orderBy: { vigenteDesde: 'asc' } });
