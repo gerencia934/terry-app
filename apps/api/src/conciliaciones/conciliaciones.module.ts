@@ -1,12 +1,12 @@
-import { Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, BadRequestException } from '@nestjs/common';
 import { EstadoConciliacion, EstadoPago, FormaPago, Prisma, TipoNegociacion } from '@prisma/client';
-import type { Response } from 'express';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import { totalesConciliacion, valorLinea, diferenciaPct, type LineaTotal } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
+import { Trabajos, type ArchivoPreparado } from '../trabajos/trabajos.module';
 
 const id = z.string().uuid();
 const dosDecimales = (v: number) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
@@ -44,7 +44,15 @@ const aTotal = (l: LineaDb): LineaTotal => ({
 
 @Injectable()
 class ConciliacionesService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly trabajos: Trabajos) {
+    // El Excel se prepara en la cola de trabajos, no durante la petición (requisitos de producción §1)
+    this.trabajos.registrar<{ id: string }>('EXCEL_CONCILIACION', { permiso: 'exportar.masivo', preparar: (a, p) => this.excelPreparado(a, p.id) });
+  }
+
+  async encolarExcel(a: Actor, id: string) {
+    const c = await this.obtener(a, id);
+    return this.trabajos.encolar(a, 'EXCEL_CONCILIACION', `Conciliación del manifiesto ${c.manifiesto.numero} en Excel`, { id });
+  }
 
   private async propia(a: Actor, id: string) {
     const c = await this.db.conciliacion.findFirst({ where: { id, empresaId: a.empresaId } });
@@ -181,7 +189,7 @@ class ConciliacionesService {
     };
   }
 
-  async excel(a: Actor, id: string, res: Response) {
+  private async excelPreparado(a: Actor, id: string): Promise<ArchivoPreparado> {
     const c = await this.obtener(a, id);
     const wb = new ExcelJS.Workbook(); wb.creator = 'TERRY-GO · Terra Viva S.A.S. E.S.P.';
     const ws = wb.addWorksheet('Conciliación');
@@ -205,9 +213,7 @@ class ConciliacionesService {
     ws.columns.forEach((col, i) => { col.width = [24, 32, 12, 14, 8, 8, 14, 14, 12, 14, 28, 14, 12, 12, 12, 12, 30][i] ?? 12; });
     const buf = Buffer.from(await wb.xlsx.writeBuffer());
     await this.audit.registrar(a, 'conciliacion', id, 'EXPORTAR', undefined, { formato: 'xlsx' });
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="conciliacion-${c.manifiesto.numero}.xlsx"`);
-    res.send(buf);
+    return { buf, nombre: `conciliacion-${c.manifiesto.numero}.xlsx`, ext: 'xlsx' };
   }
 }
 
@@ -217,7 +223,7 @@ class ConciliacionesController {
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get('consolidado') consolidado(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.consolidado(a, f); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
-  @Permiso('exportar.masivo') @Get(':id/excel') excel(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.excel(a, id, res); }
+  @Permiso('exportar.masivo') @Post(':id/excel') @HttpCode(202) excel(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.encolarExcel(a, id); }
   @Permiso('conciliaciones.gestionar') @Patch(':id/items') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarItems)) b: z.infer<typeof EditarItems>) { return this.s.editarItems(a, id, b); }
   @Permiso('conciliaciones.gestionar') @Post(':id/igualar') igualar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Igualar)) b: z.infer<typeof Igualar>) { return this.s.igualar(a, id, b); }
   @Permiso('conciliaciones.aprobar') @Post(':id/aprobar') aprobar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.cambiarEstado(a, id, 'APROBADA'); }

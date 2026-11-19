@@ -9,7 +9,8 @@ import { Badge, Button, Card, EstadoBadge, Field, Input, Kpi, PageHeader, Select
 import { api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista } from '../../lib/servidor';
+import { cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista } from '../../lib/servidor';
+import { pedirArchivo } from '../../lib/trabajos';
 import { CONC_OFICINA, MF_OFICINA, } from './comun';
 
 type Negociacion = 'COBRO' | 'COMPRA' | 'SIN_COSTO' | 'CONTRATO';
@@ -152,7 +153,7 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
     return ejecutar(() => api<ConcDetalle>(`/conciliaciones/${id}/items`, { metodo: 'PATCH', cuerpo: { items } }), `${items.length} ${items.length === 1 ? 'línea guardada' : 'líneas guardadas'}.`);
   };
   const irManifiesto = () => { if (!c) return; try { sessionStorage.setItem(MF_OFICINA, c.manifiesto.id); } catch { /* sin almacenamiento */ } go('manifiestos'); };
-  const excel = () => c && bajarArchivo(`/conciliaciones/${id}/excel`, `conciliacion-${c.manifiesto.numero}.xlsx`).catch((e) => toast(msg(e), 'warn'));
+  const excel = () => c && pedirArchivo(`/conciliaciones/${id}/excel`).then(() => toast('Preparando el Excel: se descarga solo cuando esté listo.')).catch((e) => toast(msg(e), 'warn'));
 
   if (d.error) return <><Button variant="ghost" onClick={volver}><ArrowLeft size={16} /> Bandeja</Button><p className="mt-3 rounded-xl bg-bad/10 p-4 text-bad">{d.error}</p></>;
   if (!c || !totales) return <p className="p-6 text-center text-muted">Cargando…</p>;

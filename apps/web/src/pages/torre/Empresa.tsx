@@ -17,6 +17,8 @@ interface Config {
   rcd?: { numeroGestor?: string };
   /** Exigir la verificación en dos pasos a todo el personal (en producción se exige siempre). */
   dobleFactorObligatorio?: boolean;
+  /** Portal: los certificados con facturas vencidas y sin pagar se descargan al registrar el pago (sí, si falta). */
+  cartera?: { retenerCertificados?: boolean; diasGracia?: number };
 }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
@@ -52,6 +54,17 @@ export function EmpresaServidor() {
     } catch (e) { toast(msg(e), 'warn'); }
     setGuardando2fa(false);
   };
+  // Cartera: solo esta clave, sin recargar el formulario de arriba
+  const [diasGracia, setDiasGracia] = useState('');
+  useEffect(() => { setDiasGracia(String(d.datos?.configuracion?.cartera?.diasGracia ?? 0)); }, [d.datos]);
+  const guardarCartera = async (cartera: { retenerCertificados: boolean; diasGracia: number }) => {
+    try {
+      await api('/empresa/configuracion', { metodo: 'PATCH', cuerpo: { cartera } });
+      setC((s) => ({ ...s, cartera }));
+      toast(cartera.retenerCertificados ? `En el portal, los certificados con facturas vencidas hace más de ${cartera.diasGracia} días se descargan al registrar el pago.` : 'Los clientes descargan sus certificados aunque tengan facturas vencidas.', 'ok');
+    } catch (e) { toast(msg(e), 'warn'); }
+  };
+  const retener = c.cartera?.retenerCertificados !== false;
   const guardarConsecutivo = async (doc: string) => {
     const x = num[doc]; const orig = d.datos?.consecutivos.find((y) => y.documento === doc);
     try {
@@ -136,6 +149,23 @@ export function EmpresaServidor() {
               );
             })}
           </div>
+        </Card>
+
+        <Card title="Cartera y certificados">
+          <label className={cx('flex items-start gap-3 rounded-xl border border-line p-3 text-[13px]', !edita && 'opacity-60')}>
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" disabled={!edita || !d.datos} checked={retener}
+              onChange={(e) => guardarCartera({ retenerCertificados: e.target.checked, diasGracia: Number(diasGracia) || 0 })} />
+            <span>
+              <span className="font-medium">En el portal, entregar el certificado al registrar el pago</span>
+              <span className="mt-1 block text-muted">Si una factura del certificado está vencida y sin pagar, el cliente lo ve en su portal con un aviso amable y lo descarga cuando se registre el pago (en Conciliación, «Pagada»). La oficina siempre lo descarga y puede liberarlo desde el certificado. La verificación por QR no cambia.</span>
+            </span>
+          </label>
+          {retener && (
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <Field label="Días de gracia después del vencimiento" id="em-dg"><Input id="em-dg" type="number" min={0} max={365} className="w-28" disabled={!edita} value={diasGracia} onChange={(e) => setDiasGracia(e.target.value)} /></Field>
+              {edita && Number(diasGracia) !== (c.cartera?.diasGracia ?? 0) && <Button size="sm" onClick={() => guardarCartera({ retenerCertificados: true, diasGracia: Math.max(0, Math.min(365, Math.trunc(Number(diasGracia) || 0))) })}><Save size={14} /> Guardar</Button>}
+            </div>
+          )}
         </Card>
 
         <Card title="Seguridad del ingreso">

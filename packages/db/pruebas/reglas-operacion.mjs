@@ -269,6 +269,15 @@ await rechaza('…ni la clave guardada sin la fecha en que se activó', () => db
 const activa = await db.usuario.update({ where: { id: conDosPasos.id }, data: { totpSecreto: 'iv.tag.datos', totpActivoDesde: new Date(), codigosRespaldo: { create: [{ codigoHash: 'a'.repeat(64) }] } }, include: { codigosRespaldo: true } });
 prueba('activa: clave y fecha juntas, con sus códigos de respaldo', !!activa.totpActivoDesde && activa.codigosRespaldo.length === 1 && activa.codigosRespaldo[0].usadoEn === null);
 
+console.log('\n12. Cola de trabajos y certificados sujetos al pago');
+const trabajo = (data) => db.trabajo.create({ data: { empresaId: E, usuarioId: admin.id, tipo: 'ZIP_ACTAS', titulo: 'Prueba de reglas', ...data } });
+await rechaza('un trabajo listo lleva su archivo, el nombre con que se descarga y hasta cuándo', () => trabajo({ estado: 'LISTO' }), /chk_trabajo_listo/);
+await rechaza('…y uno fallido, el motivo', () => trabajo({ estado: 'FALLIDO' }), /chk_trabajo_fallido/);
+const pendiente = await trabajo({});
+prueba('un trabajo nuevo queda pendiente en la cola', pendiente.estado === 'PENDIENTE' && pendiente.intentos === 0);
+const actaViva = await db.acta.findFirst({ where: { empresaId: E, estado: { not: 'ANULADA' } } });
+if (actaViva) await rechaza('liberar la descarga de un certificado deja quién y cuándo', () => db.acta.update({ where: { id: actaViva.id }, data: { descargaLiberadaEn: new Date() } }), /chk_acta_liberada/);
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

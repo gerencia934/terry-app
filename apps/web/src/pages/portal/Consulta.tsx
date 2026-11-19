@@ -1,7 +1,7 @@
 // Portal de clientes: consulta y descarga de lo suyo. Los PDF se abren con un enlace firmado de 5 minutos que el API
 // entrega solo después de verificar que el documento es de la empresa (y de las sedes) del usuario.
 import { useState, type ReactNode } from 'react';
-import { Award, BarChart3, CalendarDays, Download, ExternalLink, FileStack, FileText, Loader2, MapPin, Plus, ShieldCheck, Truck, Upload, type LucideIcon } from 'lucide-react';
+import { Award, BarChart3, CalendarDays, Clock, Download, ExternalLink, FileStack, FileText, Loader2, MapPin, Plus, ShieldCheck, Truck, Upload, type LucideIcon } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../../components/data';
 import { Badge, Button, Card, DefList, EstadoBadge, Field, Input, Kpi, PageHeader, Select, Sheet, useToast } from '../../components/ui';
 import { API_URL, api } from '../../lib/api';
@@ -346,7 +346,13 @@ export function PortalManifiestos() {
 interface ActaFila {
   id: string; numero: string; tipo: 'DISPOSICION' | 'APROVECHAMIENTO' | 'CONCILIACION'; periodoDesde: string; periodoHasta: string; emitidaEn: string | null;
   codigoVerificacion: string | null; destino: { razonSocial: string; esPropio: boolean }; _count: { items: number };
+  /** Con una factura vencida y sin pagar, el certificado se ve pero se descarga cuando se registre el pago. */
+  pendientePago: { facturas: string[]; mensaje: string } | null;
 }
+/** En vez del botón del PDF: aviso discreto de que se descarga al registrar el pago. */
+const PendientePago = ({ a }: { a: ActaFila }) => (
+  <span className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] text-muted" title={a.pendientePago?.mensaje}><Clock size={13} /> Al registrar el pago</span>
+);
 const TIPO_ACTA = { DISPOSICION: 'Tratamiento y disposición final', APROVECHAMIENTO: 'Aprovechamiento', CONCILIACION: 'Conciliación de residuos' };
 const enlaceVerificacion = (codigo: string) => `${location.origin}${location.pathname}#verificar/${codigo}`;
 
@@ -362,7 +368,7 @@ export function PortalCertificados() {
     { key: 'p', header: 'Periodo', render: (a) => <span className="whitespace-nowrap">{periodo(a)}</span>, priority: 2 },
     { key: 'd', header: 'Gestor', render: (a) => <span className="block max-w-[220px] truncate">{a.destino.razonSocial}</span>, priority: 3 },
     { key: 'e', header: 'Emitido', render: (a) => (a.emitidaEn ? <span className="whitespace-nowrap">{fmtFecha(a.emitidaEn)}</span> : '—'), priority: 2 },
-    { key: 'pdf', header: 'Documento', render: (a) => <BotonPdf ruta={`/portal/certificados/${a.id}/enlace`} />, priority: 3 }, // 3: no va en las tarjetas del celular
+    { key: 'pdf', header: 'Documento', render: (a) => (a.pendientePago ? <PendientePago a={a} /> : <BotonPdf ruta={`/portal/certificados/${a.id}/enlace`} />), priority: 3 }, // 3: no va en las tarjetas del celular
   ];
   return (
     <>
@@ -376,10 +382,11 @@ export function PortalCertificados() {
             footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />}
             empty={anio ? `No hay certificados de ${anio}.` : 'Su empresa aún no tiene certificados emitidos.'} />}
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? <span>Certificado <span className="num">{sel.numero}</span></span> : ''}
-        footer={sel ? <BotonPdf ruta={`/portal/certificados/${sel.id}/enlace`} etiqueta="Ver el PDF" variant="primary" /> : undefined}>
+        footer={sel && !sel.pendientePago ? <BotonPdf ruta={`/portal/certificados/${sel.id}/enlace`} etiqueta="Ver el PDF" variant="primary" /> : undefined}>
         {sel && (
           <div className="flex flex-col gap-5">
             <DefList items={[['Certificado de', TIPO_ACTA[sel.tipo]], ['Periodo', periodo(sel)], ['Gestor', sel.destino.razonSocial], ['Emitido', sel.emitidaEn ? fechaHoraCo(sel.emitidaEn) : '—'], ['Líneas certificadas', String(sel._count.items)]]} />
+            {sel.pendientePago && <p className="flex items-start gap-2 rounded-xl bg-surface-2 p-3 text-[13px] text-muted"><Clock size={16} className="mt-px shrink-0" />{sel.pendientePago.mensaje}</p>}
             {sel.codigoVerificacion && (
               <a href={enlaceVerificacion(sel.codigoVerificacion)} target="_blank" rel="noreferrer" className="flex items-start gap-2 rounded-xl border border-line p-3 text-[13px] hover:bg-surface-2">
                 <ShieldCheck size={18} className="mt-px shrink-0 text-ok" />

@@ -1,7 +1,7 @@
 // Prueba de punta a punta del API contra una base de datos real.
 // Requiere el API corriendo (API_URL) y la base sembrada con prisma/seed.mjs.
 //   API_URL=http://localhost:3000/api/v1 ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/e2e.mjs
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import { PrismaClient } from '@prisma/client';
 import shared from '@terraviva/shared';
@@ -60,11 +60,11 @@ prueba('/auth/yo devuelve el usuario y la empresa', r.status === 200 && r.json.e
 console.log('\n2. Importación desde Excel');
 const NIT = '900112345';
 r = await llamar('POST', '/importacion/clientes/vista-previa', { token: T, form: await excel('clientes', [
-  { nit: NIT, dv: dvNit(NIT), razon: 'Agroindustrial Prueba S.A.S.', negociacion: 'Cobro', pago: 'Crédito 30 días', email: 'facturas@prueba.com' },
+  { nit: NIT, dv: dvNit(NIT), razon: 'Agroindustrial Prueba S.A.S.', representante: 'Representante Legal Prueba', negociacion: 'Cobro', pago: 'Crédito 30 días', email: 'facturas@prueba.com' },
   { nit: '900556677', dv: '0', razon: 'DV malo', negociacion: 'Cobro', pago: 'Contado' },
 ]) });
 prueba('vista previa: 1 válida y 1 con error de DV', r.status === 201 && r.json.resumen.validas === 1 && r.json.resumen.conErrores === 1, JSON.stringify(r.json).slice(0, 300));
-r = await llamar('POST', '/importacion/clientes/confirmar', { token: T, form: await excel('clientes', [{ nit: NIT, razon: 'Agroindustrial Prueba S.A.S.', negociacion: 'Cobro', pago: 'Crédito 30 días' }]) });
+r = await llamar('POST', '/importacion/clientes/confirmar', { token: T, form: await excel('clientes', [{ nit: NIT, razon: 'Agroindustrial Prueba S.A.S.', representante: 'Representante Legal Prueba', negociacion: 'Cobro', pago: 'Crédito 30 días' }]) });
 prueba('confirmar clientes guarda en la base', r.status === 201 && r.json.creadas + r.json.actualizadas === 1, JSON.stringify(r.json));
 r = await llamar('POST', '/importacion/sucursales/confirmar', { token: T, form: await excel('sucursales', [
   { nit: NIT, nombre: 'Planta extractora', codigo: 'C001', principal: 'Sí', direccion: 'Km 4', municipio: 'Puerto Wilches', depto: 'Santander', zona: 'Magdalena Medio', contacto: 'Laura' },
@@ -393,11 +393,19 @@ prueba('municipios de la DIVIPOLA (1.122): se buscan sin tildes («giron» → G
 r = await llamar('GET', '/municipios?q=05001', { token: T });
 prueba('…o por su código DANE (05001 → Medellín)', r.status === 200 && r.json[0]?.nombre === 'Medellín', JSON.stringify(r.json).slice(0, 200));
 const nitF1 = '901234567';
-r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Palmas del Magdalena Medio S.A.S.', sector: 'Palma', formaPago: 'CREDITO_30', emailFacturacion: 'facturas@palmas.test', asesorId: comercial.id } });
+r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Palmas del Magdalena Medio S.A.S.' } });
+prueba('crear un cliente sin representante legal → 400 (es obligatorio)', r.status === 400 && /representante legal/.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Palmas del Magdalena Medio S.A.S.', representanteLegal: 'Representante Palmas', sector: 'Palma', formaPago: 'CREDITO_30', emailFacturacion: 'facturas@palmas.test', asesorId: comercial.id } });
 const cF1 = r.json;
 prueba('crear un cliente (Comercial) calcula el dígito de verificación y guarda el asesor', r.status === 201 && cF1.dv === dvNit(nitF1) && cF1.asesorId === comercial.id, JSON.stringify(r.json).slice(0, 200));
-r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Repetido S.A.S.' } });
+r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Repetido S.A.S.', representanteLegal: 'Otra Persona' } });
 prueba('…y no repite un NIT', r.status === 400 && /Ya existe/.test(r.json.mensaje), JSON.stringify(r.json));
+// Cliente antiguo sin representante legal: quien cambie sus datos comerciales lo completa (inactivarlo no lo exige)
+await db.cliente.update({ where: { id: cliente.id }, data: { representanteLegal: null } });
+const sinRl = await llamar('PATCH', `/clientes/${cliente.id}`, { token: tcom, cuerpo: { sector: 'Agroindustria' } });
+r = await llamar('PATCH', `/clientes/${cliente.id}`, { token: tcom, cuerpo: { sector: 'Agroindustria', representanteLegal: 'Representante Legal Prueba' } });
+prueba('cliente antiguo sin representante legal: al cambiar sus datos se exige completarlo', sinRl.status === 400 && /representante legal/.test(sinRl.json.mensaje)
+  && r.status === 200 && r.json.representanteLegal === 'Representante Legal Prueba', `${sinRl.status} ${r.status}`);
 const zonasF1 = (await llamar('GET', '/zonas', { token: T })).json;
 r = await llamar('POST', `/clientes/${cF1.id}/sucursales`, { token: tcom, cuerpo: { nombre: 'Planta de beneficio', codigo: 'p1', municipioDane: '68655', zonaId: zonasF1[0]?.id, latitud: 7.39, longitud: -73.5, atencionLvDesde: '07:00', atencionLvHasta: '16:00' } });
 const sedeP1 = r.json;
@@ -688,6 +696,17 @@ for (let intento = 0; intento < 20 && !T8; intento++) {
 prueba('el límite de intentos de ingreso se libera después de un minuto', !!T8);
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const archivoForm = (bytes, nombre, campos = {}) => { const f = new FormData(); f.append('archivo', new Blob([bytes]), nombre); Object.entries(campos).forEach(([k, v]) => f.append(k, v)); return f; };
+/** Cola de trabajos: pide el archivo, espera a que esté listo y lo baja con su enlace firmado (sin sesión). */
+async function porLaCola(ruta, cuerpo, token) {
+  const r = await llamar('POST', ruta, { token, cuerpo });
+  if (r.status !== 202) return { status: r.status, json: r.json };
+  let t = r.json;
+  for (let i = 0; i < 120 && ['PENDIENTE', 'EN_CURSO'].includes(t.estado); i++) { await new Promise((ok) => setTimeout(ok, 250)); t = (await llamar('GET', `/trabajos/${t.id}`, { token })).json; }
+  if (t.estado !== 'LISTO') return { status: 500, trabajo: t };
+  const e = await llamar('POST', `/trabajos/${t.id}/enlace`, { token, cuerpo: {} });
+  const x = await fetch(e.json.url.startsWith('/') ? API + e.json.url : e.json.url);
+  return { status: x.status, tipo: x.headers.get('content-type'), disposicion: x.headers.get('content-disposition') ?? '', buf: Buffer.from(await x.arrayBuffer()), trabajo: t, enlace: e.json };
+}
 const descargar = async (ruta, token) => { const x = await fetch(API + ruta, { headers: { authorization: `Bearer ${token}` } }); return { status: x.status, tipo: x.headers.get('content-type'), buf: Buffer.from(await x.arrayBuffer()) }; };
 const ops = (await llamar('GET', '/catalogos/operacion', { token: T8 })).json;
 prueba('catálogo operativo: ARL, EPS, especificaciones, causales y destinos', ops.arl?.length >= 5 && ops.eps?.length >= 5 && ops.especificaciones?.length >= 1 && ops.destinos?.some((d) => d.esPropio));
@@ -741,6 +760,13 @@ prueba('grabar: queda REALIZADO, con peso neto calculado y conciliación en borr
 const fFirma = await descargar(`/archivos?clave=${encodeURIComponent(r.json.firmaUrl)}`, T8);
 prueba('la firma queda guardada y se descarga', fFirma.status === 200 && fFirma.tipo === 'image/png');
 prueba('otra empresa no puede descargar la firma → 403', (await descargar(`/archivos?clave=${encodeURIComponent(r.json.firmaUrl)}`, to)).status === 403);
+const enlaceFirma = await llamar('GET', `/archivos/enlace?clave=${encodeURIComponent(r.json.firmaUrl)}`, { token: T8 });
+const porEnlace = await fetch(API + enlaceFirma.json.url);
+prueba('archivos: enlace firmado de 5 minutos que sirve sin sesión (en S3 lo firma el almacenamiento)', enlaceFirma.status === 200 && /^\/archivos\/d\//.test(enlaceFirma.json.url)
+  && new Date(enlaceFirma.json.vence) - Date.now() <= 5 * 60_000 && porEnlace.status === 200 && porEnlace.headers.get('content-type') === 'image/png', `${enlaceFirma.status} ${porEnlace.status}`);
+const alterado = await fetch(API + enlaceFirma.json.url.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')));
+prueba('…un enlace alterado no sirve → 403', alterado.status === 403, String(alterado.status));
+prueba('…ni pide un enlace a un archivo de otra empresa → 403', (await llamar('GET', `/archivos/enlace?clave=${encodeURIComponent(r.json.firmaUrl)}`, { token: to })).status === 403);
 r = await llamar('GET', `/solicitudes?numero=${solB.numero}`, { token: T8 });
 prueba('la solicitud queda RECOLECTADA', r.json.filas?.[0]?.estado === 'RECOLECTADA');
 
@@ -762,8 +788,9 @@ r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuer
 prueba('aprobada: ya no cambian las cantidades → 409', r.status === 409);
 r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, facturaNumero: 'FE-2026-88', facturaEmision: '2026-11-30', facturaVencimiento: '2026-12-30', estadoPago: 'PENDIENTE' }] } });
 prueba('…pero sí la factura (cartera)', r.status === 200 && r.json.items[0].facturaNumero === 'FE-2026-88');
-const xls = await descargar(`/conciliaciones/${concB.id}/excel`, T8);
-prueba('exportar la conciliación a Excel', xls.status === 200 && xls.buf.subarray(0, 2).toString() === 'PK');
+const xls = await porLaCola(`/conciliaciones/${concB.id}/excel`, {}, T8);
+prueba('exportar la conciliación a Excel: se prepara en la cola y se baja con enlace firmado', xls.status === 200 && xls.buf?.subarray(0, 2).toString() === 'PK' && /attachment/.test(xls.disposicion)
+  && /conciliacion-.*\.xlsx/.test(xls.disposicion), JSON.stringify(xls.trabajo ?? xls.json).slice(0, 200));
 r = await llamar('POST', `/manifiestos/${mfB.id}/anular`, { token: T8, cuerpo: { motivo: 'Prueba' } });
 prueba('no se anula un manifiesto con conciliación aprobada → 409', r.status === 409 && /conciliación aprobada/.test(r.json.mensaje), JSON.stringify(r.json));
 
@@ -782,9 +809,19 @@ r = await llamar('GET', `/verificar/${codigo}`);
 prueba('verificación pública del QR (sin sesión): auténtico y vigente, sin datos del cliente', r.status === 200 && r.json.valido === true && !JSON.stringify(r.json).includes('Agroindustrial'), JSON.stringify(r.json));
 r = await llamar('GET', '/verificar/0123456789abcdef01234567');
 prueba('un código que no existe → 404', r.status === 404);
-const zip = await descargar(`/actas/zip?ids=${actaB.id}`, T8);
-prueba('descarga masiva de actas en ZIP', zip.status === 200 && zip.buf.subarray(0, 2).toString() === 'PK');
-prueba('…solo con el permiso de exportar: un conductor → 403', (await descargar(`/actas/zip?ids=${actaB.id}`, tc)).status === 403);
+const zip = await porLaCola('/actas/zip', { ids: [actaB.id] }, T8);
+prueba('descarga masiva de actas en ZIP: el API responde de inmediato (202) y la cola lo prepara', zip.status === 200 && zip.buf?.subarray(0, 2).toString() === 'PK'
+  && zip.trabajo.titulo === '1 certificado en ZIP' && !!zip.trabajo.venceEn, JSON.stringify(zip.trabajo ?? zip.json).slice(0, 200));
+prueba('…solo con el permiso de exportar: un conductor → 403', (await llamar('POST', '/actas/zip', { token: tc, cuerpo: { ids: [actaB.id] } })).status === 403);
+r = await llamar('GET', '/trabajos', { token: T8 });
+const otros = await Promise.all([llamar('GET', `/trabajos/${zip.trabajo.id}`, { token: to }), llamar('POST', `/trabajos/${zip.trabajo.id}/enlace`, { token: thseq, cuerpo: {} })]);
+prueba('«Mis descargas»: cada quien ve lo suyo (otro usuario u otra empresa → 404)', r.status === 200 && r.json.some((t) => t.id === zip.trabajo.id && t.estado === 'LISTO' && t.descargadoEn)
+  && otros.every((x) => x.status === 404), JSON.stringify(otros.map((x) => x.status)));
+await db.trabajo.update({ where: { id: zip.trabajo.id }, data: { venceEn: new Date(Date.now() - 1000) } });
+r = await llamar('POST', `/trabajos/${zip.trabajo.id}/enlace`, { token: T8, cuerpo: {} });
+prueba('…el archivo preparado vence (es una copia: se pide de nuevo)', r.status === 400 && /venció/.test(r.json.mensaje), JSON.stringify(r.json));
+const vacio = await llamar('POST', '/actas/zip', { token: T8, cuerpo: { ids: [randomUUID()] } });
+prueba('…sin certificados emitidos en la selección no se encola → 404', vacio.status === 404, String(vacio.status));
 prueba('…y la exportación queda en la auditoría', (await db.auditoria.count({ where: { entidad: 'acta', accion: 'EXPORTAR' } })) >= 1);
 r = await llamar('POST', `/actas/${actaB.id}/anular`, { token: T8, cuerpo: { motivo: 'Prueba de anulación' } });
 prueba('anular el acta', r.status === 201 && r.json.estado === 'ANULADA');
@@ -955,8 +992,10 @@ prueba('…y el PDF sale con el modelo oficial y la constancia de RCD', pdfRcd.s
 r = await llamar('GET', '/informes/rutas/rendimiento?desde=2026-11-25&hasta=2026-11-25', { token: T8 });
 const rend = r.json.rutas?.find((x) => x.rutaId === rutaB.id);
 prueba('informe de rendimiento: 1 de 1 servicios ejecutados (100 %)', r.status === 200 && rend?.habilitados === 1 && rend.ejecutados === 1 && rend.cumplimientoRuta === 100, JSON.stringify(r.json).slice(0, 300));
-const costos = await descargar('/informes/rutas/costos?desde=2026-11-25&hasta=2026-11-25&formato=xlsx', T8);
-prueba('informe de costos de flete en Excel', costos.status === 200 && costos.buf.subarray(0, 2).toString() === 'PK');
+const costos = await porLaCola('/informes/rutas/costos/excel', { desde: '2026-11-25', hasta: '2026-11-25' }, T8);
+prueba('informe de costos de flete en Excel (por la cola)', costos.status === 200 && costos.buf?.subarray(0, 2).toString() === 'PK', JSON.stringify(costos.trabajo ?? costos.json).slice(0, 200));
+r = await llamar('GET', '/informes/rutas/costos?desde=2026-11-25&hasta=2026-11-25&formato=xlsx', { token: T8 });
+prueba('…el Excel ya no se arma durante la petición: se pide aparte → 400 con instrucciones', r.status === 400 && /Exportar a Excel/.test(r.json.mensaje), JSON.stringify(r.json));
 
 r = await llamar('POST', '/auth/salir-todos', { token: to });
 const trasSalir = await llamar('GET', '/auth/yo', { token: to });
@@ -1020,7 +1059,7 @@ const tPA = sesionA.accessToken;
 prueba('al ingresar, la sesión dice que es del portal, de qué cliente y con qué perfil', sesionA.usuario?.cliente?.id === clienteA.id && sesionA.usuario.perfilPortal === 'ADMIN'
   && sesionA.usuario.permisos.length === 0, JSON.stringify(sesionA.usuario ?? sesionA).slice(0, 200));
 // Cliente B con su propio usuario del portal
-const clienteB = (await llamar('POST', '/clientes', { token: T8, cuerpo: { nit: '901777666', razonSocial: 'Cliente B del Portal S.A.S.' } })).json;
+const clienteB = (await llamar('POST', '/clientes', { token: T8, cuerpo: { nit: '901777666', razonSocial: 'Cliente B del Portal S.A.S.', representanteLegal: 'Representante Cliente B' } })).json;
 const sedeB = (await llamar('POST', `/clientes/${clienteB.id}/sucursales`, { token: T8, cuerpo: { nombre: 'Planta B', codigo: 'B1', municipioDane: '68001' } })).json;
 const declB = (await llamar('POST', '/declaraciones', { token: T8, cuerpo: { ...formulario, clienteId: clienteB.id, alcanceSedes: 'TODAS', codigoInterno: 'B-01', nombre: 'Residuo del cliente B' } })).json;
 r = await llamar('POST', `/clientes/${clienteB.id}/usuarios-portal`, { token: T8, cuerpo: { email: 'portal.b@cliente-b.test', nombre: 'Consulta Cliente B', documento: '52999888', perfil: 'CONSULTA' } });
@@ -1117,6 +1156,39 @@ prueba('…un enlace alterado no sirve → 403', falsa.status === 403, String(fa
 r = await llamar('POST', `/portal/manifiestos/${mfsA[0].id}/enlace`, { token: tPA });
 const bajadaMf = await fetch(API + r.json.url);
 prueba('…también el PDF de sus manifiestos', bajadaMf.status === 200 && Buffer.from(await bajadaMf.arrayBuffer()).subarray(0, 4).toString() === '%PDF', String(bajadaMf.status));
+
+// Cartera (respuesta de la gerencia): con una factura vencida y sin pagar, el certificado se ve pero se descarga al pagar
+// Un certificado del cliente A con líneas conciliadas (el cargado de un aliado no tiene facturas)
+const actaCartera = await db.acta.findFirst({ where: { clienteId: clienteA.id, estado: 'EMITIDA', items: { some: {} } }, include: { items: { take: 1 } }, orderBy: { numero: 'asc' } });
+const lineaCartera = actaCartera.items[0];
+const enlaceAntes = (await llamar('POST', `/portal/certificados/${actaCartera.id}/enlace`, { token: tPA })).json;
+const factura = (estadoPago, vence = fechaEn(-10)) => llamar('PATCH', `/conciliaciones/${lineaCartera.conciliacionId}/items`, { token: T8,
+  cuerpo: { items: [{ id: lineaCartera.id, facturaNumero: 'FE-CARTERA-1', facturaEmision: fechaEn(-40), facturaVencimiento: vence, estadoPago }] } });
+r = await factura('PENDIENTE');
+const listaCartera = await llamar('GET', '/portal/certificados?porPagina=200', { token: tPA });
+const retenido = listaCartera.json.filas?.find((x) => x.id === actaCartera.id);
+const pedirRetenido = await llamar('POST', `/portal/certificados/${actaCartera.id}/enlace`, { token: tPA });
+prueba('cartera: con una factura vencida y sin pagar el certificado se ve en el portal, pero no se descarga (aviso amable)', r.status === 200 && retenido?.pendientePago?.facturas?.includes('FE-CARTERA-1')
+  && pedirRetenido.status === 403 && pedirRetenido.json.codigo === 'PENDIENTE_PAGO' && /cuando se registre el pago de la factura FE-CARTERA-1/.test(pedirRetenido.json.mensaje),
+  JSON.stringify([r.status, retenido?.pendientePago, pedirRetenido.json]).slice(0, 300));
+const enlaceAnterior = await fetch(API + enlaceAntes.url);
+prueba('…ni con un enlace que ya tenía', enlaceAnterior.status === 403, String(enlaceAnterior.status));
+r = await llamar('GET', `/actas/${actaCartera.id}`, { token: T8 });
+const pdfOficina = await descargar(`/actas/${actaCartera.id}/pdf`, T8);
+prueba('…la oficina lo ve «pago pendiente» y lo sigue descargando', r.json.pendientePago?.includes('FE-CARTERA-1') && pdfOficina.status === 200 && pdfOficina.buf.subarray(0, 4).toString() === '%PDF',
+  JSON.stringify(r.json.pendientePago));
+await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { cartera: { retenerCertificados: true, diasGracia: 30 } } });
+const conGracia = await llamar('POST', `/portal/certificados/${actaCartera.id}/enlace`, { token: tPA });
+await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { cartera: { retenerCertificados: true, diasGracia: 0 } } });
+await factura('PAGADA');
+const pagada = await llamar('POST', `/portal/certificados/${actaCartera.id}/enlace`, { token: tPA });
+prueba('…con días de gracia (30) una factura vencida hace 10 días no lo retiene, y pagada tampoco', conGracia.status === 201 && pagada.status === 201, `${conGracia.status} ${pagada.status}`);
+await factura('PENDIENTE');
+const sinPermisoLiberar = await llamar('POST', `/actas/${actaCartera.id}/liberar-descarga`, { token: thseq });
+r = await llamar('POST', `/actas/${actaCartera.id}/liberar-descarga`, { token: T8 });
+const liberado = await llamar('POST', `/portal/certificados/${actaCartera.id}/enlace`, { token: tPA });
+prueba('…quien registra facturas y pagos libera la descarga (queda quién y cuándo) y el cliente ya lo descarga', sinPermisoLiberar.status === 403 && r.status === 201 && liberado.status === 201
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'acta', entidadId: actaCartera.id, accion: 'LIBERAR_DESCARGA' } })), `${sinPermisoLiberar.status} ${r.status} ${liberado.status}`);
 
 // Usuarios del portal: el administrador del cliente gestiona los de su empresa
 const sedeC002 = await db.sucursal.findFirst({ where: { clienteId: clienteA.id, codigo: 'C002' } });

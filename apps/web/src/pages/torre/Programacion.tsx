@@ -5,7 +5,8 @@ import { MonthCalendar, ResponsiveTable, FilterBar, type CalEvent, type Column }
 import { Badge, Button, ColorBadge, Field, Input, Kpi, PageHeader, Select, Sheet, Tabs, useToast, Empty } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { bajarArchivo, cant, finDeMes, horaCo, horaColumna, hoyCo, msg, sumarDias, useApi } from '../../lib/servidor';
+import { cant, finDeMes, horaCo, horaColumna, hoyCo, msg, sumarDias, useApi } from '../../lib/servidor';
+import { pedirArchivo } from '../../lib/trabajos';
 import { CamposRuta, EtapaBadge, Placa, RutaDetalle, SIN_VEHICULO, cuerpoRuta, lineasDe, useCatalogos, type Catalogos, type FormRuta, type RutaApi } from './comun';
 
 interface PendItem {
@@ -256,7 +257,7 @@ export function ProgramacionTablaServidor() {
     { key: 'etapa', header: 'Etapa', render: (r) => <EtapaBadge e={r.estadoRecorrido} />, priority: 3 },
   ];
   const exportar = async () => {
-    try { await bajarArchivo(`/informes/rutas/costos?formato=xlsx&desde=${f.desde}&hasta=${f.hasta}${f.vehiculoId ? `&vehiculoId=${f.vehiculoId}` : ''}${f.conductorId ? `&conductorId=${f.conductorId}` : ''}`, `costos-rutas-${f.desde}-a-${f.hasta}.xlsx`); }
+    try { await pedirArchivo('/informes/rutas/costos/excel', { desde: f.desde, hasta: f.hasta, ...(f.vehiculoId ? { vehiculoId: f.vehiculoId } : {}), ...(f.conductorId ? { conductorId: f.conductorId } : {}) }); toast('Preparando el Excel: se descarga solo cuando esté listo.'); }
     catch (e) { toast(msg(e), 'warn'); }
   };
   return (

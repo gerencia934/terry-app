@@ -47,8 +47,8 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 |---|---|---|
 | API sin estado, varias copias detrás de un balanceador | ⚠️ El token es sin estado. Pero el límite de peticiones vive en la memoria de cada copia, y los archivos en el disco del servidor | Límite de peticiones en un almacén compartido (Redis); archivos en S3 |
 | Índices y paginación en todos los listados | ⚠️ El API pagina (máximo 500 por página), pero varias pantallas piden 200 a 500 registros de una vez y los selectores de cliente cargan los primeros 500. El consolidado de conciliaciones suma en memoria hasta 5.000 | Buscador de clientes con autocompletar; bandejas con «cargar más»; consolidado sumado en la base |
-| PDF y reportes pesados en cola | ❌ El PDF del acta, el ZIP de actas y los Excel se generan durante la petición | Cola de trabajos en PostgreSQL (no exige Redis). El usuario recibe aviso y enlace cuando está listo |
-| Archivos con URL firmada, no a través del API | ❌ Fotos, firmas y PDF pasan por el API | Almacenamiento privado tipo S3. El API verifica el permiso y entrega un enlace firmado de 5 minutos. En desarrollo, el enlace firmado lo sirve el propio API |
+| PDF y reportes pesados en cola | ✅ Cola de trabajos en PostgreSQL (no exige Redis): el ZIP de certificados y los Excel se piden, se preparan aparte y «Descargas» avisa con un enlace firmado. El PDF del acta se genera una sola vez, al emitir, y se guarda | — |
+| Archivos con URL firmada, no a través del API | ✅ El API verifica el permiso y entrega un enlace firmado de 5 minutos. Con `ALMACENAMIENTO=s3` (S3, R2 o MinIO) el enlace lo firma el almacenamiento y el archivo no pasa por el API; en desarrollo lo sirve el propio API. Solo el PDF del manifiesto, que se arma en el momento, sale del API | Configurar el bucket privado al desplegar |
 
 ## 2. Aislamiento de datos de clientes (crítico)
 
@@ -57,7 +57,7 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 | Rol `CLIENTE` ligado a un `cliente_id` (administrador del cliente y consulta; sedes opcionales) | ✅ Usuario del portal con `cliente_id`, perfil Administrador o Consulta y sedes opcionales. La oficina da el primer acceso desde la ficha del cliente y el administrador del cliente invita a los demás (un administrador limitado a unas sedes no da más acceso del que tiene) | — |
 | Doble barrera: filtro en el API y RLS en la base | ✅ por cliente. API: el usuario del portal solo usa las rutas del portal y cada consulta filtra por el cliente del token y sus sedes. Base: RLS con `app.cliente_id` en cada transacción del portal (clientes, sedes, declaraciones, solicitudes, manifiestos, conciliaciones, actas, cargues, usuarios y sus tablas hijas, con FORCE) | Queda la RLS por empresa para el personal interno (hoy el API filtra la empresa en cada consulta, probado) |
 | Pruebas: el cliente A recibe 403/404 en cada endpoint al pedir datos de B | ✅ e2e: el cliente B recibe 403 o 404 en el detalle, las descargas y los usuarios de A, y sus listados, filtros e informes no traen nada de A; el usuario del portal recibe 403 en las rutas de oficina; la RLS se prueba directo en la base (leer y escribir) | — |
-| Descargas solo con URL firmada de corta vida; almacenamiento nunca público | ✅ en el portal: enlace firmado de 5 minutos, con clave propia, que se entrega después de verificar el permiso; en desarrollo lo sirve el API | Con S3 en producción, el enlace lo firma el almacenamiento (ver §1) |
+| Descargas solo con URL firmada de corta vida; almacenamiento nunca público | ✅ enlace firmado de 5 minutos, con clave propia, que se entrega después de verificar el permiso (y, en el portal, de verificar el pago del certificado); con S3 lo firma el almacenamiento | — |
 | UUID en las URL; el consecutivo es solo un dato visible | ✅ | — |
 
 ## 3. Conservación e integridad
@@ -186,7 +186,7 @@ base.
   contraseñas ni datos personales. Aun así, la gerencia debe decidir si lo pasa a privado. Si lo hace:
   - CodeQL deja de ser gratis (exige la licencia «GitHub Code Security»);
   - las pruebas y Dependabot siguen funcionando.
-- **PDF en cola y descargas con enlace firmado.** Siguen pendientes (paso 4 del orden). La prueba de carga dirá qué tan
-  urgentes son.
+- **PDF en cola y descargas con enlace firmado.** Hechos el 19-11-2026 (cola de trabajos en PostgreSQL y almacenamiento
+  local o S3 con enlaces firmados de 5 minutos).
 
 La historia de cada fase está en `docs/CONTEXTO_PROYECTO.md`.

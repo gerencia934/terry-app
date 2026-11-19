@@ -7,6 +7,7 @@ import { api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
 import { ImagenProtegida, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista, verPdf } from '../../lib/servidor';
+import { abrirArchivo } from '../../lib/trabajos';
 import { CONC_OFICINA, MF_OFICINA, useCatalogos } from './comun';
 
 interface MfFila {
@@ -174,7 +175,7 @@ function DetalleManifiesto({ id, onClose, onCambio }: { id: string | null; onClo
             {!fotos.length && !pdfs.length && <p className="text-[13px] text-subtle">Sin fotos ni documentos.</p>}
             {fotos.length > 0 && <div className="grid grid-cols-2 gap-2">{fotos.map((e) => <ImagenProtegida key={e.id} clave={e.url} alt={`Foto del ${fechaHoraCo(e.tomadaEn ?? e.createdAt)}`} className="aspect-[4/3] w-full rounded-lg border border-line object-cover" />)}</div>}
             {pdfs.map((e) => (
-              <Button key={e.id} size="sm" className="self-start" onClick={() => verPdf(`/archivos?clave=${encodeURIComponent(e.url)}`).catch((x) => toast(msg(x), 'warn'))}><FileText size={15} /> {e.nombreArchivo ?? 'Documento PDF'}</Button>
+              <Button key={e.id} size="sm" className="self-start" onClick={() => abrirArchivo(e.url, e.nombreArchivo ?? 'documento.pdf').catch((x) => toast(msg(x), 'warn'))}><FileText size={15} /> {e.nombreArchivo ?? 'Documento PDF'}</Button>
             ))}
           </section>
         </div>

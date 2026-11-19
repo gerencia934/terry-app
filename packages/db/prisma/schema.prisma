@@ -283,6 +283,7 @@ model Empresa {
   consecutivos     Consecutivo[]
   textosLegales    TextoLegal[]
 
+  trabajos                Trabajo[] // cola de trabajos (ZIP, Excel)
   @@map("empresas")
 }
 
@@ -373,6 +374,7 @@ model Usuario {
   conciliacionesAprobadas Conciliacion[]
   actasEmitidas           Acta[]                   @relation("ActaEmitidaPor")
   actasCargadas           Acta[]                   @relation("ActaCargadaPor")
+  actasLiberadas          Acta[]                   @relation("ActaDescargaLiberada")
   clientesAsesorados      Cliente[]                @relation("ClienteAsesor")
   tarifasAsignadas        Tarifa[]
   solicitudesCreadas      Solicitud[]
@@ -389,6 +391,7 @@ model Usuario {
   declaracionesCreadas    Declaracion[]            @relation("DeclCreadaPor")
 
   @@index([empresaId])
+  trabajos                Trabajo[] // lo que pidió preparar (sus descargas)
   @@map("usuarios")
 }
 
@@ -1415,6 +1418,9 @@ model Acta {
   cargadaPorId       String?    @map("cargada_por") @db.Uuid
   motivoAnulacion    String?    @map("motivo_anulacion") @db.VarChar(300)
   anuladaEn          DateTime?  @map("anulada_en") @db.Timestamptz
+  // Portal: con una factura vencida y sin pagar el cliente no descarga el certificado, salvo que la oficina lo libere
+  descargaLiberadaEn    DateTime? @map("descarga_liberada_en") @db.Timestamptz
+  descargaLiberadaPorId String?   @map("descarga_liberada_por") @db.Uuid
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
 
   empresa    Empresa            @relation(fields: [empresaId], references: [id])
@@ -1422,6 +1428,7 @@ model Acta {
   destino    Proveedor          @relation(fields: [destinoId], references: [id])
   emitidaPor Usuario?           @relation("ActaEmitidaPor", fields: [emitidaPorId], references: [id])
   cargadaPor Usuario?           @relation("ActaCargadaPor", fields: [cargadaPorId], references: [id])
+  descargaLiberadaPor Usuario?  @relation("ActaDescargaLiberada", fields: [descargaLiberadaPorId], references: [id])
   items      ConciliacionItem[]
 
   @@unique([empresaId, numero])
@@ -1431,6 +1438,42 @@ model Acta {
 // ---------------------------------------------------------------------
 // AUDITORÍA (Ley 1581/2012 y soporte ante autoridad)
 // ---------------------------------------------------------------------
+/// Cola de trabajos (requisitos de producción §1): ZIP y Excel que se preparan aparte y se descargan con un enlace
+/// firmado de 5 minutos. Cada copia del API toma un trabajo con FOR UPDATE SKIP LOCKED. El archivo preparado vence.
+model Trabajo {
+  id           String        @id @default(uuid()) @db.Uuid
+  empresaId    String        @map("empresa_id") @db.Uuid
+  usuarioId    String        @map("usuario_id") @db.Uuid
+  tipo         String        @db.VarChar(40) // ZIP_ACTAS, EXCEL_CONCILIACION, EXCEL_COSTOS_RUTAS…
+  titulo       String        @db.VarChar(200)
+  parametros   Json          @default("{}")
+  estado       EstadoTrabajo @default(PENDIENTE)
+  intentos     Int           @default(0) @db.SmallInt
+  error        String?       @db.VarChar(500)
+  archivo      String? // clave del archivo preparado
+  nombre       String?       @db.VarChar(200)
+  bytes        Int?
+  creadoEn     DateTime      @default(now()) @map("creado_en") @db.Timestamptz
+  iniciadoEn   DateTime?     @map("iniciado_en") @db.Timestamptz
+  terminadoEn  DateTime?     @map("terminado_en") @db.Timestamptz
+  venceEn      DateTime?     @map("vence_en") @db.Timestamptz
+  descargadoEn DateTime?     @map("descargado_en") @db.Timestamptz
+
+  empresa Empresa @relation(fields: [empresaId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId, creadoEn(sort: Desc)], map: "ix_trabajos_usuario")
+  @@map("trabajos")
+}
+
+enum EstadoTrabajo {
+  PENDIENTE
+  EN_CURSO
+  LISTO
+  FALLIDO
+  VENCIDO
+}
+
 model Auditoria {
   id        BigInt   @id @default(autoincrement())
   usuarioId String?  @map("usuario_id") @db.Uuid

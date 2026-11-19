@@ -10,6 +10,7 @@ import { cx } from '../lib/format';
 import { useAlertas } from '../lib/alertas';
 import { MODO_REAL, salir, salirDeTodos, sesionActual } from '../lib/api';
 import { VentanaDobleFactor } from './DobleFactor';
+import { Descargas } from './Descargas';
 import logoDark from '../assets/logo-dark.webp';
 import logoLight from '../assets/logo-light.webp';
 
@@ -142,6 +143,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <button onClick={() => setBuscar(true)} className="rounded-lg p-2 text-muted hover:bg-surface-2 md:hidden" aria-label="Buscar"><Search size={19} /></button>
               <button onClick={toggle} className="rounded-lg p-2 text-muted hover:bg-surface-2" aria-label={dark ? 'Usar tema claro' : 'Usar tema oscuro'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
               <div className="relative">
+                {MODO_REAL && <Descargas />}
                 <button onClick={() => setBell((v) => !v)} className="relative rounded-lg p-2 text-muted hover:bg-surface-2" aria-label={`Alertas (${al.length})`} aria-expanded={bell}>
                   <Bell size={19} /><span className="num absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-bad px-1 text-[10px] font-semibold text-white">{al.length}</span>
                 </button>

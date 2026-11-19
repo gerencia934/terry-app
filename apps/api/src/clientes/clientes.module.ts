@@ -18,7 +18,9 @@ const Comercial = z.object({
   tipoNegociacion: z.nativeEnum(TipoNegociacion).default('COBRO'), formaPago: z.nativeEnum(FormaPago).default('CONTADO'),
   emailFacturacion: z.string().trim().email('Correo de facturación inválido').or(z.literal('')).transform((s) => s || null).nullish(),
   asesorId: z.string().uuid().nullish(),
-  representanteLegal: textoOpc(150), // lo pide la constancia de RCD (Anexo II, Res. 1257 de 2021)
+  // Obligatorio (respuesta de la gerencia, 19-11-2026); lo pide la constancia de RCD (Anexo II, Res. 1257 de 2021)
+  representanteLegal: z.string({ required_error: 'Falta el representante legal: es obligatorio (si es persona natural, su propio nombre).' }).trim()
+    .min(3, 'Escriba el nombre del representante legal (si es persona natural, su propio nombre).').max(150),
 });
 const Crear = Comercial.extend({ nit: z.string().regex(/^\d{6,10}$/, 'NIT sin puntos ni DV (6 a 10 dígitos)') });
 const Editar = Comercial.partial().extend({
@@ -123,6 +125,10 @@ class ClientesService {
       }
       const { sucursales: _s, ...antes } = c;
       const d = cambios(antes, datos);
+      // Representante legal obligatorio: quien cambia los datos comerciales de un cliente antiguo que no lo tiene, lo completa
+      // (inactivarlo o activarlo no lo exige)
+      if (Object.keys(d.despues).some((k) => k !== 'activo') && !c.representanteLegal?.trim() && !datos.representanteLegal)
+        throw new BadRequestException({ mensaje: 'Falta el representante legal del cliente: es obligatorio. Si es persona natural, escriba su nombre.' });
       if (!d.hay) return { ...c, inactivadas };
       const r = await tx.cliente.update({ where: { id }, data: datos });
       await this.audit.registrar(a, 'cliente', id, datos.activo === false && c.activo ? 'INACTIVAR' : datos.activo && !c.activo ? 'ACTIVAR' : 'EDITAR', d.antes, { ...d.despues, ...(inactivadas ? { declaracionesInactivadas: inactivadas } : {}) }, tx);

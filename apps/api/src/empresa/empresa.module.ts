@@ -26,6 +26,8 @@ const Configuracion = z.object({
   rcd: z.object({ numeroGestor: z.string().trim().max(60) }).partial().optional(),
   // Exigir la verificación en dos pasos al personal (en producción se exige siempre)
   dobleFactorObligatorio: z.boolean().optional(),
+  // Cartera: en el portal, retener la descarga de los certificados con facturas vencidas y sin pagar (sí, si falta)
+  cartera: z.object({ retenerCertificados: z.boolean(), diasGracia: z.number().int().min(0).max(365) }).partial().optional(),
   // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   bascula: z.object({
     identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,

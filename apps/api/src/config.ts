@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 /** Variables de entorno validadas al arrancar: si falta algo, el servidor no inicia y dice qué falta. */
+/** Una variable vacía en el .env vale como no escrita: toma el valor por omisión. */
+const sinVacio = <T extends z.ZodTypeAny>(s: T) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), s);
 const Esquema = z.object({
   DATABASE_URL: z.string().url('DATABASE_URL debe ser una URL de PostgreSQL'),
   PORT: z.coerce.number().default(3000),
@@ -22,6 +24,19 @@ const Esquema = z.object({
   NODE_ENV: z.string().default('development'),
   // Archivos (firmas, fotos, PDF). En desarrollo, carpeta local; en producción se cambia a S3 / R2.
   ALMACENAMIENTO_DIR: z.string().default('almacenamiento'),
+  // Dónde se guardan los archivos nuevos: «local» (carpeta ALMACENAMIENTO_DIR, para desarrollo) o «s3» (S3, R2 o MinIO).
+  // Los enlaces de descarga son firmados y vencen en 5 minutos; en S3 el archivo no pasa por el API.
+  ALMACENAMIENTO: sinVacio(z.enum(['local', 's3']).default('local')),
+  S3_BUCKET: z.string().trim().default(''),
+  S3_REGION: z.string().trim().default('us-east-1'), // Cloudflare R2: «auto»
+  S3_ENDPOINT: z.string().trim().default(''), // vacío = AWS; R2 o MinIO: su dirección
+  S3_RUTA_EN_URL: sinVacio(z.enum(['true', 'false']).default('false')).transform((v) => v === 'true'), // MinIO: true
+  S3_ACCESS_KEY_ID: z.string().trim().default(''), // vacío = credenciales del entorno (rol del servidor)
+  S3_SECRET_ACCESS_KEY: z.string().trim().default(''),
+  // Cola de trabajos (ZIP, Excel): esta copia del API los procesa (en producción puede haber una copia solo para eso)
+  TRABAJOS_PROCESAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
+  TRABAJOS_SIMULTANEOS: sinVacio(z.coerce.number().int().min(1).max(8).default(2)),
+  TRABAJOS_DIAS: sinVacio(z.coerce.number().int().min(1).max(90).default(7)), // días que se guarda el archivo preparado
   ARCHIVO_MAX_MB: z.coerce.number().default(10),
   // Límite de peticiones por minuto en cada pantalla: por usuario con sesión, por IP sin ella
   LIMITE_PETICIONES_MIN: z.coerce.number().int().min(10).default(300),
@@ -39,6 +54,7 @@ export function validarConfig(env: Record<string, unknown>): Config {
     const msg = r.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Configuración inválida. Revise el archivo .env:\n${msg}`);
   }
+  if (r.data.ALMACENAMIENTO === 's3' && !r.data.S3_BUCKET) throw new Error('ALMACENAMIENTO=s3 necesita S3_BUCKET (y S3_ENDPOINT si no es AWS).');
   if (!r.data.POLITICA_DATOS_VERSION || !r.data.POLITICA_DATOS_URL) {
     if (r.data.NODE_ENV === 'production')
       throw new Error('Falta la política de tratamiento de datos (Ley 1581): defina POLITICA_DATOS_URL y POLITICA_DATOS_VERSION. Sin ella nadie puede entrar.');

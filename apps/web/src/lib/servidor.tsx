@@ -1,6 +1,7 @@
 // Utilidades de las pantallas de oficina conectadas al API (torre de control).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ErrorApi } from './api';
+import { enlaceArchivo, urlAbsoluta } from './trabajos';
 import { cx } from './format';
 import { Button } from '../components/ui';
 
@@ -44,17 +45,15 @@ export async function verPdf(ruta: string) {
   } catch (e) { w?.close(); throw e; }
 }
 
-/** Dirección local (blob:) de un archivo guardado en el servidor: fotos, firmas. */
+/** Dirección de un archivo guardado (foto, firma): enlace firmado de 5 minutos; la imagen se carga directo de ahí. */
 export function useArchivoUrl(clave: string | null | undefined) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     setUrl(null);
     if (!clave) return;
-    let vivo = true; let u: string | null = null;
-    api<Blob>(`/archivos?clave=${encodeURIComponent(clave)}`, { blob: true })
-      .then((b) => { if (!vivo) return; u = URL.createObjectURL(b); setUrl(u); })
-      .catch(() => undefined);
-    return () => { vivo = false; if (u) URL.revokeObjectURL(u); };
+    let vivo = true;
+    enlaceArchivo(clave).then((e) => { if (vivo) setUrl(urlAbsoluta(e.url)); }).catch(() => undefined);
+    return () => { vivo = false; };
   }, [clave]);
   return url;
 }

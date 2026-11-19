@@ -100,4 +100,16 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
 - Verificación en dos pasos (requisitos de producción §4): ✅ el 19-11-2026. App de autenticación (TOTP) con códigos de
   respaldo; obligatoria para el personal en producción (o antes, con el interruptor de Ajustes › Empresa) y opcional
   en el portal; la restablece otro administrador. 85 pruebas de reglas y 376 e2e OK.
+- Respuestas de la gerencia del 19-11-2026 (tarde), hechas el mismo día:
+  - ✅ cola de trabajos: el ZIP de certificados y los Excel se preparan aparte y «Descargas» avisa;
+  - ✅ enlaces firmados de 5 minutos para todo archivo guardado (almacén local o S3 / R2 / MinIO);
+  - ✅ representante legal obligatorio en los clientes;
+  - ✅ certificados sujetos al pago: con una factura vencida y sin pagar el cliente lo ve en el portal, pero lo
+    descarga al pagar o cuando la oficina lo libera (días de gracia en Ajustes).
+
+  88 pruebas de reglas y 390 e2e OK. Sigue: licencias de los gestores aliados (carpetas «uso común» y «uso no común» del
+  Drive) y textos legales soportados en los permisos.
+- Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
+  210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
+  peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.
 - Docker no se probó en el entorno de Claude: el usuario lo levanta en su equipo.

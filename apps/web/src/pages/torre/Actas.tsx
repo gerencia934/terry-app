@@ -1,12 +1,13 @@
 // Torre de control: certificados (actas). Solo certifican líneas de conciliaciones aprobadas; cada acta emitida lleva un QR
 // que abre la página pública de verificación. Descarga masiva en ZIP y cargue de actas de gestores aliados.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Award, Ban, Copy, Download, ExternalLink, FilePlus2, FileUp, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { Award, Ban, Clock, Copy, Download, ExternalLink, FilePlus2, FileUp, RefreshCw, Send, Trash2, Unlock } from 'lucide-react';
 import { FilterBar, ResponsiveTable, type Column } from '../../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, useApi, usePaginado, PieLista, verPdf } from '../../lib/servidor';
+import { cant, fechaHoraCo, hoyCo, msg, useApi, usePaginado, PieLista } from '../../lib/servidor';
+import { abrirPdfGuardado, pedirArchivo } from '../../lib/trabajos';
 import { useCatalogos, type Destino } from './comun';
 import { BuscarCliente, type ClienteBuscado } from '../../components/BuscarCliente';
 
@@ -16,8 +17,11 @@ interface ActaFila {
   id: string; numero: string; tipo: TipoActa; origen: 'GENERADA' | 'CARGADA'; estado: 'BORRADOR' | 'EMITIDA' | 'ANULADA'; periodoDesde: string; periodoHasta: string;
   emitidaEn: string | null; cliente: { razonSocial: string }; destino: { razonSocial: string }; emitidaPor: { nombre: string } | null; _count: { items: number };
   generadorNit: string | null; generadorNombre: string | null;
+  /** Facturas vencidas y sin pagar: el cliente no lo descarga en su portal hasta que se paguen o se libere. */
+  pendientePago: string[] | null;
 }
 interface ActaDetalle extends Omit<ActaFila, '_count' | 'cliente' | 'destino'> {
+  descargaLiberadaEn: string | null; descargaLiberadaPor: { nombre: string } | null;
   codigoVerificacion: string; urlVerificacion: string; motivoAnulacion: string | null; anuladaEn: string | null; pdfSha256: string | null;
   cliente: { razonSocial: string; nit: string }; destino: { razonSocial: string }; cargadaPor: { nombre: string } | null;
   items: { id: string; cantidadConciliada: string | null; metrica: { abreviacion: string } | null; disposicion: { nombre: string; propia: boolean } | null;
@@ -44,7 +48,8 @@ export function ActasServidor() {
   const filas = lista.filas ?? [];
   const descargables = filas.filter((a) => elegidas.has(a.id) && a.estado !== 'BORRADOR');
   const zip = async () => {
-    try { await bajarArchivo(`/actas/zip?ids=${descargables.map((a) => a.id).join(',')}`, `actas-${hoyCo()}.zip`); } catch (e) { toast(msg(e), 'warn'); }
+    try { await pedirArchivo('/actas/zip', { ids: descargables.map((a) => a.id) }); toast('Preparando el ZIP: se descarga solo cuando esté listo. También queda en «Descargas», arriba.'); setElegidas(new Set()); }
+    catch (e) { toast(msg(e), 'warn'); }
   };
   const cols: Column<ActaFila>[] = [
     { key: 'num', header: 'Número', render: (a) => <span className="num font-medium">{a.numero}</span>, priority: 3 },
@@ -54,7 +59,10 @@ export function ActasServidor() {
     { key: 'per', header: 'Periodo', render: (a) => <span className="num">{fmtFechaCorta(a.periodoDesde)} – {fmtFechaCorta(a.periodoHasta)}</span>, priority: 1 },
     { key: 'lin', header: 'Líneas', align: 'right', render: (a) => a._count.items, priority: 3 },
     { key: 'emi', header: 'Emitida', render: (a) => (a.emitidaEn ? fechaHoraCo(a.emitidaEn) : '—'), priority: 3 },
-    { key: 'est', header: 'Estado', render: (a) => <EstadoBadge estado={a.estado} />, priority: 3 },
+    { key: 'est', header: 'Estado', render: (a) => (
+      <span className="flex flex-wrap items-center gap-1"><EstadoBadge estado={a.estado} />
+        {a.pendientePago && <span title={`En el portal se descarga al registrar el pago de ${a.pendientePago.join(', ')}`}><Badge tone="warn"><Clock size={11} /> Pago pendiente</Badge></span>}</span>
+    ), priority: 3 },
   ];
   return (
     <>
@@ -105,7 +113,7 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
     try { await fn(); toast(ok); d.recargar(); onCambio(); } catch (e) { toast(msg(e), 'warn'); } finally { setOcupado(false); }
   };
   const copiar = async () => { if (!a) return; try { await navigator.clipboard.writeText(a.urlVerificacion); toast('Enlace de verificación copiado.'); } catch { toast(a.urlVerificacion, 'info'); } };
-  const pdf = (descargar: boolean) => a && (descargar ? bajarArchivo(`/actas/${a.id}/pdf`, `${a.numero}.pdf`) : verPdf(`/actas/${a.id}/pdf`)).catch((e) => toast(msg(e), 'warn'));
+  const pdf = (descargar: boolean) => a && abrirPdfGuardado(`/actas/${a.id}/enlace`, descargar).catch((e) => toast(msg(e), 'warn'));
   const totales = useMemo(() => {
     const m = new Map<string, number>();
     a?.items.forEach((i) => { const u = i.metrica?.abreviacion ?? i.manifiestoItem.metrica?.abreviacion ?? 'sin unidad'; m.set(u, (m.get(u) ?? 0) + Number(i.cantidadConciliada ?? 0)); });
@@ -140,6 +148,11 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
             ...(a.cargadaPor ? [['Cargada por', a.cargadaPor.nombre]] as [string, string][] : []),
             ...(a.pdfSha256 ? [['Huella del PDF (SHA-256)', <span className="num break-all text-[11px]">{a.pdfSha256}</span>]] as [string, React.ReactNode][] : []),
             ...(a.estado === 'ANULADA' ? [['Anulación', `${fechaHoraCo(a.anuladaEn)} · ${a.motivoAnulacion ?? ''}`]] as [string, string][] : []),
+            ...(a.estado === 'EMITIDA' ? [['Portal del cliente', a.pendientePago
+              ? <span className="flex flex-col items-start gap-1.5"><span className="text-warn">Se descarga cuando se registre el pago de {a.pendientePago.join(', ')} (vencida{a.pendientePago.length > 1 ? 's' : ''}).</span>
+                  {tienePermiso('conciliaciones.gestionar') && <Button size="sm" disabled={ocupado} onClick={() => hacer(() => api(`/actas/${a.id}/liberar-descarga`, { cuerpo: {} }), 'Descarga liberada: el cliente ya puede descargarlo en su portal.')}><Unlock size={14} /> Liberar descarga</Button>}</span>
+              : a.descargaLiberadaEn ? `Descarga liberada el ${fechaHoraCo(a.descargaLiberadaEn)}${a.descargaLiberadaPor ? ` por ${a.descargaLiberadaPor.nombre}` : ''}`
+              : 'Disponible para descargar']] as [string, React.ReactNode][] : []),
             ...(a.estado !== 'BORRADOR' ? [['Verificación', <span className="flex flex-wrap items-center gap-2"><span className="num text-[12px]">{a.codigoVerificacion}</span>
               <Button size="sm" variant="ghost" onClick={copiar}><Copy size={14} /> Copiar enlace</Button>
               <a href={a.urlVerificacion} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-brand underline">Abrir</a></span>]] as [string, React.ReactNode][] : []),

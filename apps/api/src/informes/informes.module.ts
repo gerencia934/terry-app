@@ -1,11 +1,11 @@
-import { Controller, ForbiddenException, Get, Injectable, Module, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { BadRequestException, Body, Controller, Get, HttpCode, Injectable, Module, Post, Query } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, fechaColombia, type Actor } from '../common/http';
+import { Trabajos, type ArchivoPreparado } from '../trabajos/trabajos.module';
 
 const id = z.string().uuid();
 const Rango = z.object({
@@ -20,7 +20,13 @@ const dia = (d: Date) => d.toISOString().slice(0, 10);
 
 @Injectable()
 class InformesService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly trabajos: Trabajos) {
+    // El Excel de costos se prepara en la cola de trabajos, no durante la petición (requisitos de producción §1)
+    this.trabajos.registrar<{ desde: string; hasta: string; vehiculoId?: string; conductorId?: string; auxiliarId?: string }>('EXCEL_COSTOS_RUTAS', {
+      permiso: 'exportar.masivo',
+      preparar: (a, p) => this.costosExcel(a, { ...p, desde: new Date(p.desde), hasta: new Date(p.hasta), formato: 'xlsx' }),
+    });
+  }
 
   /**
    * Indicadores con datos reales, sobre las conciliaciones no anuladas (lo conciliado o, si aún no, lo cargado):
@@ -216,7 +222,7 @@ class InformesService {
   }
 
   /** Costos de flete por ruta (vehículos de terceros) con la inspección del día. */
-  async costos(a: Actor, f: z.infer<typeof Rango>, res: Response) {
+  private async costosFilas(a: Actor, f: z.infer<typeof Rango>) {
     const rutas = await this.rutas(a, f);
     const filas = rutas.map((r) => ({
       fecha: dia(r.fechaProgramada), hora: r.horaProgramada ? r.horaProgramada.toISOString().slice(11, 16) : null, codigo: r.codigo,
@@ -226,10 +232,25 @@ class InformesService {
       valorFlete: r.valorFlete === null ? null : Number(r.valorFlete), inspecciones: r.preoperacionales.map((p) => p.numero), manifiestos: r.manifiestos.map((m) => m.numero),
       cancelada: !!r.estadoRecorrido?.cancela,
     }));
-    const total = filas.reduce((s, x) => s + (x.valorFlete ?? 0), 0);
-    if (f.formato === 'json') return res.json({ rutas: filas, totalFletes: total });
-    // Exportación a Excel: solo roles autorizados, y queda en la auditoría (requisitos de producción §4)
-    if (!a.permisos.includes('*') && !a.permisos.includes('exportar.masivo')) throw new ForbiddenException({ mensaje: `Su rol (${a.rol}) no tiene el permiso «exportar.masivo».` });
+    return { filas, total: filas.reduce((s, x) => s + (x.valorFlete ?? 0), 0) };
+  }
+
+  async costos(a: Actor, f: z.infer<typeof Rango>) {
+    if (f.formato === 'xlsx') throw new BadRequestException({ mensaje: 'El Excel se pide con «Exportar a Excel»: se prepara aparte y queda en «Mis descargas».' });
+    const { filas, total } = await this.costosFilas(a, f);
+    return { rutas: filas, totalFletes: total };
+  }
+
+  /** Pide el Excel de costos: responde de inmediato y la cola lo prepara. */
+  async encolarCostos(a: Actor, f: z.infer<typeof Rango>) {
+    return this.trabajos.encolar(a, 'EXCEL_COSTOS_RUTAS', `Costos de flete por ruta, ${dia(f.desde)} a ${dia(f.hasta)}`, {
+      desde: dia(f.desde), hasta: dia(f.hasta), ...(f.vehiculoId ? { vehiculoId: f.vehiculoId } : {}), ...(f.conductorId ? { conductorId: f.conductorId } : {}), ...(f.auxiliarId ? { auxiliarId: f.auxiliarId } : {}),
+    });
+  }
+
+  /** Exportación a Excel: solo roles autorizados (lo exige la cola) y queda en la auditoría (requisitos de producción §4). */
+  private async costosExcel(a: Actor, f: z.infer<typeof Rango>): Promise<ArchivoPreparado> {
+    const { filas, total } = await this.costosFilas(a, f);
     await this.audit.registrar(a, 'informe', 'costos-rutas', 'EXPORTAR', undefined, { desde: dia(f.desde), hasta: dia(f.hasta), rutas: filas.length });
     const wb = new ExcelJS.Workbook(); wb.creator = 'TERRY-GO · Terra Viva S.A.S. E.S.P.';
     const ws = wb.addWorksheet('Costos por ruta');
@@ -240,9 +261,7 @@ class InformesService {
     filas.forEach((x) => ws.addRow([x.fecha, x.hora, x.codigo, x.placa, x.tipo, x.marca, x.capacidadKg, x.volumenM3, x.proveedor, x.nitProveedor, x.valorFlete, x.inspecciones.join(', '), x.manifiestos.join(', '), x.cancelada ? 'Sí' : 'No']));
     ws.addRow([]); ws.addRow(['Total fletes', '', '', '', '', '', '', '', '', '', total]).font = { bold: true };
     ws.columns.forEach((c, i) => { c.width = [11, 7, 14, 9, 18, 12, 13, 12, 28, 14, 13, 18, 22, 10][i] ?? 12; });
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="costos-rutas-${dia(f.desde)}-${dia(f.hasta)}.xlsx"`);
-    res.send(Buffer.from(await wb.xlsx.writeBuffer()));
+    return { buf: Buffer.from(await wb.xlsx.writeBuffer()), nombre: `costos-rutas-${dia(f.desde)}-${dia(f.hasta)}.xlsx`, ext: 'xlsx' };
   }
 }
 
@@ -253,7 +272,8 @@ class InformesController {
   @Get('inicio') inicio(@ActorActual() a: Actor) { return this.s.inicio(a); }
   @Permiso('informes.ver') @Get('indicadores') indicadores(@ActorActual() a: Actor, @Query(new Zod(RangoIndicadores)) f: z.infer<typeof RangoIndicadores>) { return this.s.indicadores(a, f); }
   @Permiso('informes.ver') @Get('rutas/rendimiento') rendimiento(@ActorActual() a: Actor, @Query(new Zod(Rango)) f: z.infer<typeof Rango>) { return this.s.rendimiento(a, f); }
-  @Permiso('informes.ver') @Get('rutas/costos') costos(@ActorActual() a: Actor, @Query(new Zod(Rango)) f: z.infer<typeof Rango>, @Res() res: Response) { return this.s.costos(a, f, res); }
+  @Permiso('informes.ver') @Get('rutas/costos') costos(@ActorActual() a: Actor, @Query(new Zod(Rango)) f: z.infer<typeof Rango>) { return this.s.costos(a, f); }
+  @Permiso('exportar.masivo') @Post('rutas/costos/excel') @HttpCode(202) costosExcel(@ActorActual() a: Actor, @Body(new Zod(Rango)) f: z.infer<typeof Rango>) { return this.s.encolarCostos(a, f); }
 }
 
 @Module({ controllers: [InformesController], providers: [InformesService] })

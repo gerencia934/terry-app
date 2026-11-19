@@ -28,6 +28,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AuthService, hashClave } from '../auth/auth.service';
 import { ManifiestosModule, ManifiestosService } from '../manifiestos/manifiestos.module';
 import { ImportacionModule, ImportacionService } from '../importacion/importacion.module';
+import { certificadosRetenidos, mensajePendientePago } from '../actas/cartera';
 
 type Tx = Prisma.TransactionClient;
 const Pagina = z.object({ pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
@@ -225,8 +226,21 @@ export class PortalService {
           destino: { select: { razonSocial: true, esPropio: true } }, _count: { select: { items: true } },
         } }),
       ]);
-      return { total, pagina, porPagina, filas };
+      // Sujeto al pago: con una factura vencida y sin pagar el certificado se ve pero no se descarga (mensaje amable)
+      const empresa = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
+      const retenidos = await certificadosRetenidos(tx, empresa.configuracion, filas.map((x) => x.id));
+      return { total, pagina, porPagina, filas: filas.map((x) => {
+        const facturas = retenidos.get(x.id);
+        return { ...x, pendientePago: facturas ? { facturas, mensaje: mensajePendientePago(facturas) } : null };
+      }) };
     });
+  }
+
+  /** Certificado del cliente con facturas vencidas y sin pagar: no se entrega el enlace (ni se sirve uno ya entregado). */
+  private async exigirPago(tx: Tx, a: Actor, actaId: string) {
+    const empresa = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
+    const facturas = (await certificadosRetenidos(tx, empresa.configuracion, [actaId])).get(actaId);
+    if (facturas) throw new ForbiddenException({ mensaje: mensajePendientePago(facturas), codigo: 'PENDIENTE_PAGO', facturas });
   }
 
   /**
@@ -382,6 +396,7 @@ export class PortalService {
         ? await tx.acta.findFirst({ where: { id, clienteId: a.clienteId, estado: 'EMITIDA', ...this.actaSede(sedes) }, select: { id: true } })
         : await tx.manifiesto.findFirst({ where: { id, clienteId: a.clienteId, estado: 'REALIZADO', ...(sedes.length ? { items: { some: { sucursalId: { in: sedes } } } } : {}) }, select: { id: true } });
       if (!ok) throw new NotFoundException({ mensaje: tipo === 'acta' ? 'Certificado no encontrado.' : 'Manifiesto no encontrado.' });
+      if (tipo === 'acta') await this.exigirPago(tx, a, id);
     });
     const token = await this.jwt.signAsync({ t: tipo, id, sub: a.id, emp: a.empresaId, cli: a.clienteId }, { secret: this.claveDescargas, expiresIn: '5m', issuer: 'terraviva-descargas' });
     return { url: `/descargas/${token}`, vence: new Date(Date.now() + 5 * 60_000).toISOString() };
@@ -393,20 +408,25 @@ export class PortalService {
     try { p = await this.jwt.verifyAsync(token, { secret: this.claveDescargas, issuer: 'terraviva-descargas' }); }
     catch { throw new ForbiddenException({ mensaje: 'El enlace de descarga venció o no es válido. Pídalo de nuevo desde el portal.' }); }
     const a: Actor = { id: p.sub, empresaId: p.emp, clienteId: p.cli, rol: ROL_PORTAL, permisos: [], nombre: 'portal' };
-    const doc = await this.conCliente(a, async (tx) => (p.t === 'acta'
-      ? tx.acta.findFirst({ where: { id: p.id, clienteId: p.cli, estado: 'EMITIDA' }, select: { numero: true, pdfUrl: true, archivoUrl: true } })
-      : tx.manifiesto.findFirst({ where: { id: p.id, clienteId: p.cli, estado: 'REALIZADO' }, select: { numero: true } })));
+    const doc = await this.conCliente(a, async (tx) => {
+      if (p.t !== 'acta') return tx.manifiesto.findFirst({ where: { id: p.id, clienteId: p.cli, estado: 'REALIZADO' }, select: { numero: true } });
+      const acta = await tx.acta.findFirst({ where: { id: p.id, clienteId: p.cli, estado: 'EMITIDA' }, select: { numero: true, pdfUrl: true, archivoUrl: true } });
+      if (acta) await this.exigirPago(tx, a, p.id);
+      return acta;
+    });
     if (!doc) throw new NotFoundException({ mensaje: 'Documento no encontrado.' });
-    let buf: Buffer, nombre: string;
     if (p.t === 'acta') {
+      // El PDF guardado se entrega con un enlace firmado del almacenamiento (en S3 no pasa por el API)
       const d = doc as { numero: string; pdfUrl: string | null; archivoUrl: string | null };
       const clave = d.pdfUrl ?? d.archivoUrl;
       if (!clave) throw new NotFoundException({ mensaje: 'El certificado aún no tiene PDF.' });
-      buf = (await this.archivos.leer(clave, p.emp)).buf; nombre = `certificado-${d.numero}.pdf`;
-    } else {
-      const r = await this.manifiestos.pdfBuffer(a, p.id); buf = r.buf; nombre = `manifiesto-${r.numero}.pdf`;
+      await this.audit.registrar({ id: p.sub }, 'acta', p.id, 'DESCARGA_PORTAL');
+      return this.archivos.servir(res, clave, p.emp, { nombre: `certificado-${d.numero}.pdf` });
     }
-    await this.audit.registrar({ id: p.sub }, p.t === 'acta' ? 'acta' : 'manifiesto', p.id, 'DESCARGA_PORTAL');
+    // El manifiesto se arma en el momento (no está guardado): sale del API
+    const r = await this.manifiestos.pdfBuffer(a, p.id);
+    const buf = r.buf, nombre = `manifiesto-${r.numero}.pdf`;
+    await this.audit.registrar({ id: p.sub }, 'manifiesto', p.id, 'DESCARGA_PORTAL');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${nombre}"`);
     res.setHeader('Cache-Control', 'private, no-store');

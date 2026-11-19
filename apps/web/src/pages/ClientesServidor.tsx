@@ -130,7 +130,7 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
       <DefList items={[
         ['NIT', <span className="num">{conDv(c)}</span>], ['Sector', c.sector ?? '—'],
         ['Negociación', NEGOCIACION[c.tipoNegociacion] ?? c.tipoNegociacion], ['Forma de pago', PAGO[c.formaPago] ?? c.formaPago],
-        ['Correo de facturación', c.emailFacturacion ?? '—'], ['Asesor comercial', c.asesor?.nombre ?? '—'], ['Representante legal', c.representanteLegal ?? '—'],
+        ['Correo de facturación', c.emailFacturacion ?? '—'], ['Asesor comercial', c.asesor?.nombre ?? '—'], ['Representante legal', c.representanteLegal ?? <span className="font-medium text-warn">Falta (es obligatorio)</span>],
         ['Declaraciones', `${c.declaracionesActivas} activas de ${c._count.declaraciones}`], ['Solicitudes · manifiestos', `${c._count.solicitudes} · ${c._count.manifiestos}`],
       ]} />
       <div className="flex flex-wrap gap-2">
@@ -220,7 +220,9 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
     setEnviando(true);
-    const datos = { razonSocial: v.razonSocial, tipo: v.tipo, sector: v.sector, tipoNegociacion: v.tipoNegociacion, formaPago: v.formaPago, emailFacturacion: v.emailFacturacion, asesorId: v.asesorId || null, representanteLegal: v.representanteLegal };
+    const datos = { razonSocial: v.razonSocial, tipo: v.tipo, sector: v.sector, tipoNegociacion: v.tipoNegociacion, formaPago: v.formaPago, emailFacturacion: v.emailFacturacion, asesorId: v.asesorId || null,
+      // Obligatorio: vacío no se envía y el servidor explica qué falta (inactivar un cliente antiguo no lo exige)
+      ...(v.representanteLegal.trim() ? { representanteLegal: v.representanteLegal } : {}) };
     try {
       if (id) {
         const r = await api<{ id: string; inactivadas: number }>(`/clientes/${id}`, { metodo: 'PATCH', cuerpo: { ...datos, activo: v.activo, ...(v.causalId && { causalId: v.causalId }) } });
@@ -253,7 +255,7 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
         <Field label="Forma de pago" id="fc-pago"><Select id="fc-pago" value={v.formaPago} onChange={set('formaPago')}>{Object.entries(PAGO).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
       </div>
       <Field label="Correo de facturación" id="fc-mail"><Input id="fc-mail" type="email" value={v.emailFacturacion} onChange={set('emailFacturacion')} maxLength={150} /></Field>
-      <Field label="Representante legal" id="fc-rep" hint="Lo pide la constancia de RCD del certificado (Anexo II de la Res. 1257 de 2021)."><Input id="fc-rep" value={v.representanteLegal} onChange={set('representanteLegal')} maxLength={150} /></Field>
+      <Field label="Representante legal *" id="fc-rep" hint="Obligatorio. Si es persona natural, su propio nombre. Sale en la constancia de RCD del certificado (Anexo II de la Res. 1257 de 2021)."><Input id="fc-rep" value={v.representanteLegal} onChange={set('representanteLegal')} maxLength={150} /></Field>
       <Field label="Asesor comercial" id="fc-ase" hint="Aparece en las conciliaciones e informes por comercial.">
         <Select id="fc-ase" value={v.asesorId} onChange={set('asesorId')}><option value="">Sin asesor</option>{(asesores.datos ?? []).map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.rol.nombre}</option>)}</Select>
       </Field>

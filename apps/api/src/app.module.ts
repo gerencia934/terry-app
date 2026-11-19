@@ -13,6 +13,7 @@ import { LogisticaModule } from './rutas/logistica.module';
 import { CumplimientoModule } from './permisos/cumplimiento.module';
 import { ImportacionModule } from './importacion/importacion.module';
 import { ArchivosModule } from './common/archivos';
+import { TrabajosModule } from './trabajos/trabajos.module';
 import { ManifiestosModule } from './manifiestos/manifiestos.module';
 import { ConciliacionesModule } from './conciliaciones/conciliaciones.module';
 import { ActasModule } from './actas/actas.module';
@@ -35,7 +36,7 @@ import { PortalModule } from './portal/portal.module';
         ],
       }),
     }),
-    PrismaModule, ComunModule, ArchivosModule, AuthModule,
+    PrismaModule, ComunModule, ArchivosModule, TrabajosModule, AuthModule,
     ClientesModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
     ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule,
   ],

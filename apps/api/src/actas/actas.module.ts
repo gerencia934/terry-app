@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
@@ -13,6 +13,8 @@ import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, paginar, type Actor } from '../common/http';
 import type { Config } from '../config';
 import { pdfActa, type BloqueRcd, type ContenidoActa } from './pdf';
+import { certificadosRetenidos } from './cartera';
+import { Trabajos, type ArchivoPreparado } from '../trabajos/trabajos.module';
 import { TIPOS_RCD } from '@terraviva/shared';
 
 type Tx = Prisma.TransactionClient;
@@ -44,7 +46,8 @@ const Cargar = z.object({
   tipo: z.nativeEnum(TipoActa).default('DISPOSICION'), clienteId: id, destinoId: id, periodoDesde: z.coerce.date(), periodoHasta: z.coerce.date(),
   conciliacionItemIds: idsCsv,
 });
-const Zip = z.object({ ids: idsCsv.pipe(z.array(id).min(1).max(200)) });
+const Zip = z.object({ ids: z.array(id).min(1).max(500) });
+const EnlacePdf = z.object({ descargar: z.boolean().default(false) });
 
 const lineasActa = {
   orderBy: [{ conciliacion: { manifiesto: { fechaServicio: 'asc' as const } } }, { id: 'asc' as const }],
@@ -62,7 +65,11 @@ type LineaActa = Prisma.ConciliacionItemGetPayload<{ include: typeof lineasActa.
 
 @Injectable()
 class ActasService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly cfg: ConfigService<Config, true>) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly cfg: ConfigService<Config, true>,
+    private readonly trabajos: Trabajos) {
+    // El ZIP de certificados se prepara en la cola de trabajos, no durante la petición (requisitos de producción §1)
+    this.trabajos.registrar<{ ids: string[] }>('ZIP_ACTAS', { permiso: 'exportar.masivo', preparar: (a, p) => this.zipPreparado(a, p.ids) });
+  }
 
   private async propia(a: Actor, id: string) {
     const x = await this.db.acta.findFirst({ where: { id, empresaId: a.empresaId } });
@@ -104,20 +111,43 @@ class ActasService {
         cliente: { select: { razonSocial: true } }, destino: { select: { razonSocial: true } }, emitidaPor: { select: { nombre: true } }, cargadaPor: { select: { nombre: true } },
         _count: { select: { items: true } } } }),
     ]);
-    return { total, pagina, porPagina, filas: filas.map(({ contenido: _c, ...x }) => x) };
+    // Cartera: los emitidos con facturas vencidas y sin pagar quedan retenidos en el portal (la oficina los ve y los libera)
+    const retenidos = await this.retenidos(a, filas.filter((x) => x.estado === 'EMITIDA').map((x) => x.id));
+    return { total, pagina, porPagina, filas: filas.map(({ contenido: _c, ...x }) => ({ ...x, pendientePago: retenidos.get(x.id) ?? null })) };
+  }
+
+  private async retenidos(a: Actor, ids: string[]) {
+    if (!ids.length) return new Map<string, string[]>();
+    const empresa = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
+    return certificadosRetenidos(this.db, empresa.configuracion, ids);
   }
 
   async obtener(a: Actor, id: string) {
     const x = await this.db.acta.findFirst({ where: { id, empresaId: a.empresaId }, include: {
       cliente: { select: { id: true, razonSocial: true, nit: true } }, destino: { select: { id: true, razonSocial: true } },
-      emitidaPor: { select: { nombre: true } }, cargadaPor: { select: { nombre: true } },
+      emitidaPor: { select: { nombre: true } }, cargadaPor: { select: { nombre: true } }, descargaLiberadaPor: { select: { nombre: true } },
       items: { include: { metrica: { select: { abreviacion: true } }, disposicion: { select: { nombre: true, propia: true } },
         conciliacion: { select: { manifiesto: { select: { numero: true, fechaServicio: true, destino: { select: { razonSocial: true } } } } } },
         manifiestoItem: { select: { declaracion: { select: { nombre: true } }, sucursal: { select: { nombre: true } }, metrica: { select: { abreviacion: true } },
           disposicion: { select: { nombre: true, propia: true } } } } } },
     } });
     if (!x) throw new NotFoundException({ mensaje: 'Acta no encontrada.' });
-    return { ...x, urlVerificacion: this.urlVerificacion(x.codigoVerificacion) };
+    const pendientePago = x.estado === 'EMITIDA' ? (await this.retenidos(a, [x.id])).get(x.id) ?? null : null;
+    return { ...x, urlVerificacion: this.urlVerificacion(x.codigoVerificacion), pendientePago };
+  }
+
+  /**
+   * Libera la descarga en el portal de un certificado con facturas vencidas (acuerdo de pago, crédito especial).
+   * No cambia el certificado: solo deja constancia de quién lo liberó y cuándo.
+   */
+  async liberarDescarga(a: Actor, id: string) {
+    const acta = await this.propia(a, id);
+    if (acta.estado !== 'EMITIDA') throw new BadRequestException({ mensaje: 'Solo se libera la descarga de un certificado emitido.' });
+    if (acta.descargaLiberadaEn) throw new BadRequestException({ mensaje: `La descarga del certificado ${acta.numero} ya está liberada.` });
+    const facturas = (await this.retenidos(a, [id])).get(id) ?? [];
+    const r = await this.db.acta.update({ where: { id }, data: { descargaLiberadaEn: new Date(), descargaLiberadaPorId: a.id } });
+    await this.audit.registrar(a, 'acta', id, 'LIBERAR_DESCARGA', { facturasPendientes: facturas }, { descargaLiberadaEn: r.descargaLiberadaEn });
+    return { id, numero: r.numero, descargaLiberadaEn: r.descargaLiberadaEn };
   }
 
   async crear(a: Actor, b: z.infer<typeof Crear>) {
@@ -281,6 +311,9 @@ class ActasService {
       const k = acta.generadorNit ? acta.generadorNit : acta.cliente.tipo === 'GESTOR' ? (x.sucursal.generadorNit ?? x.sucursal.id) : acta.cliente.id;
       porGenerador.set(k, [...(porGenerador.get(k) ?? []), x]);
     }
+    // El representante legal del cliente es obligatorio y la constancia de RCD lo lleva (cliente directo: él es el generador)
+    if (exigirSoporte && porGenerador.size && !acta.generadorNit && acta.cliente.tipo !== 'GESTOR' && !acta.cliente.representanteLegal?.trim())
+      throw new BadRequestException({ mensaje: `No se puede emitir: la constancia de RCD lleva el representante legal de ${acta.cliente.razonSocial}. Complételo en Clientes › ficha del cliente.` });
     const contacto = conf.contacto ?? {};
     const rcd: BloqueRcd[] = [...porGenerador.values()].map((ls) => {
       const s0 = ls[0].sucursal;
@@ -387,25 +420,32 @@ class ActasService {
     return (await this.archivos.leer(clave, a.empresaId)).buf;
   }
 
-  async pdf(a: Actor, id: string, res: Response) {
+  /** PDF guardado del acta: verifica la empresa y entrega un enlace firmado de 5 minutos (en S3 no pasa por el API). */
+  private async pdfGuardado(a: Actor, id: string, descargar: boolean) {
     const acta = await this.propia(a, id);
-    const buf = await this.archivoPdf(a, acta);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${acta.numero}.pdf"`);
-    res.send(buf);
+    const clave = acta.pdfUrl ?? acta.archivoUrl;
+    if (!clave) throw new NotFoundException({ mensaje: `El acta ${acta.numero} aún no tiene PDF (está en borrador).` });
+    return { clave, opciones: { nombre: `${acta.numero}${acta.estado === 'ANULADA' ? '-ANULADA' : ''}.pdf`, adjunto: descargar } };
+  }
+  async enlacePdf(a: Actor, id: string, descargar: boolean) { const x = await this.pdfGuardado(a, id, descargar); return this.archivos.enlace(x.clave, a.empresaId, x.opciones); }
+  /** Compatibilidad: redirige al enlace firmado. */
+  async pdf(a: Actor, id: string, descargar: boolean, res: Response) { const x = await this.pdfGuardado(a, id, descargar); return this.archivos.servir(res, x.clave, a.empresaId, x.opciones); }
+
+  /** Descarga masiva: pide el ZIP y responde de inmediato; la cola lo prepara y «Mis descargas» avisa. */
+  async encolarZip(a: Actor, ids: string[]) {
+    const n = await this.db.acta.count({ where: { id: { in: ids }, empresaId: a.empresaId, estado: { not: 'BORRADOR' } } });
+    if (!n) throw new NotFoundException({ mensaje: 'No hay actas emitidas en la selección.' });
+    return this.trabajos.encolar(a, 'ZIP_ACTAS', `${n} ${n === 1 ? 'certificado' : 'certificados'} en ZIP`, { ids });
   }
 
-  /** Descarga masiva: varias actas en un ZIP. */
-  async zip(a: Actor, ids: string[], res: Response) {
-    const actas = await this.db.acta.findMany({ where: { id: { in: ids }, empresaId: a.empresaId, estado: { not: 'BORRADOR' } } });
+  private async zipPreparado(a: Actor, ids: string[]): Promise<ArchivoPreparado> {
+    const actas = await this.db.acta.findMany({ where: { id: { in: ids }, empresaId: a.empresaId, estado: { not: 'BORRADOR' } }, orderBy: { numero: 'asc' } });
     if (!actas.length) throw new NotFoundException({ mensaje: 'No hay actas emitidas en la selección.' });
     const zip = new JSZip();
     for (const x of actas) zip.file(`${x.numero}${x.estado === 'ANULADA' ? '-ANULADA' : ''}.pdf`, await this.archivoPdf(a, x));
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     await this.audit.registrar(a, 'acta', actas.map((x) => x.numero).join(',').slice(0, 200), 'EXPORTAR', undefined, { formato: 'zip', actas: actas.length });
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="actas-${new Date().toISOString().slice(0, 10)}.zip"`);
-    res.send(buf);
+    return { buf, nombre: `certificados-${fechaColombia().toISOString().slice(0, 10)}.zip`, ext: 'zip' };
   }
 
   /** Verificación pública del QR: solo lo mínimo, nunca datos del cliente. */
@@ -426,15 +466,18 @@ class ActasController {
   constructor(private readonly s: ActasService) {}
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get('pendientes') pendientes(@ActorActual() a: Actor, @Query(new Zod(Pendientes)) f: z.infer<typeof Pendientes>) { return this.s.pendientes(a, f); }
-  @Permiso('exportar.masivo') @Get('zip') zip(@ActorActual() a: Actor, @Query(new Zod(Zip)) q: z.infer<typeof Zip>, @Res() res: Response) { return this.s.zip(a, q.ids, res); }
+  @Permiso('exportar.masivo') @Post('zip') @HttpCode(202) zip(@ActorActual() a: Actor, @Body(new Zod(Zip)) b: z.infer<typeof Zip>) { return this.s.encolarZip(a, b.ids); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
-  @Get(':id/pdf') pdf(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.pdf(a, id, res); }
+  @Get(':id/pdf') pdf(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Query('descargar') d: string | undefined, @Res() res: Response) { return this.s.pdf(a, id, d === '1', res); }
+  @Post(':id/enlace') @HttpCode(200) enlace(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EnlacePdf)) b: z.infer<typeof EnlacePdf>) { return this.s.enlacePdf(a, id, b.descargar); }
   @Permiso('actas.emitir') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(Crear)) b: z.infer<typeof Crear>) { return this.s.crear(a, b); }
   @Permiso('actas.emitir') @Post('cargar') @UseInterceptors(archivo)
   cargar(@ActorActual() a: Actor, @Body(new Zod(Cargar)) b: z.infer<typeof Cargar>, @UploadedFile() f?: Express.Multer.File) { return this.s.cargar(a, b, f); }
   @Permiso('actas.emitir') @Post(':id/items') items(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Items)) b: z.infer<typeof Items>) { return this.s.items(a, id, b); }
   @Permiso('actas.emitir') @Post(':id/emitir') emitir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.emitir(a, id); }
   @Permiso('actas.emitir') @Patch('lineas/:lineaId/certificado-aliado') certificadoAliado(@ActorActual() a: Actor, @Param('lineaId', ParseUUIDPipe) lineaId: string, @Body(new Zod(CertificadoAliado)) b: z.infer<typeof CertificadoAliado>) { return this.s.certificadoAliado(a, lineaId, b); }
+  // Cartera: quien registra facturas y pagos libera la descarga en el portal de un certificado con facturas vencidas
+  @Permiso('conciliaciones.gestionar') @Post(':id/liberar-descarga') liberar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.liberarDescarga(a, id); }
   @Permiso('actas.emitir') @Post(':id/anular') anular(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Anular)) b: z.infer<typeof Anular>) { return this.s.anular(a, id, b); }
 }
 
