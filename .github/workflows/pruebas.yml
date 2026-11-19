@@ -1,0 +1,113 @@
+# Pruebas automáticas en cada cambio (requisitos de producción §6).
+# Compila todo, migra y siembra una base nueva, enciende el API y corre las pruebas de punta a punta
+# y las reglas de la base. Si algo falla, el cambio no se debe unir a main.
+name: Pruebas
+
+on:
+  push:
+    branches: [main, 'fase-*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    name: Compilar y probar
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: terraviva
+          POSTGRES_PASSWORD: terraviva
+          POSTGRES_DB: terraviva_ci
+          TZ: America/Bogota
+          PGTZ: America/Bogota
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U terraviva -d terraviva_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Base desechable del contenedor de pruebas (no es una credencial real)
+      DATABASE_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_ci
+      TZ: America/Bogota
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar dependencias de producción (falla con vulnerabilidades críticas)
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Secretos de prueba (aleatorios en cada corrida)
+        run: |
+          JWT="$(openssl rand -hex 48)"
+          CLAVE="Ci-$(openssl rand -hex 10)-9"
+          echo "::add-mask::$JWT"
+          echo "::add-mask::$CLAVE"
+          {
+            echo "JWT_SECRET=$JWT"
+            echo "SEED_ADMIN_PASSWORD=$CLAVE"
+            echo "ADMIN_PASSWORD=$CLAVE"
+          } >> "$GITHUB_ENV"
+
+      - name: Compilar las reglas compartidas
+        run: npm run build -w @terraviva/shared
+
+      - name: Validar el esquema y generar el cliente de base de datos
+        run: |
+          npm run validate -w @terraviva/db
+          npm run generate -w @terraviva/db
+
+      - name: Migrar y sembrar la base
+        run: |
+          npm run db:migrate
+          npm run db:seed
+
+      - name: Compilar el API
+        run: npm run build -w @terraviva/api
+
+      - name: Compilar la app web
+        run: npm run build -w @terraviva/web
+
+      - name: Encender el API
+        working-directory: apps/api
+        run: |
+          nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/api/v1/salud > /dev/null && exit 0
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/api.log"
+          exit 1
+
+      - name: Pruebas de punta a punta del API
+        run: npm run test:e2e
+
+      - name: Pruebas de las reglas de la base (en una base aparte)
+        env:
+          DATABASE_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_reglas
+        run: |
+          psql "postgresql://terraviva:terraviva@localhost:5432/terraviva_ci" -c "CREATE DATABASE terraviva_reglas"
+          npm run db:migrate
+          npm run db:seed
+          npm run test:reglas -w @terraviva/db
+
+      - name: Registro del API (solo si algo falló)
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/api.log" || true

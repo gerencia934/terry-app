@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { middlewareContexto } from './common/contexto';
 import type { Config } from './config';
 
 async function arrancar() {
@@ -13,6 +14,7 @@ async function arrancar() {
   app.set('trust proxy', 1);
   app.useBodyParser('json', { limit: '1mb' }); // la firma táctil viaja como imagen PNG en el cuerpo
   app.use(helmet());
+  app.use(middlewareContexto); // IP y navegador de cada petición, para la auditoría
   app.enableCors({ origin: cfg.get('CORS_ORIGINS', { infer: true }).split(',').map((s) => s.trim()), credentials: false, maxAge: 600 });
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();

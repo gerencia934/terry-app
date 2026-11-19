@@ -35,7 +35,22 @@ export class AuthService {
     }
     await this.db.usuario.update({ where: { id: u.id }, data: { intentosFallidos: 0, bloqueadoHasta: null, ultimoLogin: new Date() } });
     await this.audit.registrar({ id: u.id }, 'usuario', u.id, 'LOGIN', undefined, { ip: meta.ip });
+    await this.avisarIngresoNuevo(u, meta);
     return this.emitir(u.id, meta);
+  }
+
+  /** Aviso por correo cuando se entra desde una IP o un navegador no usados en 90 días (no en el primer ingreso). */
+  private async avisarIngresoNuevo(u: { id: string; email: string; nombre: string }, meta: { ip?: string; ua?: string }) {
+    const desde = new Date(Date.now() - 90 * 86_400_000);
+    const [previas, conocida] = await Promise.all([
+      this.db.sesion.count({ where: { usuarioId: u.id } }),
+      this.db.sesion.findFirst({ where: { usuarioId: u.id, ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), creadaEn: { gt: desde } }, select: { id: true } }),
+    ]);
+    if (!previas || conocida) return;
+    const hora = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+    this.correo.enviar(u.email, 'Nuevo ingreso a su cuenta · TERRY-GO',
+      `Hola ${u.nombre}:\n\nSe ingresó a su cuenta el ${hora} desde la IP ${meta.ip ?? 'desconocida'} (${meta.ua?.slice(0, 120) ?? 'navegador desconocido'}).\n\nSi no fue usted, cambie su contraseña y cierre la sesión en todos los dispositivos.`)
+      .catch(() => undefined); // el aviso no debe impedir el ingreso
   }
 
   /** Crea una sesión: token de acceso corto (JWT) + token de renovación opaco «sesionId.secreto». */
@@ -44,10 +59,14 @@ export class AuthService {
     const secreto = randomBytes(32).toString('base64url');
     const sesion = await this.db.sesion.create({ data: { usuarioId, tokenHash: sha256(secreto), ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), expiraEn: new Date(Date.now() + this.cfg.get('REFRESH_DIAS', { infer: true }) * 86_400_000) } });
     const permisos = u.rol.permisos.map((p) => p.permiso.codigo);
-    const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id });
+    // Ley 1581: sin la versión vigente de la política aceptada, el token solo sirve para aceptarla (ver el guard)
+    const version = this.cfg.get('POLITICA_DATOS_VERSION', { infer: true });
+    const aceptada = u.datosPoliticaVersion === version;
+    const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id, dat: aceptada });
     return {
       accessToken, refreshToken: `${sesion.id}.${secreto}`, expiraEnSeg: this.cfg.get('JWT_ACCESS_MIN', { infer: true }) * 60,
-      usuario: { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol.nombre, permisos, empresa: { id: u.empresa.id, razonSocial: u.empresa.razonSocial, nit: u.empresa.nit } },
+      usuario: { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol.nombre, permisos, empresa: { id: u.empresa.id, razonSocial: u.empresa.razonSocial, nit: u.empresa.nit },
+        requiereAceptarDatos: !aceptada, politicaDatos: { version, url: this.cfg.get('POLITICA_DATOS_URL', { infer: true }) || null } },
     };
   }
 
@@ -66,6 +85,22 @@ export class AuthService {
     if (!u?.activo) throw new UnauthorizedException({ mensaje: 'Usuario inactivo.' });
     await this.db.sesion.update({ where: { id: s.id }, data: { revocadaEn: new Date() } });
     return this.emitir(s.usuarioId, meta);
+  }
+
+  /** Acepta la política de datos vigente: queda registrada (versión, fecha, IP) y se entrega una sesión nueva. */
+  async aceptarDatos(a: Actor, version: string, meta: { ip?: string; ua?: string }) {
+    const vigente = this.cfg.get('POLITICA_DATOS_VERSION', { infer: true });
+    if (version !== vigente) throw new ForbiddenException({ mensaje: `La política vigente es la versión ${vigente}: recargue la página.` });
+    await this.db.usuario.update({ where: { id: a.id }, data: { datosPoliticaVersion: vigente, datosAceptadosEn: new Date(), datosAceptadosIp: meta.ip?.slice(0, 64) ?? null } });
+    await this.audit.registrar(a, 'usuario', a.id, 'ACEPTAR_DATOS', undefined, { version: vigente });
+    if (a.sesionId) await this.db.sesion.updateMany({ where: { id: a.sesionId, revocadaEn: null }, data: { revocadaEn: new Date() } });
+    return this.emitir(a.id, meta);
+  }
+
+  /** Cierra la sesión en todos los dispositivos (por ejemplo, si perdió el celular). */
+  async salirTodos(a: Actor) {
+    const r = await this.db.sesion.updateMany({ where: { usuarioId: a.id, revocadaEn: null }, data: { revocadaEn: new Date() } });
+    await this.audit.registrar(a, 'usuario', a.id, 'SALIR_TODOS', undefined, { sesiones: r.count });
   }
 
   async salir(token: string) {

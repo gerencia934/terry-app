@@ -5,14 +5,17 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Config } from '../config';
 import type { Actor } from './http';
+import { contextoPeticion } from './contexto';
 
-/** Bitácora de cambios (soporte ante la autoridad ambiental y Ley 1581 de 2012). */
+/** Bitácora de cambios (soporte ante la autoridad ambiental y Ley 1581 de 2012). Guarda también la IP y el navegador
+ *  de la petición; la base impide modificarla o borrarla (requisitos de producción §3). */
 @Injectable()
 export class Auditoria {
   constructor(private readonly db: PrismaService) {}
   registrar(actor: Actor | { id: string } | null, entidad: string, entidadId: string, accion: string, antes?: unknown, despues?: unknown, tx?: Prisma.TransactionClient) {
     return (tx ?? this.db).auditoria.create({
-      data: { usuarioId: actor?.id ?? null, entidad, entidadId, accion, antes: (antes ?? undefined) as Prisma.InputJsonValue, despues: (despues ?? undefined) as Prisma.InputJsonValue },
+      data: { usuarioId: actor?.id ?? null, entidad, entidadId, accion, antes: (antes ?? undefined) as Prisma.InputJsonValue, despues: (despues ?? undefined) as Prisma.InputJsonValue,
+        ip: contextoPeticion.getStore()?.ip ?? null, agente: contextoPeticion.getStore()?.agente ?? null },
     });
   }
 }

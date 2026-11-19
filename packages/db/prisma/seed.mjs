@@ -18,7 +18,7 @@ const PERMISOS = [
   ['manifiestos.operar', 'Diligenciar, firmar y grabar manifiestos'], ['manifiestos.anular', 'Anular manifiestos'],
   ['conciliaciones.gestionar', 'Conciliar cantidades y registrar facturas y pagos'], ['conciliaciones.aprobar', 'Aprobar y reabrir conciliaciones'],
   ['actas.emitir', 'Emitir, cargar y anular actas y certificados'], ['informes.ver', 'Ver informes de operación'],
-  ['empresa.configurar', 'Configurar datos de la empresa, numeración y textos legales del certificado'],
+  ['exportar.masivo', 'Exportar a Excel y descargar documentos en bloque (queda en la auditoría)'],
   ['rutas.programar', 'Programar rutas'], ['rutas.operar', 'Operar rutas en campo (preoperacional, paradas, estados)'],
   ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel'],
   ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
@@ -26,10 +26,10 @@ const PERMISOS = [
 const ROLES = {
   Administrador: ['*'],
   Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar',
-    'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver'],
-  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver'],
-  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver'],
-  Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver'],
+    'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'],
+  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'],
+  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo'],
+  Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo'],
   Conductor: ['rutas.operar', 'manifiestos.operar'],
   Auxiliar: ['rutas.operar', 'manifiestos.operar'],
 };

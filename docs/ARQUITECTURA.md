@@ -16,7 +16,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 61 tablas, 10 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 62 tablas, 11 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Archivos | S3 / Cloudflare R2 (fotos, firmas, PDF) | Fase 2 |
@@ -27,7 +27,7 @@ certificado ante la CAS o el cliente.
 
 | Módulo | Rutas | Reglas |
 |---|---|---|
-| Auth | `POST auth/login · renovar · salir · recuperar · restablecer`, `GET auth/yo` | argon2id; token de acceso 15 min; token de renovación rotativo (reuso ⇒ cierra todas las sesiones); bloqueo 15 min tras 5 intentos; respuestas que no revelan si un correo existe |
+| Auth | `POST auth/login · renovar · salir · salir-todos · aceptar-datos · recuperar · restablecer`, `GET auth/yo` | argon2id; token de acceso 15 min; token de renovación rotativo (reuso ⇒ cierra todas las sesiones); bloqueo 15 min tras 5 intentos; respuestas que no revelan si un correo existe; aviso por correo de ingreso desde un equipo nuevo; Ley 1581: sin aceptar la versión vigente de la política de datos, el API responde 403 `ACEPTAR_DATOS` (fecha, IP y versión quedan registradas) |
 | Clientes | `GET/POST clientes`, `POST clientes/:id/sucursales` | DV del NIT calculado (DIAN) |
 | Declaraciones | `GET/POST declaraciones`, `GET declaraciones/catalogos`, `PATCH :id/estado`, `PATCH :id/activa`, `POST tarifas/masivas` | Una declaración por residuo y cliente, con N sedes y N disposiciones. No autoriza si alguna disposición no está cubierta por permiso de la CAS, licencia vigente del gestor aliado u objeto social (regla también en la base); peligroso exige FDS; tarifas con vigencias. Ver `docs/declaraciones/MODELO_DATOS.md` |
 | Logística | `solicitudes` (+ `:id/aprobacion`, `:id/estado`, `items/:id/descartar`), `rutas` (código automático R-AAAAMMDD-NN), `PATCH rutas/:id`, `rutas/:id/items`, `rutas/:id/rastreo`, `programacion/pendientes`, `PATCH rutas/:id/estado`, `preoperacionales`, `PATCH paradas/:id` | Solo residuos autorizados (trigger); la ruta no inicia sin inspección aprobada (trigger); cancelar siempre se permite |
@@ -44,8 +44,17 @@ Detalle de la cadena operativa: `docs/operacion/MODELO_OPERACION.md`.
 
 Transversal: guard global (toda ruta exige token salvo `@Publico()`), permisos por rol con `@Permiso()`,
 **aislamiento por empresa** en cada consulta (`empresa_id` del token), auditoría de cada cambio,
-límite de peticiones, Helmet, CORS solo para la web, errores en español (los RAISE de la base se
-traducen a 409 con el mensaje de la regla).
+Helmet, CORS solo para la web y errores en español (los RAISE de la base se traducen a 409 con el mensaje de la regla).
+
+La auditoría guarda la IP y el navegador de cada petición. Nadie la modifica ni la borra: un trigger lo impide incluso
+escribiendo directo en la base. Las exportaciones a Excel y las descargas en bloque exigen el permiso `exportar.masivo`
+y quedan registradas.
+
+**Límite de peticiones.** Con sesión válida cuenta **por usuario**: en la oficina todos salen a internet por la misma
+IP pública, y un límite por IP los bloquearía a todos. Sin sesión cuenta por IP. Es de `LIMITE_PETICIONES_MIN` (300)
+por minuto en cada ruta. En ingreso, recuperar y restablecer la contraseña hay dos límites:
+- 10 o 5 intentos por minuto para cada correo desde una IP;
+- un techo por IP para todos los correos juntos, `LIMITE_INGRESOS_IP_MIN` (60), contra el rociado de contraseñas.
 
 Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar.
 

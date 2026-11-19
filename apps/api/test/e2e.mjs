@@ -7,7 +7,8 @@ import shared from '@terraviva/shared';
 
 const { plantilla, construirPlantilla, dvNit } = shared;
 const API = process.env.API_URL ?? 'http://localhost:3000/api/v1';
-const ADMIN = { email: process.env.ADMIN_EMAIL ?? 'gerencia@terravivasas.com', clave: process.env.ADMIN_PASSWORD ?? 'TerraViva2026!' };
+const ADMIN = { email: process.env.ADMIN_EMAIL ?? 'gerencia@terravivasas.com', clave: process.env.ADMIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD };
+if (!ADMIN.clave) { console.error('Defina ADMIN_PASSWORD (o SEED_ADMIN_PASSWORD) con la contraseña del administrador sembrado.'); process.exit(1); }
 const db = new PrismaClient();
 let ok = 0, fallas = 0;
 const prueba = (nombre, cond, extra = '') => { if (cond) { ok++; console.log(`  ✓ ${nombre}`); } else { fallas++; console.log(`  ✗ ${nombre} ${extra}`); } };
@@ -25,6 +26,12 @@ async function excelBuf(id, filas) {
   filas.forEach((f, i) => { ws.getRow(3 + i).values = p.columnas.map((c) => f[c.key] ?? ''); });
   return wb.xlsx.writeBuffer();
 }
+/** Primer ingreso: acepta la política de datos personales (Ley 1581) y devuelve la sesión nueva. */
+async function aceptarDatos(sesion) {
+  if (!sesion?.usuario?.requiereAceptarDatos) return sesion;
+  const x = await llamar('POST', '/auth/aceptar-datos', { token: sesion.accessToken, cuerpo: { version: sesion.usuario.politicaDatos.version } });
+  return x.json;
+}
 const formDe = (buf, nombre) => { const form = new FormData(); form.append('archivo', new Blob([buf]), nombre); return form; };
 const excel = async (id, filas) => formDe(await excelBuf(id, filas), `${id}.xlsx`);
 
@@ -37,6 +44,12 @@ r = await llamar('POST', '/auth/login', { cuerpo: { email: ADMIN.email, clave: '
 prueba('clave incorrecta → 401 con mensaje genérico', r.status === 401 && /incorrectos/.test(r.json.mensaje));
 r = await llamar('POST', '/auth/login', { cuerpo: { email: ADMIN.email, clave: ADMIN.clave } });
 prueba('login correcto entrega tokens', r.status === 200 && r.json.accessToken && r.json.refreshToken, JSON.stringify(r.json));
+const primera = r.json;
+prueba('primer ingreso: pide aceptar la política de datos personales (Ley 1581)', primera.usuario?.requiereAceptarDatos === true && !!primera.usuario.politicaDatos?.version);
+r = await llamar('GET', '/declaraciones', { token: primera.accessToken });
+prueba('…sin aceptarla no se usa el sistema → 403', r.status === 403 && r.json.codigo === 'ACEPTAR_DATOS', JSON.stringify(r.json));
+r = await llamar('POST', '/auth/aceptar-datos', { token: primera.accessToken, cuerpo: { version: primera.usuario.politicaDatos.version } });
+prueba('…al aceptarla queda registrada y entrega una sesión nueva', r.status === 200 && r.json.usuario.requiereAceptarDatos === false && r.json.accessToken !== primera.accessToken, JSON.stringify(r.json).slice(0, 200));
 let { accessToken: T, refreshToken: R } = r.json;
 r = await llamar('GET', '/auth/yo', { token: T });
 prueba('/auth/yo devuelve el usuario y la empresa', r.status === 200 && r.json.empresa.nit === '901089780-8');
@@ -206,7 +219,7 @@ console.log('\n5. Roles y permisos');
 const conductor = await db.usuario.upsert({ where: { email: 'conductor.e2e@terravivasas.com' }, update: { intentosFallidos: 0, bloqueadoHasta: null },
   create: { empresaId: yo.empresa ? (await db.empresa.findFirst({ where: { nit: '901089780-8' } })).id : '', rolId: conductorRol.id, nombre: 'Conductor E2E', documento: '1', email: 'conductor.e2e@terravivasas.com', esConductor: true,
     passwordHash: await (await import('@node-rs/argon2')).hash('Conductor2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
-const tc = (await llamar('POST', '/auth/login', { cuerpo: { email: conductor.email, clave: 'Conductor2026!' } })).json.accessToken;
+const tc = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: conductor.email, clave: 'Conductor2026!' } })).json)).accessToken;
 r = await llamar('PATCH', `/declaraciones/${agua.id}/estado`, { token: tc, cuerpo: { estado: 'AUTORIZADA' } });
 prueba('un conductor NO puede autorizar declaraciones → 403', r.status === 403 && /permiso/.test(r.json.mensaje));
 r = await llamar('GET', '/declaraciones', { token: tc });
@@ -218,7 +231,7 @@ const rolOtra = await db.rol.upsert({ where: { empresaId_nombre: { empresaId: ot
 const todo = await db.permiso.findUnique({ where: { codigo: '*' } });
 await db.rolPermiso.upsert({ where: { rolId_permisoId: { rolId: rolOtra.id, permisoId: todo.id } }, update: {}, create: { rolId: rolOtra.id, permisoId: todo.id } });
 await db.usuario.upsert({ where: { email: 'admin@otra.com' }, update: {}, create: { empresaId: otra.id, rolId: rolOtra.id, nombre: 'Admin otra', documento: '2', email: 'admin@otra.com', passwordHash: await (await import('@node-rs/argon2')).hash('OtraClave2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
-const to = (await llamar('POST', '/auth/login', { cuerpo: { email: 'admin@otra.com', clave: 'OtraClave2026!' } })).json.accessToken;
+const to = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: 'admin@otra.com', clave: 'OtraClave2026!' } })).json)).accessToken;
 r = await llamar('GET', '/declaraciones', { token: to });
 prueba('otra empresa no ve las declaraciones de Terra Viva', r.status === 200 && r.json.total === 0);
 r = await llamar('GET', `/declaraciones/${lodo.id}`, { token: to });
@@ -347,6 +360,8 @@ r = await llamar('GET', '/verificar/0123456789abcdef01234567');
 prueba('un código que no existe → 404', r.status === 404);
 const zip = await descargar(`/actas/zip?ids=${actaB.id}`, T8);
 prueba('descarga masiva de actas en ZIP', zip.status === 200 && zip.buf.subarray(0, 2).toString() === 'PK');
+prueba('…solo con el permiso de exportar: un conductor → 403', (await descargar(`/actas/zip?ids=${actaB.id}`, tc)).status === 403);
+prueba('…y la exportación queda en la auditoría', (await db.auditoria.count({ where: { entidad: 'acta', accion: 'EXPORTAR' } })) >= 1);
 r = await llamar('POST', `/actas/${actaB.id}/anular`, { token: T8, cuerpo: { motivo: 'Prueba de anulación' } });
 prueba('anular el acta', r.status === 201 && r.json.estado === 'ANULADA');
 r = await llamar('GET', `/verificar/${codigo}`);
@@ -455,8 +470,36 @@ prueba('informe de rendimiento: 1 de 1 servicios ejecutados (100 %)', r.status =
 const costos = await descargar('/informes/rutas/costos?desde=2026-11-25&hasta=2026-11-25&formato=xlsx', T8);
 prueba('informe de costos de flete en Excel', costos.status === 200 && costos.buf.subarray(0, 2).toString() === 'PK');
 
+r = await llamar('POST', '/auth/salir-todos', { token: to });
+const trasSalir = await llamar('GET', '/auth/yo', { token: to });
+prueba('cerrar la sesión en todos los dispositivos', r.status === 204 && trasSalir.status === 401);
+// Consolidado sumado en la base: coincide con la suma de la bandeja
+r = await llamar('GET', '/conciliaciones/consolidado', { token: T8 });
+const bandeja = await llamar('GET', '/conciliaciones?porPagina=500', { token: T8 });
+const sumaCobro = Math.round(bandeja.json.filas.filter((c) => c.estado !== 'ANULADA').reduce((x, c) => x + c.totales.cobro, 0) * 100) / 100;
+prueba('consolidado sumado en la base: coincide con la bandeja', r.status === 200 && r.json.totales.cobro === sumaCobro && r.json.conciliaciones >= 1, JSON.stringify({ consolidado: r.json.totales?.cobro, sumaCobro }));
 const aud = await db.auditoria.count();
 prueba(`la auditoría registró los cambios (${aud} eventos)`, aud > 10);
+prueba('…con la IP de cada petición', (await db.auditoria.count({ where: { ip: { not: null } } })) > 10);
+let inmutable = false;
+try { await db.auditoria.deleteMany({ where: { accion: 'LOGIN' } }); } catch (e) { inmutable = /no se modifica ni se borra/.test(String(e)); }
+prueba('…y nadie la puede borrar ni modificar (ni escribiendo en la base)', inmutable);
+
+// Límite de peticiones (al final: deja la IP de la prueba sin poder ingresar durante un minuto).
+// El ingreso cuenta por correo y por IP: una oficina sale a internet por una sola IP y no debe bloquearse entera.
+let r11;
+for (let i = 0; i < 11; i++) r11 = await llamar('POST', '/auth/login', { cuerpo: { email: 'limite@ejemplo.com', clave: 'no-es' } });
+prueba('ingreso: el 11.º intento seguido con el mismo correo responde 429', r11.status === 429, String(r11.status));
+r = await llamar('POST', '/auth/login', { cuerpo: { email: 'otra.persona@ejemplo.com', clave: 'no-es' } });
+prueba('…pero otra persona desde la misma IP sí puede intentar', r.status === 401, String(r.status));
+let techo = null;
+for (let n = 1; n <= 80 && techo === null; n++) {
+  const x = await llamar('POST', '/auth/login', { cuerpo: { email: `rociado${n}@ejemplo.com`, clave: 'no-es' } });
+  if (x.status === 429) techo = n;
+}
+prueba('techo por IP: muchos correos distintos desde una IP terminan en 429 (rociado de contraseñas)', techo !== null && techo <= 60, `intento ${techo}`);
+r = await llamar('GET', '/auth/yo', { token: T8 });
+prueba('…y quien ya tiene sesión sigue trabajando (con sesión se cuenta por usuario, no por IP)', r.status === 200, String(r.status));
 
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);

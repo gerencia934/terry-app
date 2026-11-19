@@ -20,7 +20,7 @@ export function EmpresaServidor() {
   const d = useApi<DatosEmpresa>('/empresa');
   const textos = useApi<GrupoTexto[]>('/empresa/textos-legales');
   const disp = useApi<{ disposiciones: { codigo: string; nombre: string }[] }>('/declaraciones/catalogos');
-  const edita = tienePermiso('empresa.configurar');
+  const edita = tienePermiso('configuracion.editar');
   const [c, setC] = useState<Config>({});
   const [num, setNum] = useState<Record<string, Consecutivo>>({});
   const [editando, setEditando] = useState<(Partial<Texto> & { nuevo?: boolean }) | null>(null);

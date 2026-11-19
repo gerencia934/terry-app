@@ -1,8 +1,9 @@
-import { Controller, Get, Injectable, Module, Query, Res } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Injectable, Module, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
+import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, type Actor } from '../common/http';
 
 const id = z.string().uuid();
@@ -15,7 +16,7 @@ const dia = (d: Date) => d.toISOString().slice(0, 10);
 
 @Injectable()
 class InformesService {
-  constructor(private readonly db: PrismaService) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
 
   private rutas(a: Actor, f: z.infer<typeof Rango>) {
     return this.db.ruta.findMany({
@@ -70,6 +71,9 @@ class InformesService {
     }));
     const total = filas.reduce((s, x) => s + (x.valorFlete ?? 0), 0);
     if (f.formato === 'json') return res.json({ rutas: filas, totalFletes: total });
+    // Exportación a Excel: solo roles autorizados, y queda en la auditoría (requisitos de producción §4)
+    if (!a.permisos.includes('*') && !a.permisos.includes('exportar.masivo')) throw new ForbiddenException({ mensaje: `Su rol (${a.rol}) no tiene el permiso «exportar.masivo».` });
+    await this.audit.registrar(a, 'informe', 'costos-rutas', 'EXPORTAR', undefined, { desde: dia(f.desde), hasta: dia(f.hasta), rutas: filas.length });
     const wb = new ExcelJS.Workbook(); wb.creator = 'TERRY-GO · Terra Viva S.A.S. E.S.P.';
     const ws = wb.addWorksheet('Costos por ruta');
     ws.addRow([`Costos de flete por ruta · ${dia(f.desde)} a ${dia(f.hasta)}`]).font = { bold: true, size: 13 };

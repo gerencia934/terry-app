@@ -73,10 +73,11 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-132 pruebas: autenticación, sesiones, roles, aislamiento entre empresas, importación de Excel,
-declaraciones y permisos ambientales, residuos no autorizados, inspección vehicular, tarifas, auditoría y la cadena
-operativa completa: programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con
-QR, actas de aliados e informes.
+145 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
+límites de peticiones, roles, aislamiento entre empresas, importación de Excel, declaraciones y permisos ambientales,
+residuos no autorizados, inspección vehicular, tarifas, auditoría (con IP e inmutable) y la cadena operativa completa:
+programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con QR y hash, actas de
+aliados e informes. Al final prueban el límite de ingresos: durante un minuto esa IP no puede volver a ingresar.
 
 Reglas de la cadena operativa escritas directamente en la base (sin API), sobre una base migrada y sembrada:
 
@@ -86,6 +87,14 @@ DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run t
 
 46 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
 conciliación, actas y descargue en planta.
+
+**En GitHub** (`.github/`), cada cambio en `main` o en una rama `fase-*`, y cada pull request, corre solo:
+- **Pruebas:** compila todo, migra y siembra una base nueva y corre las dos suites. También falla si una librería de
+  producción tiene una vulnerabilidad crítica.
+- **CodeQL:** escaneo de seguridad del código.
+- **Dependabot:** cada lunes propone actualizar librerías.
+
+**Prueba de carga** (400 usuarios concurrentes, solo en staging): `apps/api/test/carga/LEAME.md`.
 
 ## App del conductor (celular, sin señal)
 

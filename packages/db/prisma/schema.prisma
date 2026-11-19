@@ -316,6 +316,10 @@ model Usuario {
   epsId         String?   @map("eps_id") @db.Uuid
   activo        Boolean   @default(true)
   ultimoLogin   DateTime? @map("ultimo_login") @db.Timestamptz
+  // Ley 1581 de 2012: aceptación de la política de tratamiento de datos (versión, fecha e IP)
+  datosPoliticaVersion String?   @map("datos_politica_version") @db.VarChar(20)
+  datosAceptadosEn     DateTime? @map("datos_aceptados_en") @db.Timestamptz
+  datosAceptadosIp     String?   @map("datos_aceptados_ip") @db.VarChar(64)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   empresa                 Empresa                 @relation(fields: [empresaId], references: [id])
@@ -1332,9 +1336,13 @@ model Auditoria {
   antes     Json?
   despues   Json?
   fecha     DateTime @default(now()) @db.Timestamptz
+  ip        String?  @db.VarChar(64) // desde dónde (requisitos de producción §3)
+  agente    String?  @db.VarChar(300) // navegador o app
   usuario   Usuario? @relation(fields: [usuarioId], references: [id])
 
   @@index([entidad, entidadId])
+  @@index([fecha], map: "ix_auditoria_fecha")
+  @@index([usuarioId, fecha], map: "ix_auditoria_usuario")
   @@map("auditoria")
 }
 

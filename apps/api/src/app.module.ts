@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { validarConfig } from './config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_FILTER } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { validarConfig, type Config } from './config';
 import { PrismaModule } from './prisma/prisma.service';
 import { ComunModule } from './common/servicios';
-import { FiltroErrores } from './common/http';
+import { FiltroErrores, TECHO_IP } from './common/http';
 import { AuthModule } from './auth/auth.module';
 import { ClientesModule } from './clientes/clientes.module';
 import { DeclaracionesModule } from './declaraciones/declaraciones.module';
@@ -22,13 +22,22 @@ import { EmpresaModule } from './empresa/empresa.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validarConfig, envFilePath: ['.env', '../../.env'] }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+    // Límites de peticiones. El guard (auth.module.ts) cuenta por usuario si hay sesión válida y por IP si no.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (cfg: ConfigService<Config, true>) => ({
+        throttlers: [
+          { name: 'default', ttl: 60_000, limit: cfg.get('LIMITE_PETICIONES_MIN', { infer: true }) },
+          // Techo por IP: solo en las rutas marcadas con @LimiteCredenciales
+          { name: 'ip', ttl: 60_000, limit: cfg.get('LIMITE_INGRESOS_IP_MIN', { infer: true }), skipIf: (ctx) => !Reflect.getMetadata(TECHO_IP, ctx.getHandler()) },
+        ],
+      }),
+    }),
     PrismaModule, ComunModule, ArchivosModule, AuthModule,
     ClientesModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
     ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: FiltroErrores },
   ],
 })

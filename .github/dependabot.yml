@@ -1,0 +1,27 @@
+# Dependabot (requisitos de producción §6): propone cada semana las actualizaciones de librerías y de las
+# acciones de GitHub. Las menores y de corrección llegan agrupadas en una sola propuesta; las mayores, una por una,
+# porque pueden traer cambios incompatibles. Cada propuesta pasa por las pruebas automáticas antes de unirse.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Bogota
+    open-pull-requests-limit: 10
+    groups:
+      menores-y-correcciones:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Bogota
+    groups:
+      acciones:
+        patterns: ['*']

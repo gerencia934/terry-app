@@ -127,12 +127,12 @@ class EmpresaService {
 class EmpresaController {
   constructor(private readonly s: EmpresaService) {}
   @Get() obtener(@ActorActual() a: Actor) { return this.s.obtener(a); }
-  @Permiso('empresa.configurar') @Patch('configuracion') configurar(@ActorActual() a: Actor, @Body(new Zod(Configuracion)) b: z.infer<typeof Configuracion>) { return this.s.configurar(a, b); }
-  @Permiso('empresa.configurar') @Patch('consecutivos/:documento') consecutivo(@ActorActual() a: Actor, @Param('documento') d: string, @Body(new Zod(Consecutivo)) b: z.infer<typeof Consecutivo>) { return this.s.consecutivo(a, d, b); }
+  @Permiso('configuracion.editar') @Patch('configuracion') configurar(@ActorActual() a: Actor, @Body(new Zod(Configuracion)) b: z.infer<typeof Configuracion>) { return this.s.configurar(a, b); }
+  @Permiso('configuracion.editar') @Patch('consecutivos/:documento') consecutivo(@ActorActual() a: Actor, @Param('documento') d: string, @Body(new Zod(Consecutivo)) b: z.infer<typeof Consecutivo>) { return this.s.consecutivo(a, d, b); }
   @Get('textos-legales') textos(@ActorActual() a: Actor) { return this.s.textos(a); }
-  @Permiso('empresa.configurar') @Post('textos-legales') crearTexto(@ActorActual() a: Actor, @Body(new Zod(TextoNuevo)) b: z.infer<typeof TextoNuevo>) { return this.s.crearTexto(a, b); }
-  @Permiso('empresa.configurar') @Put('textos-legales/:codigo') version(@ActorActual() a: Actor, @Param('codigo') c: string, @Body(new Zod(Texto)) b: z.infer<typeof Texto>) { return this.s.versionTexto(a, c.toUpperCase(), b); }
-  @Permiso('empresa.configurar') @Patch('textos-legales/:codigo/retirar') retirar(@ActorActual() a: Actor, @Param('codigo') c: string) { return this.s.retirarTexto(a, c.toUpperCase()); }
+  @Permiso('configuracion.editar') @Post('textos-legales') crearTexto(@ActorActual() a: Actor, @Body(new Zod(TextoNuevo)) b: z.infer<typeof TextoNuevo>) { return this.s.crearTexto(a, b); }
+  @Permiso('configuracion.editar') @Put('textos-legales/:codigo') version(@ActorActual() a: Actor, @Param('codigo') c: string, @Body(new Zod(Texto)) b: z.infer<typeof Texto>) { return this.s.versionTexto(a, c.toUpperCase(), b); }
+  @Permiso('configuracion.editar') @Patch('textos-legales/:codigo/retirar') retirar(@ActorActual() a: Actor, @Param('codigo') c: string) { return this.s.retirarTexto(a, c.toUpperCase()); }
 }
 
 @Module({ controllers: [EmpresaController], providers: [EmpresaService] })

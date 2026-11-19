@@ -1,12 +1,12 @@
 // Asignación masiva (documentos reales, planilla DMR): los mismos servicios estándar del catálogo propio para muchos
 // clientes de una vez, con valores por defecto. Reemplaza la planilla de cientos de filas.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Layers, Plus } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Sheet, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx } from '../../lib/format';
 import { msg, useApi } from '../../lib/servidor';
-import { useClientes } from '../torre/comun';
+import type { ClienteBuscado } from '../../components/BuscarCliente';
 
 interface Servicio { id: string; codigo: string; nombre: string; lineaServicio: { codigo: string; nombre: string } | null }
 interface Catalogos { lineas: { id: string; codigo: string; nombre: string }[]; metricasPrecio: { id: string; codigo: string; nombre: string }[] }
@@ -14,19 +14,22 @@ interface Resultado { creadas: number; autorizadas: number; omitidas: { cliente:
 
 export function AsignacionMasiva({ abierta, onClose, onListo }: { abierta: boolean; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
-  const clientes = useClientes();
+  // Búsqueda de clientes en el servidor (con 2.000 clientes no se carga la lista entera)
   const servicios = useApi<Servicio[]>(abierta ? '/declaraciones/catalogo-servicios' : null);
   const cat = useApi<Catalogos>(abierta ? '/declaraciones/catalogos' : null);
   const [elegidos, setElegidos] = useState<Set<string>>(new Set());
-  const [clientesSel, setClientesSel] = useState<Set<string>>(new Set());
+  const [clientesSel, setClientesSel] = useState<Map<string, ClienteBuscado>>(new Map());
   const [q, setQ] = useState('');
+  const [qBuscar, setQBuscar] = useState('');
+  useEffect(() => { const t = setTimeout(() => setQBuscar(q.trim()), 250); return () => clearTimeout(t); }, [q]);
+  const busqueda = useApi<{ total: number; filas: ClienteBuscado[] }>(abierta ? `/clientes?porPagina=50${qBuscar ? `&q=${encodeURIComponent(qBuscar)}` : ''}` : null);
   const [f, setF] = useState({ alcance: 'TODAS', frecuencia: '', automatica: false, precio: '', metricaId: '', autorizar: false });
   const [nuevo, setNuevo] = useState<{ codigo: string; nombre: string; lineaServicioId: string } | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [ocupado, setOcupado] = useState(false);
-  useEffect(() => { if (abierta) { setElegidos(new Set()); setClientesSel(new Set()); setQ(''); setResultado(null); setNuevo(null);
+  useEffect(() => { if (abierta) { setElegidos(new Set()); setClientesSel(new Map()); setQ(''); setResultado(null); setNuevo(null);
     setF({ alcance: 'TODAS', frecuencia: '', automatica: false, precio: '', metricaId: '', autorizar: false }); } }, [abierta]);
-  const visibles = useMemo(() => (clientes ?? []).filter((c) => `${c.razonSocial} ${c.nit}`.toLowerCase().includes(q.trim().toLowerCase())), [clientes, q]);
+  const visibles = busqueda.datos?.filas ?? [];
   const total = elegidos.size * clientesSel.size;
   const puedeAutorizar = tienePermiso('declaraciones.autorizar');
   const toggle = (set: Set<string>, id: string) => { const n = new Set(set); n.has(id) ? n.delete(id) : n.add(id); return n; };
@@ -42,7 +45,7 @@ export function AsignacionMasiva({ abierta, onClose, onListo }: { abierta: boole
     setOcupado(true);
     try {
       const r = await api<Resultado>('/declaraciones/asignacion-masiva', { cuerpo: {
-        catalogoIds: [...elegidos], clienteIds: [...clientesSel], alcanceSedes: f.alcance,
+        catalogoIds: [...elegidos], clienteIds: [...clientesSel.keys()], alcanceSedes: f.alcance,
         frecuenciaDias: f.frecuencia ? Number(f.frecuencia) : undefined, solicitudAutomatica: f.automatica && !!f.frecuencia,
         precio: f.precio !== '' ? { precioUnitario: Number(f.precio), metricaId: f.metricaId || null } : undefined,
         autorizar: f.autorizar,
@@ -104,20 +107,32 @@ export function AsignacionMasiva({ abierta, onClose, onListo }: { abierta: boole
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">2. Clientes ({clientesSel.size})</h3>
               <span className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={() => setClientesSel((x) => new Set([...x, ...visibles.map((c) => c.id)]))}>Elegir {visibles.length === (clientes?.length ?? 0) ? 'todos' : `los ${visibles.length}`}</Button>
-                {clientesSel.size > 0 && <Button size="sm" variant="ghost" onClick={() => setClientesSel(new Set())}>Ninguno</Button>}
+                <Button size="sm" variant="ghost" disabled={!visibles.length} onClick={() => setClientesSel((x) => new Map([...x, ...visibles.map((c) => [c.id, c] as const)]))}>Elegir los {visibles.length} de la búsqueda</Button>
+                {clientesSel.size > 0 && <Button size="sm" variant="ghost" onClick={() => setClientesSel(new Map())}>Ninguno</Button>}
               </span>
             </div>
+            {clientesSel.size > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {[...clientesSel.values()].slice(0, 8).map((c) => (
+                  <button key={c.id} type="button" onClick={() => setClientesSel((x) => { const n = new Map(x); n.delete(c.id); return n; })} title="Quitar"
+                    className="rounded-full bg-brand-soft px-2.5 py-1 text-[12px] text-brand-ink hover:bg-brand-soft/70">{c.razonSocial} ×</button>
+                ))}
+                {clientesSel.size > 8 && <span className="px-1 py-1 text-[12px] text-muted">y {clientesSel.size - 8} más</span>}
+              </div>
+            )}
             <Input aria-label="Buscar cliente" placeholder="Buscar por nombre o NIT" value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="max-h-56 overflow-y-auto rounded-lg border border-line">
               {visibles.map((c) => (
                 <label key={c.id} className="flex cursor-pointer items-center gap-2.5 border-b border-line px-3 py-1.5 text-[13px] last:border-0 hover:bg-surface-2">
-                  <input type="checkbox" className="h-4 w-4 accent-[rgb(var(--brand))]" checked={clientesSel.has(c.id)} onChange={() => setClientesSel((x) => toggle(x, c.id))} />
+                  <input type="checkbox" className="h-4 w-4 accent-[rgb(var(--brand))]" checked={clientesSel.has(c.id)} onChange={() => setClientesSel((x) => { const n = new Map(x); n.has(c.id) ? n.delete(c.id) : n.set(c.id, c); return n; })} />
                   <span className="min-w-0 flex-1 truncate">{c.razonSocial}</span><span className="num text-[12px] text-muted">{c.nit}</span>
                 </label>
               ))}
-              {!visibles.length && <p className="px-3 py-3 text-[13px] text-muted">{clientes ? 'Sin coincidencias.' : 'Cargando…'}</p>}
+              {!visibles.length && <p className="px-3 py-3 text-[13px] text-muted">{busqueda.cargando ? 'Buscando…' : 'Sin coincidencias.'}</p>}
             </div>
+            {(busqueda.datos?.total ?? 0) > visibles.length && (
+              <p className="text-[12px] text-muted">Se muestran <span className="num">{visibles.length}</span> de <span className="num">{busqueda.datos!.total}</span> que coinciden. Afine la búsqueda (nombre o NIT) para ver los demás; los ya elegidos se conservan.</p>
+            )}
           </section>
 
           <section className="flex flex-col gap-3">

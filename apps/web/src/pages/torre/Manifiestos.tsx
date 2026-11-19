@@ -6,7 +6,7 @@ import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, 
 import { api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { ImagenProtegida, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi, verPdf } from '../../lib/servidor';
+import { ImagenProtegida, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista, verPdf } from '../../lib/servidor';
 import { CONC_OFICINA, MF_OFICINA, useCatalogos } from './comun';
 
 interface MfFila {
@@ -39,8 +39,8 @@ export function ManifiestosServidor() {
   const base = { desde: sumarDias(hoy, -30), hasta: sumarDias(hoy, 7), estado: '', tipo: '', numero: '' };
   const [f, setF] = useState(base);
   const [num, setNum] = useState('');
-  const qs = new URLSearchParams({ porPagina: '300', ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) });
-  const lista = useApi<{ total: number; filas: MfFila[] }>(`/manifiestos?${qs}`);
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([, v]) => v)));
+  const lista = usePaginado<MfFila>(`/manifiestos?${qs}`);
   const [sel, setSel] = useState<string | null>(null);
   useEffect(() => { try { const id = sessionStorage.getItem(MF_OFICINA); if (id) { sessionStorage.removeItem(MF_OFICINA); setSel(id); } } catch { /* sin almacenamiento */ } }, []);
   const activos = Object.entries(f).filter(([k, v]) => v && v !== (base as Record<string, string>)[k]).length;
@@ -69,8 +69,8 @@ export function ManifiestosServidor() {
         <Field label="Número" id="mf-n"><Input id="mf-n" value={num} onChange={(e) => setNum(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setF((s) => ({ ...s, numero: num.trim() }))} onBlur={() => setF((s) => ({ ...s, numero: num.trim() }))} placeholder="MF-…" /></Field>
       </FilterBar>
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
-        : !lista.datos ? <p className="p-6 text-center text-muted">Cargando…</p>
-        : <ResponsiveTable rows={lista.datos.filas} columns={cols} rowKey={(m) => m.id} onRowClick={(m) => setSel(m.id)} cardTitle={(m) => <span className="num">{m.numero}</span>}
+        : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
+        : <ResponsiveTable rows={lista.filas} footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} columns={cols} rowKey={(m) => m.id} onRowClick={(m) => setSel(m.id)} cardTitle={(m) => <span className="num">{m.numero}</span>}
             cardBadge={(m) => <EstadoBadge estado={m.estado} />} cardMeta={(m) => `${m.cliente.razonSocial} · ${fmtFecha(m.fechaServicio)}`} empty="No hay manifiestos con estos filtros." />}
       <DetalleManifiesto id={sel} onClose={() => setSel(null)} onCambio={lista.recargar} />
     </>

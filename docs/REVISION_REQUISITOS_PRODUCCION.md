@@ -3,6 +3,10 @@
 Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase-3-operacion`. Para cada requisito dice si
 **ya se cumple (✅)**, **se cumple en parte (⚠️)** o **falta (❌)**, y cómo se ajusta. Al final está el orden propuesto.
 
+> **Actualización del 19-11-2026:** ya están hechos los ajustes 1, 4, 5, 7 y 9 de la lista de abajo, más el cierre de
+> sesión en todos los dispositivos, el aviso de ingreso nuevo y el límite de peticiones por usuario. Detalle y
+> pendientes en la sección 9.
+
 ## Resumen para la gerencia
 
 **Lo que ya está bien hecho:**
@@ -151,4 +155,37 @@ si Siigo o Wialon fallan, la operación sigue.
    - pruebas de penetración y de carga;
    - operación en paralelo y salida de Grinclic.
 
-La lista de lo aplicado está en `docs/CONTEXTO_PROYECTO.md`.
+## 9. Lo aplicado (19-11-2026)
+
+Pasos 1 y 2 del orden, hechos en la rama `fase-3-operacion` con pruebas: 145 de punta a punta y 46 de reglas de la
+base.
+
+| Requisito | Qué quedó |
+|---|---|
+| Listados para 2.000 clientes | Buscador de clientes con autocompletar en solicitudes, declaraciones, conciliación, certificados y asignación masiva. Bandejas de declaraciones, solicitudes, manifiestos, recepción, conciliación y certificados que cargan de 50 en 50 («Cargar más»). Probado con 2.000 clientes ficticios |
+| Consolidado | Sumado en la base; antes se sumaba en memoria, hasta 5.000 registros |
+| Nada legal se borra | Al anular un manifiesto, su conciliación queda «anulada» y las solicitudes automáticas, «retiradas». No se borra nada |
+| Auditoría | IP y navegador en cada evento. Registra ingresos, aceptaciones de la política y exportaciones. Nadie la modifica ni la borra: lo impide un trigger en la base |
+| Exportaciones | Permiso propio `exportar.masivo` y registro de cada exportación |
+| Hash y QR | SHA-256 del PDF emitido o cargado. El QR público muestra solo número, fecha, emisor y validez |
+| Sesiones | «Cerrar sesión en todos los dispositivos» en el menú de la cuenta. Correo de aviso al ingresar desde un equipo o IP nuevos |
+| Ley 1581 | Pantalla de aceptación en el primer ingreso y cada vez que cambia la versión. Queda registrada la fecha, la IP y la versión. Sin aceptar, el API no deja hacer nada más |
+| Límite de peticiones | Ahora cuenta por usuario cuando hay sesión. Antes contaba por IP: con 300 por minuto, una oficina que sale a internet por una sola IP se habría bloqueado entera en hora pico. En el ingreso, 10 intentos por correo y un techo de 60 por IP. Todo es configurable |
+| GitHub | Pruebas automáticas en cada cambio, CodeQL y Dependabot (`.github/`) |
+| Prueba de carga | Guion k6 de 400 usuarios, con su guía (`apps/api/test/carga/LEAME.md`). Se corre en staging |
+| Librerías | Actualizadas las que tenían arreglo compatible: NestJS 11.2.11 (arregla `multer`), nodemailer 10, Vite 6.4, PostCSS, esbuild, NestJS CLI y uuid. Hoy las librerías de producción no tienen vulnerabilidades críticas |
+
+**Pendientes que salieron en este trabajo:**
+- **zod 3 → 4.** Tiene un aviso alto: consumo de memoria al validar listas enormes. El riesgo está acotado, porque el
+  API acepta cuerpos de máximo 1 MB y limita las peticiones. La migración toca todas las validaciones, así que va como
+  tarea propia con sus pruebas.
+- **Prisma 6 → 7.** Los avisos son de la herramienta de migraciones, que solo corre al desplegar y con archivos
+  propios. Es un cambio mayor y va como tarea propia.
+- **El repositorio de GitHub es público.** Cualquiera puede ver el código y los documentos. Revisado: no hay
+  contraseñas ni datos personales. Aun así, la gerencia debe decidir si lo pasa a privado. Si lo hace:
+  - CodeQL deja de ser gratis (exige la licencia «GitHub Code Security»);
+  - las pruebas y Dependabot siguen funcionando.
+- **PDF en cola y descargas con enlace firmado.** Siguen pendientes (paso 4 del orden). La prueba de carga dirá qué tan
+  urgentes son.
+
+La historia de cada fase está en `docs/CONTEXTO_PROYECTO.md`.

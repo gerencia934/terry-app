@@ -2,7 +2,8 @@ import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/ui';
 import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
-import { MODO_REAL, sesionActual } from './lib/api';
+import { MODO_REAL, useSesion } from './lib/api';
+import AceptarDatos from './pages/AceptarDatos';
 import { Login, Recuperar, Restablecer } from './pages/Auth';
 import Inicio from './pages/Inicio';
 import Declaraciones from './pages/Declaraciones';
@@ -26,6 +27,7 @@ import Verificar from './pages/Verificar';
 
 function Screen() {
   const { route } = useRouter();
+  const sesion = useSesion();
   switch (route) {
     case 'login': return <Login />;
     case 'recuperar': return <Recuperar />;
@@ -33,7 +35,9 @@ function Screen() {
     case 'verificar': return <Verificar />; // pública: código QR de los certificados (sin sesión)
   }
   // En modo servidor, sin sesión se vuelve al ingreso.
-  if (MODO_REAL && !sesionActual()) return <Login />;
+  if (MODO_REAL && !sesion) return <Login />;
+  // Ley 1581: antes de usar el sistema (oficina o app del conductor) se acepta la política de datos personales
+  if (MODO_REAL && sesion?.usuario.requiereAceptarDatos) return <AceptarDatos />;
   switch (route) {
     // App del conductor: conectada al API (con cola sin señal) o de demostración
     case 'campo': return MODO_REAL ? <CampoRutaServidor /> : <CampoHoy />;

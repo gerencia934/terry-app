@@ -8,7 +8,7 @@ import {
 import { useRouter, type RouteName } from '../lib/router';
 import { cx } from '../lib/format';
 import { useAlertas } from '../lib/alertas';
-import { MODO_REAL, salir, sesionActual } from '../lib/api';
+import { MODO_REAL, salir, salirDeTodos, sesionActual } from '../lib/api';
 import logoDark from '../assets/logo-dark.webp';
 import logoLight from '../assets/logo-light.webp';
 
@@ -103,6 +103,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => { if (buscar) setTimeout(() => qRef.current?.focus(), 30); }, [buscar]);
   const resultados = useMemo(() => TODOS.filter((i) => `${i.grupo} ${i.label} ${i.desc ?? ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 9), [q]);
   const cerrarSesion = async () => { await salir(); go('login'); };
+  const cerrarTodas = async () => { await salirDeTodos(); go('login'); };
+  const [menuUsuario, setMenuUsuario] = useState(false);
+  useEffect(() => { setMenuUsuario(false); }, [route]);
 
   const Lateral = (
     <div className="flex h-full flex-col">
@@ -154,10 +157,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                 )}
               </div>
-              <button onClick={cerrarSesion} className="ml-1 flex h-9 items-center gap-2 rounded-full pl-1 pr-1 hover:bg-surface-2 sm:pr-3" title="Cerrar sesión">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-on-brand">{iniciales}</span>
-                <span className="hidden text-[13px] text-muted sm:inline">Salir</span>
-              </button>
+              <div className="relative">
+                <button onClick={() => setMenuUsuario((v) => !v)} aria-expanded={menuUsuario} className="ml-1 flex h-9 items-center gap-2 rounded-full pl-1 pr-1 hover:bg-surface-2 sm:pr-3" title="Su cuenta">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-on-brand">{iniciales}</span>
+                  <span className="hidden text-[13px] text-muted sm:inline">Salir</span>
+                </button>
+                {menuUsuario && <div className="fixed inset-0 z-30" aria-hidden onClick={() => setMenuUsuario(false)} />}
+                {menuUsuario && (
+                  <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-line bg-surface p-1.5 shadow-xl" onKeyDown={(e) => { if (e.key === 'Escape') setMenuUsuario(false); }}>
+                    {usuario && <p className="px-3 py-2 text-[12px] text-muted">{usuario.nombre}<br />{usuario.rol}</p>}
+                    <button onClick={cerrarSesion} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión</button>
+                    {MODO_REAL && <button onClick={cerrarTodas} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión en todos los dispositivos</button>}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>

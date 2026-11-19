@@ -299,6 +299,7 @@ class ActasService {
     const zip = new JSZip();
     for (const x of actas) zip.file(`${x.numero}${x.estado === 'ANULADA' ? '-ANULADA' : ''}.pdf`, await this.archivoPdf(a, x));
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    await this.audit.registrar(a, 'acta', actas.map((x) => x.numero).join(',').slice(0, 200), 'EXPORTAR', undefined, { formato: 'zip', actas: actas.length });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="actas-${new Date().toISOString().slice(0, 10)}.zip"`);
     res.send(buf);
@@ -322,7 +323,7 @@ class ActasController {
   constructor(private readonly s: ActasService) {}
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get('pendientes') pendientes(@ActorActual() a: Actor, @Query(new Zod(Pendientes)) f: z.infer<typeof Pendientes>) { return this.s.pendientes(a, f); }
-  @Get('zip') zip(@ActorActual() a: Actor, @Query(new Zod(Zip)) q: z.infer<typeof Zip>, @Res() res: Response) { return this.s.zip(a, q.ids, res); }
+  @Permiso('exportar.masivo') @Get('zip') zip(@ActorActual() a: Actor, @Query(new Zod(Zip)) q: z.infer<typeof Zip>, @Res() res: Response) { return this.s.zip(a, q.ids, res); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
   @Get(':id/pdf') pdf(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.pdf(a, id, res); }
   @Permiso('actas.emitir') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(Crear)) b: z.infer<typeof Crear>) { return this.s.crear(a, b); }

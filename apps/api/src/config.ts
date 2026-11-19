@@ -14,9 +14,16 @@ const Esquema = z.object({
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
   MAIL_FROM: z.string().default('TERRY-GO · Terra Viva <no-responder@terravivasas.com>'),
+  // Ley 1581: versión vigente de la política de tratamiento de datos (al cambiarla, se pide aceptar de nuevo) y su enlace
+  POLITICA_DATOS_VERSION: z.string().max(20).default('2026-11'),
+  POLITICA_DATOS_URL: z.string().default(''),
   // Archivos (firmas, fotos, PDF). En desarrollo, carpeta local; en producción se cambia a S3 / R2.
   ALMACENAMIENTO_DIR: z.string().default('almacenamiento'),
   ARCHIVO_MAX_MB: z.coerce.number().default(10),
+  // Límite de peticiones por minuto en cada pantalla: por usuario con sesión, por IP sin ella
+  LIMITE_PETICIONES_MIN: z.coerce.number().int().min(10).default(300),
+  // Techo por IP en ingreso / recuperar contraseña, sumando todos los correos (contra el rociado de contraseñas)
+  LIMITE_INGRESOS_IP_MIN: z.coerce.number().int().min(5).default(60),
 });
 export type Config = z.infer<typeof Esquema>;
 

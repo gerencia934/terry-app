@@ -7,8 +7,9 @@ import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, 
 import { api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { cant, hoyCo, msg, sumarDias, useApi } from '../../lib/servidor';
-import { useCatalogos, useClientes } from './comun';
+import { cant, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista } from '../../lib/servidor';
+import { useCatalogos } from './comun';
+import { BuscarCliente } from '../../components/BuscarCliente';
 
 type Jornada = 'AM' | 'PM' | 'DIA';
 const JORNADA: Record<Jornada, string> = { AM: 'Mañana', PM: 'Tarde', DIA: 'Todo el día' };
@@ -29,17 +30,16 @@ const sedes = (s: Sol) => [...new Set(s.items.map((i) => i.sucursal.codigo ?? i.
 
 export function SolicitudesServidor({ porConfirmar = false }: { porConfirmar?: boolean }) {
   const hoy = hoyCo();
-  const clientes = useClientes();
   const base = porConfirmar
     ? { desde: '', hasta: '', estado: 'PENDIENTE', aprobacion: 'PENDIENTE', clienteId: '', numero: '' }
     : { desde: sumarDias(hoy, -30), hasta: sumarDias(hoy, 30), estado: '', aprobacion: '', clienteId: '', numero: '' };
   const [f, setF] = useState(base);
   const [num, setNum] = useState('');
-  const lista = useApi<{ total: number; filas: Sol[] }>(`/solicitudes?${new URLSearchParams({ porPagina: '300', ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) })}`);
+  const lista = usePaginado<Sol>(`/solicitudes?${new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([, v]) => v)))}`);
   const [sel, setSel] = useState<string | null>(null);
   const [nueva, setNueva] = useState(false);
   const activos = Object.entries(f).filter(([k, v]) => v !== (base as Record<string, string>)[k]).length;
-  const filas = lista.datos?.filas ?? [];
+  const filas = lista.filas ?? [];
   const cols: Column<Sol>[] = [
     { key: 'n', header: 'N.º', render: (s) => <span className="num font-medium">{s.numero}</span>, priority: 3 },
     { key: 'f', header: 'Para el', render: (s) => <span className={cx('num', s.fechaSolicitada.slice(0, 10) < hoy && s.estado === 'PENDIENTE' && 'text-bad')}>{fmtFechaCorta(s.fechaSolicitada)}</span>, priority: 1 },
@@ -61,14 +61,14 @@ export function SolicitudesServidor({ porConfirmar = false }: { porConfirmar?: b
       <FilterBar active={activos} onClear={() => { setF(base); setNum(''); }}>
         <Field label="Para el, desde" id="so-d"><Input id="so-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
         <Field label="Hasta" id="so-h"><Input id="so-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>
-        <Field label="Cliente" id="so-c"><Select id="so-c" value={f.clienteId} onChange={(e) => setF((s) => ({ ...s, clienteId: e.target.value }))}><option value="">Todos</option>{clientes?.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
+        <Field label="Cliente" id="so-c"><BuscarCliente id="so-c" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
         <Field label="Aprobación" id="so-a"><Select id="so-a" value={f.aprobacion} onChange={(e) => setF((s) => ({ ...s, aprobacion: e.target.value }))}><option value="">Todas</option><option value="PENDIENTE">Pendiente</option><option value="APROBADA">Aprobada</option><option value="NO_APROBADA">No aprobada</option></Select></Field>
         <Field label="Avance" id="so-e"><Select id="so-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['PENDIENTE', 'PROGRAMADA', 'EN_CURSO', 'RECOLECTADA', 'CANCELADA'].map((x) => <option key={x} value={x}>{x === 'EN_CURSO' ? 'En curso' : x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
         <Field label="Número" id="so-n"><Input id="so-n" type="number" value={num} onChange={(e) => setNum(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setF((s) => ({ ...s, numero: num.trim() }))} onBlur={() => setF((s) => ({ ...s, numero: num.trim() }))} /></Field>
       </FilterBar>
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
-        : !lista.datos ? <p className="p-6 text-center text-muted">Cargando…</p>
-        : <ResponsiveTable rows={filas} columns={cols} rowKey={(s) => s.id} onRowClick={(s) => setSel(s.id)} cardTitle={(s) => <span>Sol. <span className="num">{s.numero}</span> · {s.cliente.razonSocial}</span>}
+        : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
+        : <ResponsiveTable rows={filas} columns={cols} rowKey={(s) => s.id} onRowClick={(s) => setSel(s.id)} footer={<PieLista mostradas={filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} cardTitle={(s) => <span>Sol. <span className="num">{s.numero}</span> · {s.cliente.razonSocial}</span>}
             cardBadge={(s) => <EstadoBadge estado={s.aprobacion} />} cardMeta={(s) => `Para el ${fmtFecha(s.fechaSolicitada)} · ${sedes(s)}`}
             empty={porConfirmar ? 'No hay solicitudes esperando aprobación.' : 'No hay solicitudes con estos filtros.'} />}
       <DetalleSolicitud s={filas.find((x) => x.id === sel) ?? null} onClose={() => setSel(null)} onCambio={lista.recargar} />
@@ -139,7 +139,6 @@ interface LineaForm { incluir: boolean; sucursalId: string; cantidad: string; jo
 /** Nueva solicitud de recolección: residuos autorizados del cliente, con la sede de cada línea. */
 function NuevaSolicitud({ abierta, onClose, onListo }: { abierta: boolean; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
-  const clientes = useClientes();
   const [clienteId, setClienteId] = useState('');
   const [fecha, setFecha] = useState(hoyCo());
   const [oc, setOc] = useState('');
@@ -171,7 +170,7 @@ function NuevaSolicitud({ abierta, onClose, onListo }: { abierta: boolean; onClo
     <Sheet open={abierta} onClose={onClose} title="Nueva solicitud de recolección"
       footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={ocupado || !completas || !fecha} onClick={enviar}><Plus size={16} /> Crear{aprobar ? ' y aprobar' : ''}</Button></>}>
       <div className="flex flex-col gap-4">
-        <Field label="Cliente" id="ns-c"><Select id="ns-c" value={clienteId} onChange={(e) => { setClienteId(e.target.value); setLineas({}); }}><option value="">Elija el cliente</option>{clientes?.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
+        <Field label="Cliente" id="ns-c"><BuscarCliente id="ns-c" valor={clienteId} vacio="Escriba el nombre o el NIT" onChange={(c) => { setClienteId(c?.id ?? ''); setLineas({}); }} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Fecha del servicio" id="ns-f"><Input id="ns-f" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
           <Field label="Orden de compra" id="ns-oc" hint="Opcional"><Input id="ns-oc" value={oc} onChange={(e) => setOc(e.target.value)} maxLength={40} /></Field>

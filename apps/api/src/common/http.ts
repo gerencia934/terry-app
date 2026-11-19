@@ -1,21 +1,33 @@
 import {
   ArgumentsHost, BadRequestException, Catch, ExceptionFilter, HttpException, HttpStatus, Injectable, Logger, PipeTransform,
-  SetMetadata, createParamDecorator, ExecutionContext,
+  SetMetadata, applyDecorators, createParamDecorator, ExecutionContext,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { ZodError, type ZodSchema } from 'zod';
 
 /** Usuario autenticado (lo pone el guard a partir del token). */
-export interface Actor { id: string; empresaId: string; rol: string; permisos: string[]; nombre: string }
+export interface Actor { id: string; empresaId: string; rol: string; permisos: string[]; nombre: string; sesionId?: string }
 export const ActorActual = createParamDecorator((_: unknown, ctx: ExecutionContext): Actor => ctx.switchToHttp().getRequest().actor);
 
 export const PUBLICO = 'publico';
 /** Ruta sin autenticación (login, recuperación, salud). */
 export const Publico = () => SetMetadata(PUBLICO, true);
 export const PERMISO = 'permiso';
+export const SIN_DATOS = 'sinAceptarDatos';
+/** Ruta que se puede usar antes de aceptar la política de datos personales (Ley 1581): ver quién soy, aceptar, salir. */
+export const SinAceptarDatos = () => SetMetadata(SIN_DATOS, true);
 /** Exige un permiso del rol, p. ej. @Permiso('declaraciones.autorizar'). */
 export const Permiso = (codigo: string) => SetMetadata(PERMISO, codigo);
+
+export const TECHO_IP = 'techoPorIp';
+/**
+ * Rutas de credenciales (ingreso, recuperar y restablecer la contraseña): `porCuenta` intentos por minuto para cada
+ * correo desde una misma IP —así una oficina que sale a internet por una sola IP no se bloquea entera— y además un techo
+ * por IP para todos los correos juntos (LIMITE_INGRESOS_IP_MIN), contra el rociado de contraseñas.
+ */
+export const LimiteCredenciales = (porCuenta: number) => applyDecorators(Throttle({ default: { limit: porCuenta, ttl: 60_000 } }), SetMetadata(TECHO_IP, true));
 
 /** Valida el cuerpo o la consulta con un esquema Zod y responde 400 con mensajes en español. */
 @Injectable()

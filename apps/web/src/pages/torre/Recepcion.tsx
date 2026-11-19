@@ -7,9 +7,10 @@ import { ResponsiveTable, type Column } from '../../components/data';
 import { Badge, Button, Card, EstadoBadge, Field, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { api, sesionActual, tienePermiso } from '../../lib/api';
 import { fmtFechaCorta } from '../../lib/format';
-import { cant, hoyCo, msg, sumarDias, useApi, verPdf } from '../../lib/servidor';
+import { cant, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista, verPdf } from '../../lib/servidor';
 import { Firma } from '../CampoServidor';
-import { useCatalogos, useClientes } from './comun';
+import { useCatalogos } from './comun';
+import { BuscarCliente } from '../../components/BuscarCliente';
 
 interface Descargue {
   id: string; numero: string; estado: string; fechaServicio: string; cliente: { razonSocial: string }; realizadoEn: string | null;
@@ -30,7 +31,7 @@ const formVacio = () => ({
 export function RecepcionPlantaServidor() {
   const [nueva, setNueva] = useState(false);
   const hoy = hoyCo();
-  const lista = useApi<{ filas: Descargue[] }>(`/manifiestos?tipo=DESCARGUE&desde=${sumarDias(hoy, -7)}&hasta=${sumarDias(hoy, 1)}&porPagina=100`);
+  const lista = usePaginado<Descargue>(`/manifiestos?tipo=DESCARGUE&desde=${sumarDias(hoy, -7)}&hasta=${sumarDias(hoy, 1)}`);
   if (nueva) return <NuevaRecepcion volver={() => { setNueva(false); lista.recargar(); }} />;
   const imprimir = (m: Descargue, recibo: boolean) => verPdf(`/manifiestos/${m.id}/${recibo ? 'recibo' : 'pdf'}`).catch(() => undefined);
   const cols: Column<Descargue>[] = [
@@ -49,8 +50,8 @@ export function RecepcionPlantaServidor() {
       <PageHeader eyebrow="Planta Los Pinos" title="Recepción en planta" subtitle="Descargas de transportadores externos: datos del vehículo y del conductor, báscula y firmas del receptor y de quien entrega. Al grabar sale el recibo para la impresora térmica."
         actions={<>{tienePermiso('manifiestos.operar') && <Button variant="primary" onClick={() => setNueva(true)}><Plus size={16} /> Nueva recepción</Button>}<Button onClick={lista.recargar}><RefreshCw size={16} /> Actualizar</Button></>} />
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
-        : !lista.datos ? <p className="p-6 text-center text-muted">Cargando…</p>
-        : <ResponsiveTable rows={lista.datos.filas} columns={cols} rowKey={(m) => m.id} cardTitle={(m) => <span className="num">{m.numero}</span>} cardBadge={(m) => <EstadoBadge estado={m.estado} />}
+        : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
+        : <ResponsiveTable rows={lista.filas} footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} columns={cols} rowKey={(m) => m.id} cardTitle={(m) => <span className="num">{m.numero}</span>} cardBadge={(m) => <EstadoBadge estado={m.estado} />}
             cardMeta={(m) => `${m.cliente.razonSocial} · ${m.transporte?.placa ?? ''}`} empty="No hay descargas en los últimos 7 días." />}
     </>
   );
@@ -58,7 +59,6 @@ export function RecepcionPlantaServidor() {
 
 function NuevaRecepcion({ volver }: { volver: () => void }) {
   const toast = useToast();
-  const clientes = useClientes();
   const cat = useCatalogos();
   const [f, setF] = useState(formVacio);
   const [lineas, setLineas] = useState<Linea[]>([{ sucursalId: '', declaracionId: '', cantidad: '', embalajes: '' }]);
@@ -123,7 +123,7 @@ function NuevaRecepcion({ volver }: { volver: () => void }) {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card title="1. Cliente y residuos">
           <div className="flex flex-col gap-3">
-            <Field label="Cliente" id="rp-c"><Select id="rp-c" value={f.clienteId} disabled={!!manifiestoId} onChange={set('clienteId')}><option value="">Elija el cliente</option>{clientes?.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
+            <Field label="Cliente" id="rp-c"><BuscarCliente id="rp-c" valor={f.clienteId} disabled={!!manifiestoId} vacio="Escriba el nombre o el NIT" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
             {f.clienteId && decls.datos && !sedes.length && <p className="rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">El cliente no tiene declaraciones autorizadas y activas.</p>}
             {lineas.map((l, i) => {
               const delaSede = (decls.datos?.filas ?? []).filter((d) => d.sucursales.some((s) => s.activa && s.sucursal.id === l.sucursalId));

@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Check, X, RefreshCw, Upload, ShieldAlert, Layers } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, Tabs, useToast } from '../components/ui';
+import { BuscarCliente } from '../components/BuscarCliente';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { useRouter } from '../lib/router';
 import { fmtCOP, fmtNum } from '../lib/format';
+import { usePaginado, PieLista } from '../lib/servidor';
 import { AsignacionMasiva } from './declaraciones/AsignacionMasiva';
 
 interface DeclApi {
@@ -28,17 +30,16 @@ export default function DeclaracionesServidor() {
   const toast = useToast();
   const { go } = useRouter();
   const [tipo, setTipo] = useState<'RESIDUO' | 'SERVICIO'>('RESIDUO');
-  const [f, setF] = useState({ estado: '', q: '', codigo: '' });
-  const [datos, setDatos] = useState<{ total: number; filas: DeclApi[] } | null>(null);
-  const [error, setError] = useState('');
+  const vacio = { estado: '', q: '', codigo: '', clienteId: '' };
+  const [f, setF] = useState(vacio);
+  // Nombre y código se aplican con Enter (no una consulta por tecla); estado y cliente, al elegirlos.
+  const [texto, setTexto] = useState({ q: '', codigo: '' });
   const [sel, setSel] = useState<DeclApi | null>(null);
   const [asignar, setAsignar] = useState(false);
-  const cargar = async () => {
-    setError('');
-    const qs = new URLSearchParams({ tipo, porPagina: '200', ...(f.estado && { estado: f.estado }), ...(f.q && { q: f.q }), ...(f.codigo && { codigo: f.codigo }) });
-    try { setDatos(await api(`/declaraciones?${qs}`)); } catch (e) { setError(e instanceof ErrorApi ? e.message : 'No se pudo cargar.'); }
-  };
-  useEffect(() => { cargar(); }, [tipo, f.estado]); // eslint-disable-line react-hooks/exhaustive-deps
+  const qs = new URLSearchParams({ tipo, ...(f.estado && { estado: f.estado }), ...(f.clienteId && { clienteId: f.clienteId }), ...(f.q && { q: f.q }), ...(f.codigo && { codigo: f.codigo }) });
+  const lista = usePaginado<DeclApi>(`/declaraciones?${qs}`);
+  const cargar = lista.recargar;
+  const aplicarTexto = () => setF((s) => ({ ...s, q: texto.q.trim(), codigo: texto.codigo.trim() }));
 
   const cambiar = async (d: DeclApi, estado: 'AUTORIZADA' | 'RECHAZADA') => {
     try { await api(`/declaraciones/${d.id}/estado`, { metodo: 'PATCH', cuerpo: { estado } }); toast(estado === 'AUTORIZADA' ? `Declaración ${d.numero} autorizada.` : `Declaración ${d.numero} rechazada.`); setSel(null); cargar(); }
@@ -62,16 +63,18 @@ export default function DeclaracionesServidor() {
     <>
       <PageHeader eyebrow="Comercial" title="Declaraciones" subtitle="Datos del servidor. Al autorizar, el API verifica que el tratamiento esté cubierto por un permiso ambiental vigente."
         actions={<>{tienePermiso('declaraciones.crear') && <Button onClick={() => setAsignar(true)}><Layers size={16} /> Asignar servicios</Button>}<Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
-      <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => setF({ estado: '', q: '', codigo: '' })}>
+      <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => { setF(vacio); setTexto({ q: '', codigo: '' }); }}>
+        <Field label="Cliente" id="ds-cli"><BuscarCliente id="ds-cli" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
         <Field label="Estado" id="ds-e"><Select id="ds-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['BORRADOR', 'PENDIENTE', 'AUTORIZADA', 'RECHAZADA'].map((x) => <option key={x} value={x}>{x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
-        <Field label="Nombre" id="ds-q"><Input id="ds-q" value={f.q} onChange={(e) => setF((s) => ({ ...s, q: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && cargar()} placeholder="Enter para buscar" /></Field>
-        <Field label="Código" id="ds-c"><Input id="ds-c" value={f.codigo} onChange={(e) => setF((s) => ({ ...s, codigo: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && cargar()} /></Field>
+        <Field label="Nombre" id="ds-q"><Input id="ds-q" value={texto.q} onChange={(e) => setTexto((s) => ({ ...s, q: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && aplicarTexto()} onBlur={aplicarTexto} placeholder="Enter para buscar" /></Field>
+        <Field label="Código" id="ds-c"><Input id="ds-c" value={texto.codigo} onChange={(e) => setTexto((s) => ({ ...s, codigo: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && aplicarTexto()} onBlur={aplicarTexto} /></Field>
       </FilterBar>
       <div className="mb-3"><Tabs value={tipo} onChange={setTipo} items={[{ value: 'RESIDUO', label: 'Residuos' }, { value: 'SERVICIO', label: 'Servicios' }]} /></div>
-      {error ? <p className="flex items-center gap-2 rounded-xl bg-bad/10 p-4 text-bad"><ShieldAlert size={18} />{error}</p>
-        : !datos ? <p className="p-6 text-center text-muted">Cargando…</p>
-        : <ResponsiveTable rows={datos.filas} columns={cols} rowKey={(d) => d.id} onRowClick={setSel} cardTitle={(d) => d.nombre} cardBadge={(d) => <EstadoBadge estado={d.estado} />}
-            cardMeta={(d) => `N.º ${d.numero} · ${d.cliente.razonSocial} · ${sedes(d)}`} empty="No hay declaraciones. Impórtelas desde Excel en Ajustes › Importar datos." />}
+      {lista.error ? <p className="flex items-center gap-2 rounded-xl bg-bad/10 p-4 text-bad"><ShieldAlert size={18} />{lista.error}</p>
+        : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
+        : <ResponsiveTable rows={lista.filas} columns={cols} rowKey={(d) => d.id} onRowClick={setSel} cardTitle={(d) => d.nombre} cardBadge={(d) => <EstadoBadge estado={d.estado} />}
+            footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />}
+            cardMeta={(d) => `N.º ${d.numero} · ${d.cliente.razonSocial} · ${sedes(d)}`} empty="No hay declaraciones con estos filtros. Impórtelas desde Excel en Ajustes › Importar datos." />}
       <AsignacionMasiva abierta={asignar} onClose={() => setAsignar(false)} onListo={cargar} />
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? `Declaración ${sel.numero}` : ''}
         footer={sel?.estado === 'PENDIENTE' && tienePermiso('declaraciones.autorizar') && <><Button onClick={() => cambiar(sel, 'RECHAZADA')}><X size={16} /> Rechazar</Button><Button variant="primary" onClick={() => cambiar(sel, 'AUTORIZADA')}><Check size={16} /> Autorizar</Button></>}>

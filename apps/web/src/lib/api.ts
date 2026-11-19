@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 // Cliente del API de Terra Viva.
 // Modo real: defina VITE_API_URL (ej. http://localhost:3000/api/v1) en apps/web/.env
 // Modo demostración: sin VITE_API_URL la app usa los datos de src/data/mock.ts.
@@ -7,7 +8,9 @@ export const MODO_REAL = API_URL.length > 0;
 
 export interface Sesion {
   accessToken: string; refreshToken: string; expiraEnSeg: number;
-  usuario: { id: string; nombre: string; email: string; rol: string; permisos: string[]; empresa: { razonSocial: string; nit: string } };
+  usuario: { id: string; nombre: string; email: string; rol: string; permisos: string[]; empresa: { razonSocial: string; nit: string };
+    /** Ley 1581: falta aceptar la versión vigente de la política de tratamiento de datos. */
+    requiereAceptarDatos?: boolean; politicaDatos?: { version: string; url: string | null } };
 }
 export class ErrorApi extends Error {
   constructor(public status: number, mensaje: string, public datos?: unknown) { super(mensaje); }
@@ -25,6 +28,12 @@ function guardar(s: Sesion | null) {
 }
 export const sesionActual = () => sesion;
 export const alCambiarSesion = (f: (s: Sesion | null) => void) => { oyentes.add(f); return () => oyentes.delete(f); };
+/** La sesión actual como estado de React (cambia al entrar, salir, renovar o aceptar la política de datos). */
+export function useSesion() {
+  const [s, setS] = useState<Sesion | null>(sesion);
+  useEffect(() => { const quitar = alCambiarSesion(setS); return () => { quitar(); }; }, []);
+  return s;
+}
 export const tienePermiso = (p: string) => !!sesion && (sesion.usuario.permisos.includes('*') || sesion.usuario.permisos.includes(p));
 
 async function renovar(): Promise<boolean> {
@@ -55,6 +64,9 @@ export async function api<T = unknown>(ruta: string, opciones: { metodo?: string
   }
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
+    // Sesión de antes de aceptar la política de datos: la app muestra la pantalla para aceptarla
+    if (r.status === 403 && (d as { codigo?: string }).codigo === 'ACEPTAR_DATOS' && sesion && !sesion.usuario.requiereAceptarDatos)
+      guardar({ ...sesion, usuario: { ...sesion.usuario, requiereAceptarDatos: true } });
     throw new ErrorApi(r.status, (d as { mensaje?: string }).mensaje ?? `Error ${r.status}`, d);
   }
   if (opciones.blob) return (await r.blob()) as T;
@@ -66,6 +78,17 @@ export async function ingresar(email: string, clave: string) {
   guardar(await api<Sesion>('/auth/login', { cuerpo: { email, clave } }));
   return sesion!;
 }
+/** Ley 1581: acepta la versión vigente de la política de datos; el servidor entrega una sesión nueva. */
+export async function aceptarPoliticaDatos() {
+  if (!sesion) return;
+  guardar(await api<Sesion>('/auth/aceptar-datos', { cuerpo: { version: sesion.usuario.politicaDatos?.version ?? '' } }));
+}
+/** Cierra la sesión en todos los dispositivos (por ejemplo, si se perdió el celular). */
+export async function salirDeTodos() {
+  await api('/auth/salir-todos', { cuerpo: {} }).catch(() => undefined);
+  guardar(null);
+}
+
 export async function salir() {
   const s = sesion;
   guardar(null);

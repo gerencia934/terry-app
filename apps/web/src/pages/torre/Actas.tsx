@@ -6,8 +6,9 @@ import { FilterBar, ResponsiveTable, type Column } from '../../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, useApi, verPdf } from '../../lib/servidor';
-import { useCatalogos, useClientes, type ClienteRef, type Destino } from './comun';
+import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, useApi, usePaginado, PieLista, verPdf } from '../../lib/servidor';
+import { useCatalogos, type Destino } from './comun';
+import { BuscarCliente, type ClienteBuscado } from '../../components/BuscarCliente';
 
 type TipoActa = 'DISPOSICION' | 'APROVECHAMIENTO' | 'CONCILIACION';
 const TIPOS: Record<TipoActa, string> = { DISPOSICION: 'Tratamiento y disposición final', APROVECHAMIENTO: 'Aprovechamiento', CONCILIACION: 'Conciliación de residuos' };
@@ -29,17 +30,17 @@ const mesAnterior = () => { const h = hoyCo(); const [y, m] = h.split('-').map(N
 
 export function ActasServidor() {
   const toast = useToast();
-  const clientes = useClientes();
+
   const base = { clienteId: '', estado: '', numero: '', desde: '', hasta: '' };
   const [f, setF] = useState(base);
   const [num, setNum] = useState('');
-  const lista = useApi<{ total: number; filas: ActaFila[] }>(`/actas?${new URLSearchParams({ porPagina: '300', ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) })}`);
+  const lista = usePaginado<ActaFila>(`/actas?${new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([, v]) => v)))}`);
   const [elegidas, setElegidas] = useState<Set<string>>(new Set());
   const [sel, setSel] = useState<string | null>(null);
   const [nueva, setNueva] = useState<'generar' | 'cargar' | null>(null);
   const emite = tienePermiso('actas.emitir');
   const activos = Object.values(f).filter(Boolean).length;
-  const filas = lista.datos?.filas ?? [];
+  const filas = lista.filas ?? [];
   const descargables = filas.filter((a) => elegidas.has(a.id) && a.estado !== 'BORRADOR');
   const zip = async () => {
     try { await bajarArchivo(`/actas/zip?ids=${descargables.map((a) => a.id).join(',')}`, `actas-${hoyCo()}.zip`); } catch (e) { toast(msg(e), 'warn'); }
@@ -63,7 +64,7 @@ export function ActasServidor() {
           <Button onClick={lista.recargar}><RefreshCw size={16} /> Actualizar</Button>
         </>} />
       <FilterBar active={activos} onClear={() => { setF(base); setNum(''); }}>
-        <Field label="Cliente" id="ac-c"><Select id="ac-c" value={f.clienteId} onChange={(e) => setF((s) => ({ ...s, clienteId: e.target.value }))}><option value="">Todos</option>{clientes?.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
+        <Field label="Cliente" id="ac-c"><BuscarCliente id="ac-c" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
         <Field label="Estado" id="ac-e"><Select id="ac-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option><option value="BORRADOR">Borrador</option><option value="EMITIDA">Emitidas</option><option value="ANULADA">Anuladas</option></Select></Field>
         <Field label="Periodo desde" id="ac-d"><Input id="ac-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
         <Field label="Hasta" id="ac-h"><Input id="ac-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>
@@ -76,12 +77,12 @@ export function ActasServidor() {
         </div>
       )}
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
-        : !lista.datos ? <p className="p-6 text-center text-muted">Cargando…</p>
-        : <ResponsiveTable rows={filas} columns={cols} rowKey={(a) => a.id} onRowClick={(a) => setSel(a.id)} selectable selected={elegidas} onSelectedChange={setElegidas}
+        : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
+        : <ResponsiveTable rows={filas} columns={cols} rowKey={(a) => a.id} onRowClick={(a) => setSel(a.id)} selectable footer={<PieLista mostradas={filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} selected={elegidas} onSelectedChange={setElegidas}
             cardTitle={(a) => <span className="num">{a.numero}</span>} cardBadge={(a) => <EstadoBadge estado={a.estado} />} cardMeta={(a) => `${a.cliente.razonSocial} · ${TIPOS[a.tipo]}`}
             empty="No hay actas con estos filtros. Cree una con «Nueva acta» cuando haya conciliaciones aprobadas." />}
       <DetalleActa id={sel} onClose={() => setSel(null)} onCambio={lista.recargar} />
-      {emite && <NuevaActa modo={nueva} clientes={clientes ?? []} onClose={() => setNueva(null)} onListo={(id) => { setNueva(null); lista.recargar(); setSel(id); }} />}
+      {emite && <NuevaActa modo={nueva} onClose={() => setNueva(null)} onListo={(id) => { setNueva(null); lista.recargar(); setSel(id); }} />}
     </>
   );
 }
@@ -167,12 +168,13 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
 }
 
 /** Nueva acta generada por TERRY-GO (borrador con las líneas aprobadas elegidas) o acta de un gestor aliado (PDF). */
-function NuevaActa({ modo, clientes, onClose, onListo }: { modo: 'generar' | 'cargar' | null; clientes: ClienteRef[]; onClose: () => void; onListo: (id: string) => void }) {
+function NuevaActa({ modo, onClose, onListo }: { modo: 'generar' | 'cargar' | null; onClose: () => void; onListo: (id: string) => void }) {
+  const [cliente, setCliente] = useState<ClienteBuscado | null>(null);
   const toast = useToast();
   const cat = useCatalogos();
   const [f, setF] = useState(() => ({ clienteId: '', tipo: 'DISPOSICION' as TipoActa, destinoId: '', ...mesAnterior() }));
   const [porGenerador, setPorGenerador] = useState(true);
-  const gestor = clientes.find((c) => c.id === f.clienteId)?.tipo === 'GESTOR';
+  const gestor = cliente?.tipo === 'GESTOR';
   const [elegidas, setElegidas] = useState<Set<string>>(new Set());
   const [archivo, setArchivo] = useState<File | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -206,7 +208,7 @@ function NuevaActa({ modo, clientes, onClose, onListo }: { modo: 'generar' | 'ca
     <Sheet open={!!modo} onClose={onClose} title={cargar ? 'Cargar acta de un gestor aliado' : 'Nueva acta'}
       footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={ocupado || !listo} onClick={enviar}>{cargar ? <><FileUp size={16} /> Cargar</> : <><Award size={16} /> Crear borrador</>}</Button></>}>
       <div className="flex flex-col gap-4">
-        <Field label="Cliente" id="na-c"><Select id="na-c" value={f.clienteId} onChange={(e) => setF((s) => ({ ...s, clienteId: e.target.value }))}><option value="">Elija el cliente</option>{clientes.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
+        <Field label="Cliente" id="na-c"><BuscarCliente id="na-c" valor={f.clienteId} vacio="Escriba el nombre o el NIT" onChange={(c) => { setCliente(c); setF((s) => ({ ...s, clienteId: c?.id ?? '' })); }} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Periodo desde" id="na-d"><Input id="na-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
           <Field label="Hasta" id="na-h"><Input id="na-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>

@@ -122,24 +122,62 @@ class ConciliacionesService {
     return this.obtener(a, id);
   }
 
-  /** Consolidado de varias conciliaciones (por periodo y cliente). */
+  /**
+   * Consolidado de varias conciliaciones (por periodo y cliente), sumado en la base: no trae las conciliaciones a
+   * memoria, así sirve con miles de clientes. Mismas reglas que totalesConciliacion (@terraviva/shared).
+   */
   async consolidado(a: Actor, f: z.infer<typeof Filtros>) {
-    const cs = await this.db.conciliacion.findMany({
-      where: { empresaId: a.empresaId, estado: f.estado ?? { not: 'ANULADA' }, manifiesto: { clienteId: f.clienteId, fechaServicio: f.desde || f.hasta ? { gte: f.desde, lte: f.hasta } : undefined } },
-      include: { manifiesto: { select: { pesoEntrada: true, pesoSalida: true, pesoNeto: true, cliente: { select: { id: true, razonSocial: true } } } }, items: lineas },
-      take: 5000,
-    });
-    const porCliente = new Map<string, { cliente: string; conciliaciones: typeof cs }>();
-    for (const c of cs) {
-      const k = c.manifiesto.cliente.id;
-      const g = porCliente.get(k) ?? { cliente: c.manifiesto.cliente.razonSocial, conciliaciones: [] };
-      g.conciliaciones.push(c); porCliente.set(k, g);
-    }
-    const tot = (xs: typeof cs) => totalesConciliacion(xs.flatMap((c) => c.items.map(aTotal)), xs.map((c) => bascula(c.manifiesto)));
+    const estado = f.estado ?? null, cliente = f.clienteId ?? null, desde = f.desde ?? null, hasta = f.hasta ?? null;
+    const donde = Prisma.sql`c.empresa_id = ${a.empresaId}::uuid
+      AND ((${estado}::text IS NULL AND c.estado::text <> 'ANULADA') OR c.estado::text = ${estado}::text)
+      AND (${cliente}::uuid IS NULL OR m.cliente_id = ${cliente}::uuid)
+      AND (${desde}::date IS NULL OR m.fecha_servicio >= ${desde}::date)
+      AND (${hasta}::date IS NULL OR m.fecha_servicio <= ${hasta}::date)`;
+    type Grupo = { cliente_id: string; unidad: string; tipo: string | null; forma: string | null; lineas: bigint; cargado: Prisma.Decimal | null; conciliado: Prisma.Decimal | null; valor: Prisma.Decimal | null; sin_conciliar: bigint };
+    type PorCliente = { cliente_id: string; razon_social: string; conciliaciones: bigint; lleno: Prisma.Decimal | null; vacio: Prisma.Decimal | null; neto: Prisma.Decimal | null };
+    const [grupos, clientes] = await Promise.all([
+      this.db.$queryRaw<Grupo[]>`
+        SELECT m.cliente_id, COALESCE(mc.abreviacion, mm.abreviacion, 'sin unidad') AS unidad, ci.tipo_negociacion::text AS tipo, ci.forma_pago::text AS forma,
+               count(*) AS lineas, sum(ci.cantidad_origen) AS cargado, sum(COALESCE(ci.cantidad_destino, 0)) AS conciliado,
+               sum(round(COALESCE(ci.cantidad_destino, ci.cantidad_origen) * COALESCE(ci.precio_unitario, 0), 2)) AS valor,
+               count(*) FILTER (WHERE ci.cantidad_destino IS NULL OR (ci.precio_unitario IS NULL AND COALESCE(ci.tipo_negociacion::text, '') NOT IN ('SIN_COSTO', 'CONTRATO'))) AS sin_conciliar
+          FROM conciliaciones c JOIN manifiestos m ON m.id = c.manifiesto_id
+          JOIN conciliacion_items ci ON ci.conciliacion_id = c.id JOIN manifiesto_items mi ON mi.id = ci.manifiesto_item_id
+          LEFT JOIN metricas mc ON mc.id = ci.metrica_id LEFT JOIN metricas mm ON mm.id = mi.metrica_id
+         WHERE ${donde}
+         GROUP BY 1, 2, 3, 4`,
+      this.db.$queryRaw<PorCliente[]>`
+        SELECT m.cliente_id, cl.razon_social, count(*) AS conciliaciones, sum(COALESCE(m.peso_entrada, 0)) AS lleno, sum(COALESCE(m.peso_salida, 0)) AS vacio,
+               sum(COALESCE(m.peso_neto, COALESCE(m.peso_entrada, 0) - COALESCE(m.peso_salida, 0))) AS neto
+          FROM conciliaciones c JOIN manifiestos m ON m.id = c.manifiesto_id JOIN clientes cl ON cl.id = m.cliente_id
+         WHERE ${donde}
+         GROUP BY 1, 2`,
+    ]);
+    const n = (v: Prisma.Decimal | bigint | null) => (v === null ? 0 : Number(v));
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const SIN_VALOR = new Set(['SIN_COSTO', 'CONTRATO']);
+    const totales = (gs: Grupo[], b: PorCliente[]) => {
+      const unidades = new Map<string, { cargado: number; conciliado: number }>();
+      let cobro = 0, compra = 0, contado = 0, credito = 0, lineas = 0, sinConciliar = 0;
+      for (const g of gs) {
+        const u = unidades.get(g.unidad) ?? { cargado: 0, conciliado: 0 };
+        u.cargado += n(g.cargado); u.conciliado += n(g.conciliado); unidades.set(g.unidad, u);
+        lineas += n(g.lineas); sinConciliar += n(g.sin_conciliar);
+        const valor = n(g.valor);
+        if (g.tipo === 'COMPRA') compra += valor; else if (!SIN_VALOR.has(g.tipo ?? '')) cobro += valor;
+        if (!SIN_VALOR.has(g.tipo ?? '')) { if (!g.forma || g.forma === 'CONTADO') contado += valor; else credito += valor; }
+      }
+      return {
+        lineas, sinConciliar,
+        porUnidad: [...unidades.entries()].map(([unidad, v]) => ({ unidad, cargado: r2(v.cargado), conciliado: r2(v.conciliado), diferencia: r2(v.conciliado - v.cargado) })),
+        cobro: r2(cobro), compra: r2(compra), contado: r2(contado), credito: r2(credito), neto: r2(cobro - compra),
+        bascula: { lleno: r2(b.reduce((x, y) => x + n(y.lleno), 0)), vacio: r2(b.reduce((x, y) => x + n(y.vacio), 0)), neto: r2(b.reduce((x, y) => x + n(y.neto), 0)) },
+      };
+    };
     return {
-      conciliaciones: cs.length, totales: tot(cs),
-      clientes: [...porCliente.entries()].map(([clienteId, g]) => ({ clienteId, cliente: g.cliente, conciliaciones: g.conciliaciones.length, totales: tot(g.conciliaciones) }))
-        .sort((x, y) => y.totales.neto - x.totales.neto),
+      conciliaciones: clientes.reduce((x, c) => x + n(c.conciliaciones), 0), totales: totales(grupos, clientes),
+      clientes: clientes.map((c) => ({ clienteId: c.cliente_id, cliente: c.razon_social, conciliaciones: n(c.conciliaciones),
+        totales: totales(grupos.filter((g) => g.cliente_id === c.cliente_id), [c]) })).sort((x, y) => y.totales.neto - x.totales.neto),
     };
   }
 
@@ -166,6 +204,7 @@ class ConciliacionesService {
     ws.addRow(['Báscula: lleno / vacío / neto (kg)', '', t.bascula.lleno, t.bascula.vacio, t.bascula.neto]);
     ws.columns.forEach((col, i) => { col.width = [24, 32, 12, 14, 8, 8, 14, 14, 12, 14, 28, 14, 12, 12, 12, 12, 30][i] ?? 12; });
     const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    await this.audit.registrar(a, 'conciliacion', id, 'EXPORTAR', undefined, { formato: 'xlsx' });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="conciliacion-${c.manifiesto.numero}.xlsx"`);
     res.send(buf);
@@ -178,7 +217,7 @@ class ConciliacionesController {
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get('consolidado') consolidado(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.consolidado(a, f); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
-  @Get(':id/excel') excel(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.excel(a, id, res); }
+  @Permiso('exportar.masivo') @Get(':id/excel') excel(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response) { return this.s.excel(a, id, res); }
   @Permiso('conciliaciones.gestionar') @Patch(':id/items') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarItems)) b: z.infer<typeof EditarItems>) { return this.s.editarItems(a, id, b); }
   @Permiso('conciliaciones.gestionar') @Post(':id/igualar') igualar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Igualar)) b: z.infer<typeof Igualar>) { return this.s.igualar(a, id, b); }
   @Permiso('conciliaciones.aprobar') @Post(':id/aprobar') aprobar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.cambiarEstado(a, id, 'APROBADA'); }

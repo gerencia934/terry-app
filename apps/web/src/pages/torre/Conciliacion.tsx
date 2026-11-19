@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCheck, Download, Equal, RefreshCw, RotateCcw, Save, Scale, FileText, AlertTriangle } from 'lucide-react';
 import { totalesConciliacion, diferenciaPct, valorLinea, TOLERANCIA_CONCILIACION_PCT, type LineaTotal, type Totales } from '@terraviva/shared';
 import { FilterBar, ResponsiveTable, type Column } from '../../components/data';
+import { BuscarCliente } from '../../components/BuscarCliente';
 import { Badge, Button, Card, EstadoBadge, Field, Input, Kpi, PageHeader, Select, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
-import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi } from '../../lib/servidor';
-import { CONC_OFICINA, MF_OFICINA, useClientes } from './comun';
+import { bajarArchivo, cant, fechaHoraCo, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista } from '../../lib/servidor';
+import { CONC_OFICINA, MF_OFICINA, } from './comun';
 
 type Negociacion = 'COBRO' | 'COMPRA' | 'SIN_COSTO' | 'CONTRATO';
 type Forma = 'CONTADO' | 'CREDITO_30' | 'CREDITO_60' | 'CREDITO_90';
@@ -48,12 +49,12 @@ export function ConciliacionServidor() {
 
 function Bandeja({ abrir }: { abrir: (id: string) => void }) {
   const hoy = hoyCo();
-  const clientes = useClientes();
+
   const base = { estado: 'BORRADOR', desde: sumarDias(hoy, -60), hasta: hoy, clienteId: '', manifiesto: '' };
   const [f, setF] = useState(base);
   const [mf, setMf] = useState('');
   const filtros = Object.fromEntries(Object.entries(f).filter(([, v]) => v));
-  const lista = useApi<{ total: number; filas: ConcFila[] }>(`/conciliaciones?${new URLSearchParams({ porPagina: '300', ...filtros })}`);
+  const lista = usePaginado<ConcFila>(`/conciliaciones?${new URLSearchParams(filtros)}`);
   const cons = useApi<Consolidado>(`/conciliaciones/consolidado?${new URLSearchParams(filtros)}`);
   const activos = Object.entries(f).filter(([k, v]) => v !== (base as Record<string, string>)[k]).length;
   const cols: Column<ConcFila>[] = [
@@ -83,12 +84,12 @@ function Bandeja({ abrir }: { abrir: (id: string) => void }) {
         <Field label="Estado" id="cb-e"><Select id="cb-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todas</option><option value="BORRADOR">Borrador (por conciliar)</option><option value="APROBADA">Aprobadas</option></Select></Field>
         <Field label="Servicio desde" id="cb-d"><Input id="cb-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
         <Field label="Hasta" id="cb-h"><Input id="cb-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>
-        <Field label="Cliente" id="cb-c"><Select id="cb-c" value={f.clienteId} onChange={(e) => setF((s) => ({ ...s, clienteId: e.target.value }))}><option value="">Todos</option>{clientes?.map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}</Select></Field>
+        <Field label="Cliente" id="cb-c"><BuscarCliente id="cb-c" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
         <Field label="Manifiesto" id="cb-m"><Input id="cb-m" value={mf} onChange={(e) => setMf(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setF((s) => ({ ...s, manifiesto: mf.trim() }))} onBlur={() => setF((s) => ({ ...s, manifiesto: mf.trim() }))} placeholder="MF-…" /></Field>
       </FilterBar>
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
-        : !lista.datos ? <p className="p-6 text-center text-muted">Cargando…</p>
-        : <ResponsiveTable rows={lista.datos.filas} columns={cols} rowKey={(c) => c.id} onRowClick={(c) => abrir(c.id)} cardTitle={(c) => <span className="num">{c.manifiesto.numero}</span>}
+        : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
+        : <ResponsiveTable rows={lista.filas} footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} columns={cols} rowKey={(c) => c.id} onRowClick={(c) => abrir(c.id)} cardTitle={(c) => <span className="num">{c.manifiesto.numero}</span>}
             cardBadge={(c) => <EstadoBadge estado={c.estado} />} cardMeta={(c) => `${c.manifiesto.cliente.razonSocial} · ${fmtFecha(c.manifiesto.fechaServicio)}`}
             empty={f.estado === 'BORRADOR' ? 'No hay conciliaciones por hacer con estos filtros. Se abren solas cuando el conductor graba el manifiesto.' : 'No hay conciliaciones con estos filtros.'} />}
     </>

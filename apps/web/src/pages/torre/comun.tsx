@@ -33,18 +33,8 @@ export interface RutaApi {
 
 // ---------- Catálogos (una sola carga por sesión) ----------
 let cache: Promise<Catalogos> | null = null;
-let cacheClientes: Promise<ClienteRef[]> | null = null;
-alCambiarSesion(() => { cache = null; cacheClientes = null; });
-export interface ClienteRef { id: string; razonSocial: string; nit: string; tipo?: 'DIRECTO' | 'GESTOR' }
-export function useClientes() {
-  const [c, setC] = useState<ClienteRef[] | null>(null);
-  useEffect(() => {
-    let vivo = true;
-    (cacheClientes ??= api<{ filas: ClienteRef[] }>('/clientes?porPagina=500').then((r) => r.filas)).then((x) => vivo && setC(x)).catch(() => { cacheClientes = null; });
-    return () => { vivo = false; };
-  }, []);
-  return c;
-}
+
+alCambiarSesion(() => { cache = null; });
 const cargarCatalogos = async (): Promise<Catalogos> => {
   const [vehiculos, personal, zonas, ops] = await Promise.all([
     api<Vehiculo[]>('/vehiculos'), api<Persona[]>('/personal'), api<Zona[]>('/zonas'),

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ErrorApi } from './api';
 import { cx } from './format';
+import { Button } from '../components/ui';
 
 /** Mensaje legible de un error del API. */
 export const msg = (e: unknown, def = 'No se pudo completar.') => (e instanceof ErrorApi ? e.message : def);
@@ -73,3 +74,39 @@ export const horaColumna = (iso: string | null | undefined) => (iso ? iso.slice(
 
 /** Número con hasta 2 decimales, o «—». */
 export const cant = (v: string | number | null | undefined) => (v === null || v === undefined || v === '' ? '—' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }));
+
+/**
+ * Listado por páginas con «Cargar más» (requisitos de producción §1: ningún listado pide todo de una vez).
+ * `ruta` sin `pagina` ni `porPagina`; el API responde { total, filas }.
+ */
+export function usePaginado<T>(ruta: string | null, porPagina = 50) {
+  const [filas, setFilas] = useState<T[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const turno = useRef(0);
+  const pedir = useCallback(async (p: number, agregar: boolean) => {
+    if (!ruta) { setFilas(null); return; }
+    const t = ++turno.current;
+    setCargando(true); setError('');
+    try {
+      const r = await api<{ total: number; filas: T[] }>(`${ruta}${ruta.includes('?') ? '&' : '?'}pagina=${p}&porPagina=${porPagina}`);
+      if (t !== turno.current) return;
+      setTotal(r.total); setPagina(p); setFilas((f) => (agregar && f ? [...f, ...r.filas] : r.filas));
+    } catch (e) { if (t === turno.current) setError(msg(e, 'No se pudo cargar.')); }
+    finally { if (t === turno.current) setCargando(false); }
+  }, [ruta, porPagina]);
+  useEffect(() => { pedir(1, false); }, [pedir]);
+  const recargar = useCallback(() => pedir(1, false), [pedir]);
+  return { filas, total, error, cargando, hayMas: !!filas && filas.length < total, cargarMas: () => pedir(pagina + 1, true), recargar };
+}
+
+export function PieLista({ mostradas, total, hayMas, cargando, cargarMas }: { mostradas: number; total: number; hayMas: boolean; cargando: boolean; cargarMas: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-muted">
+      <span>Mostrando <b className="num text-fg">{mostradas}</b> de <b className="num text-fg">{total}</b></span>
+      {hayMas && <Button size="sm" disabled={cargando} onClick={cargarMas}>{cargando ? 'Cargando…' : 'Cargar más'}</Button>}
+    </div>
+  );
+}
