@@ -29,6 +29,7 @@ import { TarifasServidor } from './pages/TarifasServidor';
 import { PermisosServidor } from './pages/PermisosServidor';
 import { FlotaServidor, InspeccionesServidor } from './pages/FlotaServidor';
 import { UsuariosServidor } from './pages/UsuariosServidor';
+import { IndicadoresServidor, InicioServidor } from './pages/IndicadoresServidor';
 import Verificar from './pages/Verificar';
 
 function Screen() {
@@ -53,7 +54,7 @@ function Screen() {
   }
   const page = (() => {
     switch (route) {
-      case 'inicio': return <Inicio />;
+      case 'inicio': return MODO_REAL ? <InicioServidor /> : <Inicio />;
       case 'clientes': return MODO_REAL ? <ClientesServidor /> : <Clientes />;
       case 'declaraciones': return MODO_REAL ? <DeclaracionesServidor /> : <Declaraciones />;
       case 'tarifas': return MODO_REAL ? <TarifasServidor /> : <Precios />;
@@ -70,7 +71,7 @@ function Screen() {
       case 'inventario': return <Inventario />;
       case 'certificados': return MODO_REAL ? <ActasServidor /> : <Certificados />;
       case 'permisos': return MODO_REAL ? <PermisosServidor /> : <Permisos />;
-      case 'indicadores': return <Indicadores />;
+      case 'indicadores': return MODO_REAL ? <IndicadoresServidor /> : <Indicadores />;
       case 'informes': return <Informes />;
       case 'ajustes': return <ConfigIndex />;
       case 'importar': return <Cargues />;

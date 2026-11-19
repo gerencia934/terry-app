@@ -6,7 +6,7 @@ import { CAUSALES_CANCELACION, CLIENTES, DIST_MANEJO, RUTAS_MES, SERIE_MENSUAL, 
 import { fmtNum } from '../lib/format';
 
 /** Lee los tokens de color actuales (cambian con el tema) para pasarlos a Recharts. */
-function useChartColors() {
+export function useChartColors() {
   const read = () => {
     const cs = getComputedStyle(document.documentElement);
     const v = (n: string) => `rgb(${cs.getPropertyValue(`--${n}`).trim().split(/\s+/).join(',')})`;

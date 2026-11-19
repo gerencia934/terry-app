@@ -37,7 +37,7 @@ certificado ante la CAS o el cliente.
 | Manifiestos | `manifiestos`, `desde-ruta`, `:id/items`, `:id/evidencias`, `:id/grabar`, `:id/anular`, `:id/pdf`, `:id/recibo` (80 mm) | Firma táctil, báscula, ARL/EPS de terceros; al grabar abre la conciliación (regla en la base) |
 | Conciliaciones | `conciliaciones`, `consolidado`, `:id/items`, `:id/igualar · aprobar · reabrir`, `:id/excel` | Totales por unidad (shared); ±2 % con justificación; aprobada solo cambia factura/pago |
 | Actas | `actas`, `pendientes`, `:id/emitir`, `cargar`, `:id/pdf`, `zip`, `PATCH lineas/:id/certificado-aliado`, `verificar/:código` (pública; el QR abre `<web>/#verificar/<código>`) | Solo líneas aprobadas; soporte legal a la fecha del servicio; PDF con QR (pdfkit) |
-| Informes | `informes/rutas/rendimiento`, `informes/rutas/costos` | Cumplimiento por ruta/día/rango; fletes en Excel |
+| Informes | `informes/inicio` (cadena del mes, operación de hoy, agenda, obligaciones; cifras de dinero solo con «informes.ver»), `informes/indicadores` (toneladas, facturado, comprado y servicios por mes; por cliente, destino, tratamiento, vehículo y conductor; inspecciones y diferencia de báscula), `informes/rutas/rendimiento`, `informes/rutas/costos` | Sobre las conciliaciones no anuladas; toneladas solo de líneas en masa (factor a kg); lo facturado coincide con el consolidado de conciliaciones; fletes en Excel |
 | Empresa | `empresa`, `PATCH empresa/configuracion`, `PATCH empresa/consecutivos/:documento`, `empresa/textos-legales` (versiones) | Numeración TV/PSAP (el último número solo sube); textos legales con versión que salen según la disposición |
 | Archivos | `archivos?clave=` | Carpeta local por empresa (S3/R2 en producción); tipo real validado |
 

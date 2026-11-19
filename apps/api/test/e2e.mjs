@@ -937,6 +937,29 @@ let inmutable = false;
 try { await db.auditoria.deleteMany({ where: { accion: 'LOGIN' } }); } catch (e) { inmutable = /no se modifica ni se borra/.test(String(e)); }
 prueba('…y nadie la puede borrar ni modificar (ni escribiendo en la base)', inmutable);
 
+console.log('\n8b. Indicadores e inicio (fase 1c)');
+r = await llamar('GET', '/informes/indicadores?desde=2026-01-01&hasta=2026-12-31', { token: T8 });
+const indic = r.json;
+prueba('indicadores: totales, serie por mes y repartos, con los datos de las conciliaciones', r.status === 200 && indic.totales.servicios >= 1 && indic.serie.length >= 1
+  && indic.porCliente.length >= 1 && indic.porVehiculo.length >= 1, JSON.stringify(indic).slice(0, 300));
+const sumaDestinos = Math.round((indic.porDestino ?? []).reduce((a, x) => a + x.toneladas, 0) * 100) / 100;
+prueba('…las toneladas por destino suman el total', Math.abs(sumaDestinos - indic.totales.toneladas) < 0.05, `${sumaDestinos} vs ${indic.totales.toneladas}`);
+r = await llamar('GET', '/conciliaciones/consolidado?desde=2026-01-01&hasta=2026-12-31', { token: T8 });
+prueba('…lo facturado coincide con el consolidado de conciliaciones del mismo rango', r.status === 200 && Math.abs(indic.totales.facturado - r.json.totales.cobro) < 0.01, `${indic.totales.facturado} vs ${r.json.totales?.cobro}`);
+r = await llamar('GET', '/informes/indicadores?desde=2026-12-31&hasta=2026-01-01', { token: T8 });
+prueba('…un rango al revés → 400', r.status === 400, String(r.status));
+const rolAuxiliar = await db.rol.findFirst({ where: { nombre: 'Auxiliar', empresaId: cliente.empresaId } });
+const auxiliarE2e = await db.usuario.upsert({ where: { email: 'auxiliar.e2e@terravivasas.com' }, update: {}, create: { empresaId: cliente.empresaId, rolId: rolAuxiliar.id, nombre: 'Auxiliar E2E', documento: '6',
+  email: 'auxiliar.e2e@terravivasas.com', esAuxiliar: true, passwordHash: await (await import('@node-rs/argon2')).hash('Auxiliar2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+const tAux = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: auxiliarE2e.email, clave: 'Auxiliar2026!' } })).json)).accessToken;
+r = await llamar('GET', '/informes/indicadores?desde=2026-01-01&hasta=2026-12-31', { token: tAux });
+prueba('…sin el permiso «informes.ver» (auxiliar) no se ven → 403', r.status === 403, String(r.status));
+r = await llamar('GET', '/informes/inicio', { token: T8 });
+prueba('inicio: cadena del mes, agenda, obligaciones y cifras del mes para quien ve informes', r.status === 200 && typeof r.json.cadena?.solicitadas === 'number' && r.json.negocio !== null
+  && Array.isArray(r.json.obligaciones) && Array.isArray(r.json.rutasHoy) && typeof r.json.agenda?.semana === 'number', JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', '/informes/inicio', { token: tAux });
+prueba('…quien no ve informes recibe la operación, sin cifras de dinero', r.status === 200 && r.json.negocio === null && typeof r.json.cadena?.programadas === 'number', JSON.stringify(r.json).slice(0, 200));
+
 // Límite de peticiones (al final: deja la IP de la prueba sin poder ingresar durante un minuto).
 // El ingreso cuenta por correo y por IP: una oficina sale a internet por una sola IP y no debe bloquearse entera.
 let r11;
