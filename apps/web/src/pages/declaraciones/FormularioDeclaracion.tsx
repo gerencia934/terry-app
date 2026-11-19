@@ -3,7 +3,7 @@
 // vuelve a revisar todo al guardar: el formulario solo avisa antes y explica qué falta y dónde.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, CircleAlert, CircleCheck, Save, Send, ShieldAlert, ShieldCheck, Star, Trash2 } from 'lucide-react';
-import { FORMAS_PAGO, NEGOCIACIONES, RESPONSABILIDAD_GENERADOR, faltantesParaAutorizar } from '@terraviva/shared';
+import { FORMAS_PAGO, NEGOCIACIONES, RESPONSABILIDAD_GENERADOR, TIPOS_RCD, faltantesParaAutorizar, type TipoRcdCodigo } from '@terraviva/shared';
 import { Badge, Button, Card, EstadoBadge, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { BuscarCliente } from '../../components/BuscarCliente';
 import { api, sesionActual, tienePermiso } from '../../lib/api';
@@ -410,10 +410,23 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
                         : <><ShieldAlert size={14} className="mt-px shrink-0" /> {cob.soporte}. No se podrá autorizar mientras siga así.</>}
                     </p>
                   </div>
-                  <Button size="sm" variant="ghost" aria-label="Quitar la disposición" onClick={() => set({ disposiciones: f.disposiciones.filter((_, j) => j !== i) })}><Trash2 size={15} /></Button>
+                  <Button size="sm" variant="ghost" aria-label="Quitar la disposición" onClick={() => {
+                    const quedan = f.disposiciones.filter((_, j) => j !== i);
+                    // Sin la disposición de RCD, el tipo de RCD ya no aplica
+                    set({ disposiciones: quedan, ...(quedan.some((y) => c.disposiciones.find((z) => z.id === y.disposicionId)?.codigo === 'RCD') ? {} : { tipoRcd: '' as const }) });
+                  }}><Trash2 size={15} /></Button>
                 </div>
               );
             })}
+            {residuo && f.disposiciones.some((x) => c.disposiciones.find((y) => y.id === x.disposicionId)?.codigo === 'RCD') && (
+              <Campo label="Tipo de RCD (Anexo II de la Res. 1257 de 2021)" id="dc-rcd" hint="Lo pide la constancia de RCD que sale con el certificado: sin él, el certificado no se emite.">
+                <Select id="dc-rcd" value={f.tipoRcd} onChange={(x) => set({ tipoRcd: x.target.value as '' | TipoRcdCodigo })}>
+                  <option value="">Elija el tipo…</option>
+                  <optgroup label="1. Susceptibles de aprovechamiento">{TIPOS_RCD.filter((t) => t.aprovechable).map((t) => <option key={t.codigo} value={t.codigo}>{t.numeral} {t.nombre}</option>)}</optgroup>
+                  <optgroup label="2. No susceptibles de aprovechamiento">{TIPOS_RCD.filter((t) => !t.aprovechable).map((t) => <option key={t.codigo} value={t.codigo}>{t.numeral} {t.nombre}</option>)}</optgroup>
+                </Select>
+              </Campo>
+            )}
             <Campo label={f.disposiciones.length ? 'Agregar otra disposición' : 'Disposición o manejo'} id="dc-disp"
               hint={residuo ? 'Obligatoria para autorizar un residuo. La de la estrella es la principal: es la que sale en el certificado.' : 'Opcional en servicios.'}>
               <Select id="dc-disp" value="" onChange={(x) => x.target.value && set({ disposiciones: [...f.disposiciones, { disposicionId: x.target.value, principal: false }] })}>

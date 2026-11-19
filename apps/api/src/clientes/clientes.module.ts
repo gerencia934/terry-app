@@ -18,6 +18,7 @@ const Comercial = z.object({
   tipoNegociacion: z.nativeEnum(TipoNegociacion).default('COBRO'), formaPago: z.nativeEnum(FormaPago).default('CONTADO'),
   emailFacturacion: z.string().trim().email('Correo de facturación inválido').or(z.literal('')).transform((s) => s || null).nullish(),
   asesorId: z.string().uuid().nullish(),
+  representanteLegal: textoOpc(150), // lo pide la constancia de RCD (Anexo II, Res. 1257 de 2021)
 });
 const Crear = Comercial.extend({ nit: z.string().regex(/^\d{6,10}$/, 'NIT sin puntos ni DV (6 a 10 dígitos)') });
 const Editar = Comercial.partial().extend({
@@ -31,7 +32,7 @@ const DatosSede = z.object({
   esPrincipal: z.boolean().default(false), clasificacion: z.nativeEnum(ClasificacionSede).nullish(),
   generadorNit: z.string().regex(/^\d{6,10}$/, 'NIT del generador sin puntos ni DV').or(z.literal('').transform(() => null)).nullish(), generadorNombre: textoOpc(200),
   direccion: textoOpc(300), municipioDane: z.string().regex(/^\d{5}$/, 'Código DANE de 5 dígitos').or(z.literal('').transform(() => null)).nullish(), zonaId: z.string().uuid().nullish(),
-  latitud: z.number().min(-5).max(14).nullish(), longitud: z.number().min(-82).max(-66).nullish(), registroRespel: textoOpc(50),
+  latitud: z.number().min(-5).max(14).nullish(), longitud: z.number().min(-82).max(-66).nullish(), registroRespel: textoOpc(50), registroRcd: textoOpc(50),
   contacto: textoOpc(150), telefono: textoOpc(20), celular: textoOpc(20), emails: textoOpc(200),
   atencionLvDesde: horaOpc, atencionLvHasta: horaOpc, atencionFdDesde: horaOpc, atencionFdHasta: horaOpc, observaciones: textoOpc(1000),
 });

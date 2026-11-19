@@ -90,7 +90,9 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
 
 - Inventario con saldo por tratar y edición de catálogos: esperan las respuestas F1 y F2 (`docs/PREGUNTAS_GERENCIA.md`).
 - Exportar e Informes (descargas en Excel) siguen de ejemplo.
-- Certificados: campos del Anexo VI del Decreto 0766 de 2026 y códigos D/R (`docs/declaraciones/MODELO_DATOS.md` §9).
+- Certificados: ✅ modelo oficial de Terra Viva y constancia de RCD (Anexo II de la Res. 1257 de 2021) el 19-11-2026.
+  Siguen pendientes los campos del Anexo VI del Decreto 0766 de 2026 y los códigos D/R (`docs/declaraciones/MODELO_DATOS.md` §9),
+  y que la gerencia confirme los tres textos legales ajustados (quedaron «por revisar» en Ajustes).
 - Portal de clientes (fase 3, paso 3 del orden de la gerencia): ✅ consulta y descarga el 19-11-2026, con doble barrera
   (API + RLS), enlace firmado de 5 minutos, usuarios del cliente (administrador y consulta, sedes opcionales) e informe
   anual en Excel. Con el visto bueno del usuario («Sí, sigue») el administrador del cliente también carga sus

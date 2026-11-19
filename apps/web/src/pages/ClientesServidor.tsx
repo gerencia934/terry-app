@@ -19,11 +19,12 @@ interface SedeResumen { id: string; nombre: string; codigo: string | null; esPri
 interface ClienteFila {
   id: string; nit: string; dv: string | null; razonSocial: string; tipo: Tipo; sector: string | null; tipoNegociacion: string; formaPago: string;
   emailFacturacion: string | null; activo: boolean; asesor: { id: string; nombre: string } | null; sucursales: SedeResumen[]; _count: { declaraciones: number };
+  representanteLegal: string | null;
 }
 interface Sede {
   id: string; nombre: string; codigo: string | null; esPrincipal: boolean; activa: boolean; clasificacion: string | null; generadorNit: string | null; generadorNombre: string | null;
   direccion: string | null; municipio: MunicipioBuscado | null; zonaId: string | null; zona: Zona | null;
-  latitud: string | null; longitud: string | null; registroRespel: string | null; contacto: string | null; telefono: string | null; celular: string | null; emails: string | null;
+  latitud: string | null; longitud: string | null; registroRespel: string | null; registroRcd: string | null; contacto: string | null; telefono: string | null; celular: string | null; emails: string | null;
   atencionLvDesde: string | null; atencionLvHasta: string | null; atencionFdDesde: string | null; atencionFdHasta: string | null; observaciones: string | null;
   _count: { declaraciones: number };
 }
@@ -129,7 +130,7 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
       <DefList items={[
         ['NIT', <span className="num">{conDv(c)}</span>], ['Sector', c.sector ?? '—'],
         ['Negociación', NEGOCIACION[c.tipoNegociacion] ?? c.tipoNegociacion], ['Forma de pago', PAGO[c.formaPago] ?? c.formaPago],
-        ['Correo de facturación', c.emailFacturacion ?? '—'], ['Asesor comercial', c.asesor?.nombre ?? '—'],
+        ['Correo de facturación', c.emailFacturacion ?? '—'], ['Asesor comercial', c.asesor?.nombre ?? '—'], ['Representante legal', c.representanteLegal ?? '—'],
         ['Declaraciones', `${c.declaracionesActivas} activas de ${c._count.declaraciones}`], ['Solicitudes · manifiestos', `${c._count.solicitudes} · ${c._count.manifiestos}`],
       ]} />
       <div className="flex flex-wrap gap-2">
@@ -205,12 +206,12 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
   const actual = useApi<ClienteDetalle>(id ? `/clientes/${id}` : null);
   const asesores = useApi<{ id: string; nombre: string; rol: { nombre: string } }[]>('/clientes/asesores');
   const sectores = useApi<string[]>('/clientes/sectores');
-  const [v, setV] = useState({ nit: '', razonSocial: '', tipo: 'DIRECTO' as Tipo, sector: '', tipoNegociacion: 'COBRO', formaPago: 'CONTADO', emailFacturacion: '', asesorId: '', activo: true, causalId: '' });
+  const [v, setV] = useState({ nit: '', razonSocial: '', tipo: 'DIRECTO' as Tipo, sector: '', tipoNegociacion: 'COBRO', formaPago: 'CONTADO', emailFacturacion: '', asesorId: '', representanteLegal: '', activo: true, causalId: '' });
   const [enviando, setEnviando] = useState(false);
   const c = actual.datos;
   useEffect(() => {
     if (c) setV({ nit: c.nit, razonSocial: c.razonSocial, tipo: c.tipo, sector: c.sector ?? '', tipoNegociacion: c.tipoNegociacion, formaPago: c.formaPago,
-      emailFacturacion: c.emailFacturacion ?? '', asesorId: c.asesor?.id ?? '', activo: c.activo, causalId: '' });
+      emailFacturacion: c.emailFacturacion ?? '', asesorId: c.asesor?.id ?? '', representanteLegal: c.representanteLegal ?? '', activo: c.activo, causalId: '' });
   }, [c]);
   const inactivando = !!c && c.activo && !v.activo;
   const causales = useApi<{ id: string; nombre: string }[]>(inactivando && c.declaracionesActivas ? '/catalogos?tipo=CAUSAL' : null);
@@ -219,7 +220,7 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
     setEnviando(true);
-    const datos = { razonSocial: v.razonSocial, tipo: v.tipo, sector: v.sector, tipoNegociacion: v.tipoNegociacion, formaPago: v.formaPago, emailFacturacion: v.emailFacturacion, asesorId: v.asesorId || null };
+    const datos = { razonSocial: v.razonSocial, tipo: v.tipo, sector: v.sector, tipoNegociacion: v.tipoNegociacion, formaPago: v.formaPago, emailFacturacion: v.emailFacturacion, asesorId: v.asesorId || null, representanteLegal: v.representanteLegal };
     try {
       if (id) {
         const r = await api<{ id: string; inactivadas: number }>(`/clientes/${id}`, { metodo: 'PATCH', cuerpo: { ...datos, activo: v.activo, ...(v.causalId && { causalId: v.causalId }) } });
@@ -252,6 +253,7 @@ function FormularioCliente({ id, volver, alGuardar }: { id?: string; volver: () 
         <Field label="Forma de pago" id="fc-pago"><Select id="fc-pago" value={v.formaPago} onChange={set('formaPago')}>{Object.entries(PAGO).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
       </div>
       <Field label="Correo de facturación" id="fc-mail"><Input id="fc-mail" type="email" value={v.emailFacturacion} onChange={set('emailFacturacion')} maxLength={150} /></Field>
+      <Field label="Representante legal" id="fc-rep" hint="Lo pide la constancia de RCD del certificado (Anexo II de la Res. 1257 de 2021)."><Input id="fc-rep" value={v.representanteLegal} onChange={set('representanteLegal')} maxLength={150} /></Field>
       <Field label="Asesor comercial" id="fc-ase" hint="Aparece en las conciliaciones e informes por comercial.">
         <Select id="fc-ase" value={v.asesorId} onChange={set('asesorId')}><option value="">Sin asesor</option>{(asesores.datos ?? []).map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.rol.nombre}</option>)}</Select>
       </Field>
@@ -282,7 +284,7 @@ function FormularioSede({ clienteId, sedeId, volver, alGuardar }: { clienteId: s
   const cliente = useApi<ClienteDetalle>(`/clientes/${clienteId}`);
   const zonas = useApi<Zona[]>('/zonas');
   const vacia = { nombre: '', codigo: '', esPrincipal: false, clasificacion: '', generadorNit: '', generadorNombre: '', direccion: '', zonaId: '', latitud: '', longitud: '',
-    registroRespel: '', contacto: '', telefono: '', celular: '', emails: '', atencionLvDesde: '', atencionLvHasta: '', atencionFdDesde: '', atencionFdHasta: '', observaciones: '', activa: true };
+    registroRespel: '', registroRcd: '', contacto: '', telefono: '', celular: '', emails: '', atencionLvDesde: '', atencionLvHasta: '', atencionFdDesde: '', atencionFdHasta: '', observaciones: '', activa: true };
   const [v, setV] = useState(vacia);
   const [municipio, setMunicipio] = useState<MunicipioBuscado | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -291,7 +293,7 @@ function FormularioSede({ clienteId, sedeId, volver, alGuardar }: { clienteId: s
   useEffect(() => {
     if (!s) return;
     setV({ nombre: s.nombre, codigo: s.codigo ?? '', esPrincipal: s.esPrincipal, clasificacion: s.clasificacion ?? '', generadorNit: s.generadorNit ?? '', generadorNombre: s.generadorNombre ?? '',
-      direccion: s.direccion ?? '', zonaId: s.zonaId ?? '', latitud: s.latitud ?? '', longitud: s.longitud ?? '', registroRespel: s.registroRespel ?? '', contacto: s.contacto ?? '',
+      direccion: s.direccion ?? '', zonaId: s.zonaId ?? '', latitud: s.latitud ?? '', longitud: s.longitud ?? '', registroRespel: s.registroRespel ?? '', registroRcd: s.registroRcd ?? '', contacto: s.contacto ?? '',
       telefono: s.telefono ?? '', celular: s.celular ?? '', emails: s.emails ?? '', atencionLvDesde: horaColumna(s.atencionLvDesde), atencionLvHasta: horaColumna(s.atencionLvHasta),
       atencionFdDesde: horaColumna(s.atencionFdDesde), atencionFdHasta: horaColumna(s.atencionFdHasta), observaciones: s.observaciones ?? '', activa: s.activa });
     setMunicipio(s.municipio ? { codigoDane: s.municipio.codigoDane, nombre: s.municipio.nombre, departamento: s.municipio.departamento } : null);
@@ -352,6 +354,7 @@ function FormularioSede({ clienteId, sedeId, volver, alGuardar }: { clienteId: s
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Clasificación" id="fs-clas"><Select id="fs-clas" value={v.clasificacion} onChange={set('clasificacion')}><option value="">Sin clasificar</option>{Object.entries(CLASIFICACION).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
         <Field label="Registro de generador RESPEL (IDEAM)" id="fs-respel"><Input id="fs-respel" value={v.registroRespel} onChange={set('registroRespel')} maxLength={50} /></Field>
+        <Field label="N.º único de generador de RCD" id="fs-rcd" hint="El que asignó la autoridad ambiental al proyecto, si lo tiene. Va en la constancia de RCD."><Input id="fs-rcd" value={v.registroRcd} onChange={set('registroRcd')} maxLength={50} /></Field>
       </div>
       <Field label="Observaciones" id="fs-obs"><Input id="fs-obs" value={v.observaciones} onChange={set('observaciones')} maxLength={1000} placeholder="Pasar primero por portería" /></Field>
       <label className="flex items-center gap-2 text-[13px]">

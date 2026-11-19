@@ -1,7 +1,7 @@
 // Estado y reglas del formulario de 8 secciones (fase B de Declaraciones).
 // La validación es la misma del API: EsquemaDeclaracion (packages/shared). Aquí solo se convierte lo que se escribe en
 // pantalla (textos) a lo que espera el API, y cada mensaje se ubica en su campo y en su sección.
-import { EsquemaDeclaracion, type DeclaracionEntrada, type FORMAS_PAGO, type NEGOCIACIONES } from '@terraviva/shared';
+import { EsquemaDeclaracion, type DeclaracionEntrada, type FORMAS_PAGO, type NEGOCIACIONES, type TipoRcdCodigo } from '@terraviva/shared';
 
 type Negociacion = (typeof NEGOCIACIONES)[number];
 type FormaPago = (typeof FORMAS_PAGO)[number];
@@ -26,6 +26,8 @@ export interface FormDecl {
   color: string; olor: string; densidad: string; metricaDensidadId: string; contieneHidrocarburos: SiNo;
   // [5] Disposición
   disposiciones: { disposicionId: string; principal: boolean }[];
+  /** Solo RCD: numeral del Anexo II de la Res. 1257 de 2021 (lo pide la constancia del certificado). */
+  tipoRcd: '' | TipoRcdCodigo;
   // [6] Adicional
   datosExtras: string; fichaSeguridadUrl: string; caracterizacionUrl: string; serial: string;
   // [7] Precio (vacío = sin precio todavía)
@@ -41,7 +43,7 @@ export const formVacio = (tipo: Tipo = 'RESIDUO'): FormDecl => ({
   etiquetadoIds: [], codigoAId: '', codigoYId: '', codigoUn: '', riesgoIds: [], descripcionProceso: '', composicion: '', descripcionServicio: '',
   tipoEmbalajeId: '', otroTipoEmbalaje: '', presentacion: '', materialEmbalajeId: '', otroMaterial: '', tipoSellado: '',
   estadoFisico: '', inflamable: '', controladaEstupefacientes: '', color: '', olor: '', densidad: '', metricaDensidadId: '', contieneHidrocarburos: 'no',
-  disposiciones: [], datosExtras: '', fichaSeguridadUrl: '', caracterizacionUrl: '', serial: '',
+  disposiciones: [], tipoRcd: '', datosExtras: '', fichaSeguridadUrl: '', caracterizacionUrl: '', serial: '',
   precio: '', metricaId: '', tipoNegociacion: '', formaPago: '', mostrarPrecioApp: false,
   vigenteHasta: '', observaciones: '', responsabilidadAceptada: false,
 });
@@ -58,7 +60,7 @@ export interface DetalleDecl {
   tipoEmbalajeId: string | null; otroTipoEmbalaje: string | null; presentacion: string | null; materialEmbalajeId: string | null; otroMaterial: string | null; tipoSellado: string | null;
   estadoFisico: FormDecl['estadoFisico'] | null; inflamable: boolean | null; controladaEstupefacientes: boolean | null;
   color: string | null; olor: string | null; densidad: string | null; metricaDensidadId: string | null; contieneHidrocarburos: boolean;
-  disposiciones: { principal: boolean; disposicion: { id: string; codigo: string; nombre: string } }[];
+  disposiciones: { principal: boolean; disposicion: { id: string; codigo: string; nombre: string } }[]; tipoRcd: TipoRcdCodigo | null;
   datosExtras: string | null; fichaSeguridadUrl: string | null; caracterizacionUrl: string | null; serial: string | null; mostrarPrecioApp: boolean;
   vigenteHasta: string | null; observaciones: string | null; responsabilidadAceptada: boolean; aceptadaEn: string | null;
   aceptadaPor: { nombre: string } | null; aprobadaPor: { nombre: string } | null; aprobadaEn: string | null; causal: { nombre: string } | null;
@@ -81,7 +83,7 @@ export function desdeDetalle(d: DetalleDecl): FormDecl {
     materialEmbalajeId: s(d.materialEmbalajeId), otroMaterial: s(d.otroMaterial), tipoSellado: s(d.tipoSellado), estadoFisico: d.estadoFisico ?? '',
     inflamable: siNo(d.inflamable), controladaEstupefacientes: siNo(d.controladaEstupefacientes), color: s(d.color), olor: s(d.olor),
     densidad: d.densidad === null ? '' : String(Number(d.densidad)), metricaDensidadId: s(d.metricaDensidadId), contieneHidrocarburos: d.contieneHidrocarburos ? 'si' : 'no',
-    disposiciones: d.disposiciones.map((x) => ({ disposicionId: x.disposicion.id, principal: x.principal })),
+    disposiciones: d.disposiciones.map((x) => ({ disposicionId: x.disposicion.id, principal: x.principal })), tipoRcd: d.tipoRcd ?? '',
     datosExtras: s(d.datosExtras), fichaSeguridadUrl: s(d.fichaSeguridadUrl), caracterizacionUrl: s(d.caracterizacionUrl), serial: s(d.serial),
     precio: d.tarifaVigente ? String(Number(d.tarifaVigente.precioUnitario)) : '', metricaId: s(d.tarifaVigente?.metricaId),
     tipoNegociacion: s(d.tarifaVigente?.tipoNegociacion), formaPago: s(d.tarifaVigente?.formaPago), mostrarPrecioApp: d.mostrarPrecioApp,
@@ -116,6 +118,7 @@ export function aPayload(f: FormDecl, borrador: boolean): DeclaracionEntrada {
     color: residuo ? txt(f.color) : null, olor: residuo ? txt(f.olor) : null,
     densidad: residuo ? num(f.densidad) : null, metricaDensidadId: residuo ? idONull(f.metricaDensidadId) : null,
     contieneHidrocarburos: residuo && f.contieneHidrocarburos === 'si',
+    tipoRcd: residuo && f.tipoRcd ? f.tipoRcd : null,
     disposiciones: f.disposiciones,
     datosExtras: txt(f.datosExtras), fichaSeguridadUrl: txt(f.fichaSeguridadUrl), caracterizacionUrl: residuo ? txt(f.caracterizacionUrl) : null, serial: txt(f.serial),
     precio: f.precio.trim() === '' ? null : {
@@ -140,7 +143,7 @@ const SECCION_DE: Record<string, number> = {
   descripcionProceso: 2, composicion: 2, descripcionServicio: 2,
   tipoEmbalajeId: 3, otroTipoEmbalaje: 3, presentacion: 3, materialEmbalajeId: 3, otroMaterial: 3, tipoSellado: 3,
   estadoFisico: 4, inflamable: 4, controladaEstupefacientes: 4, color: 4, olor: 4, densidad: 4, metricaDensidadId: 4, contieneHidrocarburos: 4,
-  disposiciones: 5, datosExtras: 6, fichaSeguridadUrl: 6, caracterizacionUrl: 6, serial: 6, precio: 7, mostrarPrecioApp: 7,
+  disposiciones: 5, tipoRcd: 5, datosExtras: 6, fichaSeguridadUrl: 6, caracterizacionUrl: 6, serial: 6, precio: 7, mostrarPrecioApp: 7,
   vigenteHasta: 8, observaciones: 8, responsabilidadAceptada: 8,
 };
 export const seccionDe = (campo: string) => SECCION_DE[campo] ?? 8;

@@ -30,6 +30,8 @@ export const textoResponsabilidadGenerador = (conPoliticaDatos: boolean) =>
   [RESPONSABILIDAD_GENERADOR.intro, ...RESPONSABILIDAD_GENERADOR.puntos.map((p, i) => `${i + 1}. ${p}`), ...(conPoliticaDatos ? [RESPONSABILIDAD_GENERADOR.autorizacionDatos] : [])].join(' ');
 
 export const ESTADOS_FISICOS_DB = ['SOLIDO', 'SEMISOLIDO', 'LIQUIDO', 'GASEOSO'] as const;
+/** Numerales del Anexo II de la Res. 1257 de 2021 (ver TIPOS_RCD). Solo para RCD: lo exige la constancia del certificado. */
+export const TIPOS_RCD_DB = ['EXCAVACION', 'CIMENTACION', 'PETREOS', 'NO_PETREOS', 'CONTAMINADO_RESPEL', 'NO_APROVECHABLE', 'PELIGROSO'] as const;
 export const ALCANCES_SEDES = ['TODAS', 'PRINCIPAL', 'SELECCION'] as const;
 export const NEGOCIACIONES = ['COBRO', 'COMPRA', 'SIN_COSTO', 'CONTRATO'] as const;
 export const FORMAS_PAGO = ['CONTADO', 'CREDITO_30', 'CREDITO_60', 'CREDITO_90'] as const;
@@ -74,6 +76,7 @@ const base = z.object({
 
   // [4] Características fisicoquímicas
   estadoFisico: opcional(z.enum(ESTADOS_FISICOS_DB)),
+  tipoRcd: opcional(z.enum(TIPOS_RCD_DB)),
   inflamable: opcional(z.boolean()),
   controladaEstupefacientes: opcional(z.boolean()),
   color: texto(60),

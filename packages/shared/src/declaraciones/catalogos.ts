@@ -266,14 +266,16 @@ export interface TextoLegalCatalogo {
   soloPeligrosos?: boolean; activo?: boolean; revisado?: boolean;
 }
 export const TEXTOS_LEGALES: TextoLegalCatalogo[] = [
-  { codigo: 'CERTIFICACION', orden: 0, disposiciones: [], revisado: true, titulo: 'Certificación',
-    texto: 'TERRA VIVA S.A.S. E.S.P. certifica la gestión de los residuos relacionados en este documento, en las fechas, cantidades y condiciones aquí descritas, según la información declarada por el generador y los registros de recepción y tratamiento. Cada línea indica la licencia o el permiso que ampara su tratamiento y disposición final.' },
+  // Modelo oficial del certificado de Terra Viva (PSAP2026-296): es el párrafo de entrada. {emisor}, {nit_emisor} y
+  // {actividades} los llena el certificado (las actividades dependen de si Terra Viva recogió o solo recibió).
+  { codigo: 'CERTIFICACION', orden: 0, disposiciones: [], revisado: false, titulo: 'Certificación',
+    texto: '{emisor}, NIT {nit_emisor}, certifica que recibió a conformidad y realizó la gestión integral ({actividades}) de los residuos relacionados a continuación, bajo estrictos estándares de seguridad y en cumplimiento de la normativa ambiental vigente. Las cantidades son las recibidas y conciliadas con el generador, y cada línea indica la licencia o el permiso que ampara su tratamiento y disposición final.' },
   { codigo: 'RESPONSABILIDAD_RESPEL', orden: 1, disposiciones: [], soloPeligrosos: true, revisado: true, titulo: 'Responsabilidad del generador de residuos peligrosos',
     texto: 'Conforme a la Ley 1252 de 2008 y al Decreto 1076 de 2015, la responsabilidad integral del generador sobre sus residuos peligrosos subsiste hasta que sean aprovechados como insumo o dispuestos con carácter definitivo (artículo 2.2.6.1.3.3). El generador debe conservar este certificado (artículo 2.2.6.1.3.1).' },
-  { codigo: 'TRANSPORTE_RESPEL', orden: 2, disposiciones: [], soloPeligrosos: true, revisado: true, titulo: 'Transporte de residuos peligrosos',
-    texto: 'El transporte de los residuos peligrosos relacionados lo realizó TERRA VIVA S.A.S. E.S.P. conforme al Decreto 1079 de 2015 (transporte terrestre automotor de mercancías peligrosas) y a su Plan de Contingencia para el transporte de hidrocarburos, derivados y sustancias nocivas, presentado a la CAS y declarado recibido mediante el Auto SAA No. 0244-20 del 29 de septiembre de 2020, actualizado con el radicado CAS 80.30.17312.2024.' },
-  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], revisado: true, titulo: 'Tratamiento y vertimiento a suelo',
-    texto: 'Las aguas residuales domésticas (ARD) y no domésticas (ARnD) sin características de peligrosidad relacionadas se recibieron y trataron en la Planta de Tratamiento de Aguas Residuales «Los Pinos», en el Parque de Saneamiento Ambiental Los Pinos (vereda Villa de Leyva, Sabana de Torres). El efluente tratado se dispuso al suelo por evaporación, dispersión o riego, al amparo del permiso de vertimiento a suelo otorgado por la Corporación Autónoma Regional de Santander (CAS) mediante la Resolución DGL No. 000632 del 15 de agosto de 2023 (Expediente 210.60.00032.2023), cuyo alcance precisó el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023.' },
+  { codigo: 'TRANSPORTE_RESPEL', orden: 2, disposiciones: [], soloPeligrosos: true, revisado: false, titulo: 'Transporte de residuos peligrosos',
+    texto: 'El transporte de los residuos peligrosos relacionados lo realizó TERRA VIVA S.A.S. E.S.P. conforme al Decreto 1079 de 2015 (transporte terrestre automotor de mercancías peligrosas) y a su Plan de Contingencia para el transporte de hidrocarburos, derivados y sustancias nocivas, presentado a la CAS y declarado recibido mediante el Auto SAA No. 0244-20 del 29 de septiembre de 2020, actualizado con el radicado CAS 80.30.17312.2024, y al plan de contingencia registrado ante la Corporación Autónoma Regional para la Defensa de la Meseta de Bucaramanga (CDMB), expediente TH 0013-2021 (SINCA 33950).' },
+  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], revisado: false, titulo: 'Tratamiento y vertimiento a suelo',
+    texto: 'Las aguas residuales domésticas (ARD) y no domésticas (ARnD) sin características de peligrosidad relacionadas se recibieron y trataron en la Planta de Tratamiento de Aguas Residuales «Los Pinos», en el Parque de Saneamiento Ambiental Los Pinos (vereda Villa de Leyva, Sabana de Torres). El efluente tratado se dispuso al suelo por evaporación, dispersión o riego, al amparo del permiso de vertimiento a suelo otorgado por la Corporación Autónoma Regional de Santander (CAS) mediante la Resolución DGL No. 000632 del 15 de agosto de 2023 (Expediente 210.60.00032.2023), cuyo alcance precisó el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023. Ningún efluente de la planta se vierte a fuentes hídricas superficiales.' },
   { codigo: 'BIORREMEDIACION', orden: 11, disposiciones: ['BIO'], revisado: true, titulo: 'Biorremediación',
     texto: 'Los lodos no peligrosos y los cortes de perforación base agua relacionados se trataron por biorremediación (landfarming) en la celda de operación de landfarming de la planta «Los Pinos», unidad de tratamiento aprobada en el artículo quinto de la Resolución DGL No. 000632 del 15 de agosto de 2023 de la CAS, dentro del alcance de su artículo sexto, precisado por el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023.' },
   { codigo: 'RCD', orden: 12, disposiciones: ['RCD'], revisado: true, titulo: 'Residuos de construcción y demolición',
@@ -403,6 +405,34 @@ export const ETAPAS_RECORRIDO: [number, string, string, boolean, boolean, boolea
 export const ESTADOS_FISICOS: [string, 'SOLIDO' | 'SEMISOLIDO' | 'LIQUIDO' | 'GASEOSO'][] = [
   ['Sólido', 'SOLIDO'], ['Semisólido / lodo', 'SEMISOLIDO'], ['Líquido', 'LIQUIDO'], ['Gaseoso', 'GASEOSO'],
 ];
+
+/**
+ * Tipos de RCD del Anexo II («Formato constancia gestores») de la Resolución 1257 de 2021, que modifica la 0472 de 2017.
+ * El gestor de RCD entrega al generador las cantidades recibidas (en toneladas) por cada numeral.
+ */
+export const TIPOS_RCD = [
+  { codigo: 'EXCAVACION', numeral: '1.1', nombre: 'Productos de excavación y sobrantes de la adecuación del terreno', aprovechable: true,
+    ejemplos: 'coberturas vegetales, tierras, limos y materiales pétreos productos de la excavación, entre otros' },
+  { codigo: 'CIMENTACION', numeral: '1.2', nombre: 'Productos de cimentaciones y pilotajes', aprovechable: true, ejemplos: 'arcillas, bentonitas y demás' },
+  { codigo: 'PETREOS', numeral: '1.3', nombre: 'Pétreos', aprovechable: true,
+    ejemplos: 'hormigón, arenas, gravas, gravillas, cantos, pétreos asfálticos, trozos de ladrillos y bloques, cerámicas, sobrantes de mezcla de cementos y concretos hidráulicos, entre otros' },
+  { codigo: 'NO_PETREOS', numeral: '1.4', nombre: 'No pétreos', aprovechable: true,
+    ejemplos: 'vidrio, metales, plásticos, espumas, gomas y cauchos, madera y compuestos de madera, cartón-yeso (drywall), entre otros' },
+  { codigo: 'CONTAMINADO_RESPEL', numeral: '2.1', nombre: 'Contaminados con residuos peligrosos', aprovechable: false, ejemplos: '' },
+  { codigo: 'NO_APROVECHABLE', numeral: '2.2', nombre: 'Los que por su estado no pueden ser aprovechados', aprovechable: false, ejemplos: '' },
+  { codigo: 'PELIGROSO', numeral: '2.3', nombre: 'Los que tengan características de peligrosidad', aprovechable: false, ejemplos: '' },
+] as const;
+export type TipoRcdCodigo = (typeof TIPOS_RCD)[number]['codigo'];
+/** «1.3», «PETREOS», «Pétreos» o «1.3 Pétreos» → PETREOS (sin importar tildes ni mayúsculas). */
+export function tipoRcdDe(valor?: string | null): TipoRcdCodigo | null {
+  const v = (valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  if (!v) return null;
+  const t = TIPOS_RCD.find((x) => {
+    const nombre = x.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return v === x.numeral || v === x.codigo.toLowerCase() || v === nombre || v === `${x.numeral} ${nombre}` || v.startsWith(`${x.numeral} `);
+  });
+  return t?.codigo ?? null;
+}
 
 /** Catálogos que se pueden referenciar por código desde las plantillas de cargue. */
 export type ClaveCatalogo = 'categorias' | 'tiposResiduo' | 'lineas' | 'metricasPrecio' | 'embalajes' | 'materiales'

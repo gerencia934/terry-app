@@ -18,6 +18,12 @@ const Configuracion = z.object({
     entidad: z.string().trim().max(80).optional(), vence: fechaOVacia.optional(),
   })).max(10).optional(),
   notaBascula: z.string().trim().max(300).optional(), // nota libre del recibo, si no hay datos de calibración
+  // Contacto que va en el certificado y en la constancia de RCD (dirección de la planta, teléfono y correo)
+  contacto: z.object({
+    direccion: z.string().trim().max(200), municipio: z.string().trim().max(80), telefono: z.string().trim().max(60), correo: z.string().trim().max(150),
+  }).partial().optional(),
+  // Gestor de RCD: número único que le asignó la autoridad ambiental (Anexo II de la Res. 1257 de 2021)
+  rcd: z.object({ numeroGestor: z.string().trim().max(60) }).partial().optional(),
   // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   bascula: z.object({
     identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,

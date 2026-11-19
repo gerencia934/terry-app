@@ -162,9 +162,23 @@ Pasan 43 pruebas de reglas y 95 de punta a punta. La sección 8 de las e2e recor
 **Decisiones de esta fase:**
 - **PDF con `pdfkit`, en el mismo servidor.** No usa Gotenberg, así que no hace falta Docker ni otro servicio. El PDF se
   genera solo desde la copia fija, de modo que se puede volver a generar idéntico.
-- **Diseño del certificado: provisional y propio.** Lleva encabezado con QR, generador con coordenadas, tabla de residuos
-  con tratamiento y soporte legal, transporte, marco legal y firma del representante legal. **No lleva sellos ISO**
-  hasta que se confirme la autorización del ente certificador.
+- **Diseño del certificado: el modelo oficial de Terra Viva** (certificado PSAP2026-296; la gerencia confirmó el
+  19-11-2026 que el modelo es propio de la empresa). Formato A4 con logo y QR de verificación, título y número en rojo,
+  párrafo de entrada del modelo, «1. Información del generador», «2. Relación técnica de residuos gestionados»,
+  empresa que realizó el transporte, «3. Respaldo legal y permisos ambientales», los párrafos que aplican, cierre
+  «Para constancia de lo anterior, se firma en…» y firma del representante legal. Mejoras sobre el modelo:
+  - suma en una fila las líneas iguales de un mismo manifiesto (el modelo repetía 32 veces la misma línea);
+  - llena la columna «Licencia y/o permiso» (salía vacía) y da los totales por unidad;
+  - cita solo los actos y los párrafos que aplican, con la fecha de cada acto, y el NIT del transportador;
+  - la entrada dice lo que hizo Terra Viva: recolección y transporte, o recepción en planta si el residuo llegó en un
+    vehículo de terceros; el párrafo de transporte de RESPEL solo sale si Terra Viva los transportó;
+  - las certificaciones (ISO 9001, 14001 y 45001) van como sellos propios con su número, sin logotipos de terceros.
+- **Constancia de RCD (Anexo II de la Resolución 1257 de 2021):** si el certificado tiene residuos de construcción y
+  demolición, se agrega una hoja con los datos del gestor y del generador y las toneladas recibidas por tipo
+  (numerales 1.1 a 2.3), con la fecha de recepción. Cada declaración de RCD lleva su tipo (campo nuevo en el formulario y
+  columna opcional en la plantilla); sin él, o con una unidad que no se convierte a toneladas, el certificado no se
+  emite. El número único del gestor y el contacto de la planta se escriben en Ajustes › Datos de la empresa; el del
+  generador, en su sede; el representante legal del cliente, en su ficha.
 - **Soporte legal de cada línea:** se exige al emitir, revisado **a la fecha del servicio**:
   - permiso de la CAS que no haya vencido antes del servicio;
   - licencia del aliado vigente en esa fecha;

@@ -906,7 +906,7 @@ prueba('cliente gestor: un certificado por generador, a nombre del generador', r
 r = await llamar('POST', `/actas/${actaGen.id}/emitir`, { token: T8 });
 const contenido = r.json.contenido ?? {};
 const textos = (contenido.textosLegales ?? []).map((t) => t.codigo);
-prueba('el certificado lleva al generador, la firma con ciudad y representante, y la certificación ISO', r.status === 201 && contenido.version === 2 && contenido.generador?.razonSocial === 'Generador Tercero S.A.S.'
+prueba('el certificado lleva al generador, la firma con ciudad y representante, y la certificación ISO', r.status === 201 && contenido.version === 3 && contenido.generador?.razonSocial === 'Generador Tercero S.A.S.'
   && contenido.firma?.ciudad === 'Sabana de Torres' && contenido.certificaciones?.some((c) => c.numero === 'CO-SC-123'), JSON.stringify(contenido).slice(0, 300));
 prueba('solo los textos legales que aplican: certificación y biorremediación; sin peligrosos no van los de RESPEL; no RCD', textos.includes('CERTIFICACION') && textos.includes('BIORREMEDIACION') && !textos.includes('RCD')
   && !textos.includes('RESPONSABILIDAD_RESPEL') && !textos.includes('TRANSPORTE_RESPEL') && !textos.includes('RESPONSABILIDAD'), JSON.stringify(textos));
@@ -915,6 +915,41 @@ const { createHash } = await import('node:crypto');
 prueba('se guarda el hash SHA-256 del PDF emitido y coincide con el descargado', r.json.pdfSha256 === createHash('sha256').update(pdfGen.buf).digest('hex'));
 r = await llamar('GET', `/verificar/${r.json.codigoVerificacion}`);
 prueba('la verificación pública muestra solo número, fecha y validez', r.status === 200 && r.json.valido && r.json.numero && !('periodo' in r.json) && !('tipo' in r.json), JSON.stringify(r.json));
+
+// Certificado con RCD (modelo oficial de Terra Viva): constancia del Anexo II de la Res. 1257 de 2021, en toneladas por tipo
+r = await llamar('POST', '/declaraciones', { token: T8, cuerpo: { ...formulario, clienteId: suc.clienteId, alcanceSedes: 'TODAS', nombre: 'Escombros de demolición', codigoInterno: 'RCD-E2E',
+  categoriaId: idDe(cat.categorias, 'ESPEC'), esPeligroso: false, codigoYId: null, codigoUn: null, riesgoIds: [], etiquetadoIds: [], composicion: null, estadoFisico: 'SOLIDO', inflamable: false,
+  densidad: null, metricaDensidadId: null, disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'RCD') }], precio: { precioUnitario: 45000, metricaId: idDe(cat.metricasPrecio, 'ton') } } });
+const declRcd = r.json;
+r = await llamar('PATCH', `/declaraciones/${declRcd.id}/estado`, { token: T8, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('declaración de RCD autorizada (todavía sin su tipo del Anexo II)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE', clienteId: suc.clienteId, fechaServicio: '2026-11-30',
+  transporte: { empresaTransportadora: 'Volquetas E2E', nit: '901555444', placa: 'RCD123', tipoVehiculo: 'Volqueta', conductorNombre: 'Conductor volqueta', conductorDocumento: '91000222',
+    conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id },
+  items: [{ declaracionId: declRcd.id, sucursalId: suc.id, cantidad: 12 }] } });
+const mfRcd = r.json;
+r = await llamar('POST', `/manifiestos/${mfRcd.id}/grabar`, { token: T8, cuerpo: { ...firma, ...receptor, horaLlegada: '2026-11-30T08:00:00-05:00', horaSalida: '2026-11-30T08:30:00-05:00', pesoEntrada: 22000, pesoSalida: 10000 } });
+prueba('descargue de RCD de una volqueta externa: se graba', r.status === 201 && r.json.estado === 'REALIZADO', JSON.stringify(r.json).slice(0, 200));
+const concRcd = await db.conciliacion.findUnique({ where: { manifiestoId: mfRcd.id }, include: { items: true } });
+await llamar('POST', `/conciliaciones/${concRcd.id}/igualar`, { token: T8, cuerpo: {} });
+await llamar('POST', `/conciliaciones/${concRcd.id}/aprobar`, { token: T8 });
+r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.clienteId, periodoDesde: '2026-11-30', periodoHasta: '2026-11-30', conciliacionItemIds: [concRcd.items[0].id] } });
+const actaRcd = r.json;
+r = await llamar('POST', `/actas/${actaRcd.id}/emitir`, { token: T8 });
+prueba('sin el tipo de RCD (Anexo II) el certificado no se emite', r.status === 400 && /tipo de RCD/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 250));
+await db.declaracion.update({ where: { id: declRcd.id }, data: { tipoRcd: 'PETREOS' } });
+r = await llamar('POST', `/actas/${actaRcd.id}/emitir`, { token: T8 });
+const bloqueRcd = r.json.contenido?.rcd?.[0];
+prueba('…con el tipo, sale la constancia de RCD: toneladas por numeral, a nombre del generador, gestor de disposición final', r.status === 201 && r.json.contenido.version === 3
+  && bloqueRcd?.cantidades.find((q) => q.codigo === 'PETREOS')?.toneladas === 12 && bloqueRcd.total === 12 && bloqueRcd.generador.razonSocial === 'Generador Tercero S.A.S.'
+  && bloqueRcd.gestor.tipo === 'DISPOSICION_FINAL' && bloqueRcd.recepcion.desde === '2026-11-30', JSON.stringify(r.json.contenido?.rcd ?? r.json).slice(0, 300));
+const textosRcd = r.json.contenido?.textosLegales ?? [];
+prueba('…lo recibió Terra Viva en planta (no lo recogió): la entrada lo dice, va el NIT del transportador y no el texto de transporte de RESPEL',
+  /recepción en planta/.test(textosRcd.find((t) => t.codigo === 'CERTIFICACION')?.texto ?? '') && !textosRcd.some((t) => t.codigo === 'TRANSPORTE_RESPEL')
+  && textosRcd.some((t) => t.codigo === 'RCD') && !textosRcd.some((t) => /\{\w+\}/.test(t.texto)) && r.json.contenido.transporte.some((t) => t.nit === '901555444'),
+  JSON.stringify(textosRcd.map((t) => t.codigo)));
+const pdfRcd = await descargar(`/actas/${actaRcd.id}/pdf`, T8);
+prueba('…y el PDF sale con el modelo oficial y la constancia de RCD', pdfRcd.status === 200 && pdfRcd.buf.subarray(0, 4).toString() === '%PDF' && pdfRcd.buf.length > 20000, String(pdfRcd.buf.length));
 
 r = await llamar('GET', '/informes/rutas/rendimiento?desde=2026-11-25&hasta=2026-11-25', { token: T8 });
 const rend = r.json.rutas?.find((x) => x.rutaId === rutaB.id);

@@ -2,7 +2,7 @@
 // La usan: (1) el navegador para generar/leer el Excel y previsualizar, (2) scripts/generar-plantillas.ts
 // para producir los .xlsx del repositorio y (3) el API, que vuelve a validar todo antes de guardar.
 
-import { CODIGOS_BASE, ESTADOS_FISICOS, corrienteDe, type ClaveCatalogo } from '../declaraciones/catalogos';
+import { CODIGOS_BASE, ESTADOS_FISICOS, TIPOS_RCD, corrienteDe, tipoRcdDe, type ClaveCatalogo } from '../declaraciones/catalogos';
 
 export type TipoCol = 'texto' | 'numero' | 'fecha' | 'lista' | 'email' | 'si_no' | 'codigo';
 export interface Columna {
@@ -69,6 +69,7 @@ export const L = {
   tipoPersona: ['Jurídica', 'Natural'],
   tipoCliente: ['Directo', 'Gestor'],
   estadoFisico: ESTADOS_FISICOS.map(([etiqueta]) => etiqueta),
+  tipoRcd: TIPOS_RCD.map((t) => `${t.numeral} ${t.nombre}`),
   unidad: ['kg', 't', 'm³', 'gal', 'L', 'und'],
   tipoVehiculo: ['Furgón', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta', 'Tractocamión'],
   rol: ['Administrador', 'Logística', 'HSEQ', 'Comercial', 'Facturación', 'Conductor', 'Auxiliar', 'Cliente (portal)'],
@@ -107,9 +108,11 @@ const vSedes = (v: string, f: Record<string, string>, c: Contexto) => {
 };
 const si = (v?: string) => norm(v ?? '') === 'si';
 /** Advierte (no bloquea) si alguna disposición no tiene hoy permiso o licencia vigente: no se podrá autorizar. */
-const aDisposiciones = (v: string, _f: Record<string, string>, c: Contexto) => {
+const aDisposiciones = (v: string, f: Record<string, string>, c: Contexto) => {
   const sin = lista(v).filter((x) => c.catalogos.disposiciones.has(x.toUpperCase()) && !c.disposicionesCubiertas.has(x.toUpperCase()));
-  return sin.length ? `Sin permiso ni licencia vigente hoy: ${sin.join(', ')}. La declaración quedará pendiente y no se podrá autorizar.` : null;
+  const avisos = sin.length ? [`Sin permiso ni licencia vigente hoy: ${sin.join(', ')}. La declaración quedará pendiente y no se podrá autorizar.`] : [];
+  if (lista(v).some((x) => x.toUpperCase() === 'RCD') && !tipoRcdDe(f.tipoRcd)) avisos.push('Es RCD: indique el «Tipo de RCD (Anexo II)»; sin él no se emite su certificado.');
+  return avisos.length ? avisos.join(' ') : null;
 };
 /** Fecha de hoy en Colombia (AAAA-MM-DD), sin importar la zona horaria del equipo o del servidor. */
 export const hoyColombia = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
@@ -192,6 +195,9 @@ export const PLANTILLAS: Plantilla[] = [
       { key: 'inflamable', header: 'Inflamable', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'No', ayuda: '', ancho: 10 },
       { key: 'estupefacientes', header: 'Sustancia controlada (FNE)', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'No', ayuda: 'Controlada por el Fondo Nacional de Estupefacientes.', ancho: 12 },
       { key: 'disposiciones', header: 'Disposición', requerido: true, tipo: 'codigo', catalogo: 'disposiciones', multiple: true, ejemplo: 'BIO', ayuda: 'Una o varias separadas por punto y coma; la primera es la principal.', ancho: 12, advertir: aDisposiciones },
+      { key: 'tipoRcd', header: 'Tipo de RCD (Anexo II)', tipo: 'texto', opciones: L.tipoRcd, ejemplo: '', ancho: 18,
+        ayuda: 'Solo para residuos de construcción y demolición: numeral del Anexo II de la Res. 1257 de 2021 (1.1 a 2.3).',
+        validar: (v) => (v && !tipoRcdDe(v) ? 'Use un numeral del Anexo II: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2 o 2.3.' : null) },
       { key: 'frecuenciaDias', header: 'Frecuencia (días)', tipo: 'numero', ejemplo: 30, ayuda: 'Cada cuántos días se recoge (1 a 366).', ancho: 10,
         validar: (v) => v && !(Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 366) ? 'Entero entre 1 y 366.' : null },
       { key: 'cantidad', header: 'Cantidad por frecuencia', tipo: 'numero', ejemplo: 8000, ayuda: 'En la métrica del precio.', ancho: 12,

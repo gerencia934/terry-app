@@ -12,7 +12,8 @@ import { Auditoria } from '../common/servicios';
 import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, paginar, type Actor } from '../common/http';
 import type { Config } from '../config';
-import { pdfActa, type ContenidoActa } from './pdf';
+import { pdfActa, type BloqueRcd, type ContenidoActa } from './pdf';
+import { TIPOS_RCD } from '@terraviva/shared';
 
 type Tx = Prisma.TransactionClient;
 const id = z.string().uuid();
@@ -31,7 +32,10 @@ const Crear = z.object({
 }).refine((b) => b.periodoHasta >= b.periodoDesde, { message: 'El periodo está invertido.' });
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 /** Configuración de la empresa que usa el certificado (Ajustes › Datos de la empresa). */
-interface ConfigEmpresa { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; certificaciones?: { norma: string; numero: string; entidad?: string; vence?: string }[] }
+interface ConfigEmpresa {
+  ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; certificaciones?: { norma: string; numero: string; entidad?: string; vence?: string }[];
+  contacto?: { direccion?: string; municipio?: string; telefono?: string; correo?: string }; rcd?: { numeroGestor?: string };
+}
 const Items = z.object({ agregar: z.array(id).max(2000).default([]), quitar: z.array(id).max(2000).default([]) });
 const Anular = z.object({ motivo: z.string().trim().min(5).max(300) });
 /** N.° del certificado que expidió el gestor aliado para esa línea (vacío = quitarlo). */
@@ -180,7 +184,7 @@ class ActasService {
       this.db.conciliacionItem.findMany({ where: { actaId: acta.id }, ...lineasActa }),
     ]);
     const sinSoporte: string[] = [], sinCertificadoAliado: string[] = [];
-    const permisosUsados = new Map<string, { acto: string; autoridad: string; alcance: string; vence: string | null }>();
+    const permisosUsados = new Map<string, { acto: string; autoridad: string; alcance: string; vence: string | null; expedicion: string | null }>();
     /** Gestor aliado de la línea, vigente a la fecha del servicio: el destino del manifiesto si es uno de los aliados de la disposición. */
     const aliadoDe = (l: LineaActa) => {
       const d = l.disposicion ?? l.manifiestoItem.disposicion;
@@ -201,7 +205,8 @@ class ActasService {
       }
       const vigentes = d.permisos.map((x) => x.permiso).filter((p) => p.empresaId === a.empresaId &&
         (p.vence ? p.vence >= fechaServicio : ['VIGENTE', 'POR_VENCER'].includes(p.estado)));
-      vigentes.forEach((p) => permisosUsados.set(p.id, { acto: p.acto, autoridad: p.autoridad, alcance: p.alcance, vence: p.vence?.toISOString().slice(0, 10) ?? null }));
+      vigentes.forEach((p) => permisosUsados.set(p.id, { acto: p.acto, autoridad: p.autoridad, alcance: p.alcance, vence: p.vence?.toISOString().slice(0, 10) ?? null,
+        expedicion: p.expedicion?.toISOString().slice(0, 10) ?? null }));
       return vigentes.length ? vigentes.map((p) => `${p.acto} (${p.autoridad})`) : null;
     };
     const filas = lineas.map((l) => {
@@ -218,10 +223,21 @@ class ActasService {
         sede: mi.sucursal.nombre, cantidad: Number(l.cantidadConciliada ?? l.cantidadCargada), unidad: l.metrica?.abreviacion ?? mi.metrica?.abreviacion ?? 'und',
         tratamiento: d ? (d.propia ? d.nombre : `${d.nombre} (gestor aliado)`) : '—', soporte: s ?? [],
         aliado: aliado ? { razonSocial: aliado.razonSocial, nit: aliado.nit, licencia: aliado.licencia ?? '', autoridad: aliado.licenciaAutoridad ?? '', operacion: d!.nombre, certificado: l.certificadoAliado?.trim() || null } : null,
+        // Constancia de RCD (Anexo II): tipo y conversión a toneladas con el factor de la unidad
+        rcd: d?.codigo === 'RCD', tipoRcd: mi.declaracion.tipoRcd ?? null, numeroDeclaracion: mi.declaracion.numero,
+        kgPorUnidad: (() => { const me = l.metrica ?? mi.metrica; return me?.factorAKg === null || me?.factorAKg === undefined ? null : Number(me.factorAKg); })(),
+        recogido: m.tipo === 'CARGUE', sucursal: mi.sucursal,
       };
     });
     if (sinSoporte.length) throw new BadRequestException({ mensaje: `No se puede emitir: sin permiso o licencia vigente a la fecha del servicio para ${sinSoporte.join('; ')}.` });
     if (sinCertificadoAliado.length) throw new BadRequestException({ mensaje: `No se puede emitir el certificado final: falta el número del certificado del gestor aliado en ${sinCertificadoAliado.join('; ')}. Regístrelo en cada línea del acta.` });
+    // Constancia de RCD: cada línea de RCD necesita su tipo (Anexo II) y una unidad convertible a toneladas
+    const rcdSinTipo = [...new Map(filas.filter((x) => x.rcd && !x.tipoRcd).map((x) => [x.numeroDeclaracion, `N.º ${x.numeroDeclaracion} «${x.residuo}»`])).values()];
+    const rcdSinFactor = [...new Set(filas.filter((x) => x.rcd && x.kgPorUnidad === null).map((x) => x.unidad))];
+    if (exigirSoporte && rcdSinTipo.length)
+      throw new BadRequestException({ mensaje: `No se puede emitir: la constancia de RCD (Anexo II de la Res. 1257 de 2021) pide el tipo de RCD de las declaraciones ${rcdSinTipo.join(', ')}. Complételo en Declaraciones.` });
+    if (exigirSoporte && rcdSinFactor.length)
+      throw new BadRequestException({ mensaje: `No se puede emitir: la constancia de RCD va en toneladas y la unidad ${rcdSinFactor.join(', ')} no tiene factor de conversión a kilogramos (Catálogos › Unidades).` });
     // Párrafos de respaldo: los de las disposiciones de este certificado (vacío = siempre); los «solo peligrosos», si hay alguno.
     // GESTOR_ALIADO sale una vez por cada aliado, con sus datos y el número de su certificado.
     const presentes = new Set(filas.map((f) => f.disposicion).filter(Boolean) as string[]);
@@ -235,9 +251,17 @@ class ActasService {
       aliados.set(f.aliado.nit, x);
     }
     const llenar = (texto: string, v: Record<string, string>) => texto.replace(/\{(\w+)\}/g, (m, k: string) => v[k] ?? m);
+    // Lo que hizo Terra Viva: recogió y transportó (manifiesto de cargue) o recibió en planta (descargue de un tercero)
+    const recogio = filas.some((x) => x.recogido), recibio = filas.some((x) => !x.recogido);
+    const final = acta.tipo === 'APROVECHAMIENTO' ? 'aprovechamiento' : 'tratamiento y disposición final';
+    const actividades = recogio && recibio ? `recolección, transporte o recepción en planta, ${final}` : recogio ? `recolección, transporte, ${final}` : `recepción en planta, ${final}`;
+    const generales = { emisor: empresa.razonSocial, nit_emisor: empresa.nit, actividades };
+    const transportoPeligrosos = filas.some((x) => x.peligroso && x.recogido);
     const textos = (await this.db.textoLegal.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ orden: 'asc' }, { codigo: 'asc' }] }))
-      .filter((t) => (!t.disposiciones.length || t.disposiciones.some((x) => presentes.has(x))) && (!t.soloPeligrosos || hayPeligrosos))
-      .flatMap((t) => (t.codigo !== 'GESTOR_ALIADO' ? [t] : [...aliados.values()].map((x) => ({ ...t, texto: llenar(t.texto, {
+      .filter((t) => (!t.disposiciones.length || t.disposiciones.some((x) => presentes.has(x))) && (!t.soloPeligrosos || hayPeligrosos)
+        && (t.codigo !== 'TRANSPORTE_RESPEL' || transportoPeligrosos))
+      .flatMap((t) => (t.codigo !== 'GESTOR_ALIADO' ? [{ ...t, texto: llenar(t.texto, generales) }] : [...aliados.values()].map((x) => ({ ...t, texto: llenar(t.texto, {
+        ...generales,
         razon_social: x.razonSocial, nit: x.nit, operacion: [...x.operaciones].join(' y '), licencia: x.licencia, autoridad: x.autoridad || 'la autoridad ambiental',
         certificado: [...x.certificados].join(', ') || 'pendiente' }) }))));
     const conf = (empresa.configuracion ?? {}) as ConfigEmpresa;
@@ -246,25 +270,58 @@ class ActasService {
     const sedes = new Map(lineas.map((l) => [l.manifiestoItem.sucursal.id, l.manifiestoItem.sucursal]));
     const transporte = new Map(lineas.map((l) => { const m = l.conciliacion.manifiesto; return [m.numero, {
       manifiesto: m.numero, vehiculo: m.vehiculo?.placa ?? m.transporte?.placa ?? null,
-      transportador: m.transporte?.empresaTransportadora ?? empresa.razonSocial,
+      transportador: m.transporte?.empresaTransportadora ?? empresa.razonSocial, nit: m.transporte ? (m.transporte.nit ?? null) : empresa.nit,
     }]; }));
+    // Constancia de RCD: una por generador (el cliente, o cada generador de un cliente gestor)
+    const lineaSede = (x: (typeof filas)[number]['sucursal']) => [x.direccion, x.municipio ? `${x.municipio.nombre} (${x.municipio.departamento})` : null].filter(Boolean).join(', ') || x.nombre;
+    const principal = filas.some((x) => x.rcd)
+      ? await this.db.sucursal.findFirst({ where: { clienteId: acta.clienteId, esPrincipal: true }, include: { municipio: true } }) : null;
+    const porGenerador = new Map<string, (typeof filas)>();
+    for (const x of filas.filter((y) => y.rcd)) {
+      const k = acta.generadorNit ? acta.generadorNit : acta.cliente.tipo === 'GESTOR' ? (x.sucursal.generadorNit ?? x.sucursal.id) : acta.cliente.id;
+      porGenerador.set(k, [...(porGenerador.get(k) ?? []), x]);
+    }
+    const contacto = conf.contacto ?? {};
+    const rcd: BloqueRcd[] = [...porGenerador.values()].map((ls) => {
+      const s0 = ls[0].sucursal;
+      const esGenerador = !!acta.generadorNit || acta.cliente.tipo === 'GESTOR';
+      const fechas = ls.map((x) => x.fechaServicio).sort();
+      const toneladas = (cod: string) => Math.round(ls.filter((x) => x.tipoRcd === cod).reduce((acc, x) => acc + x.cantidad * (x.kgPorUnidad ?? 0) / 1000, 0) * 1000) / 1000;
+      const cantidades = TIPOS_RCD.map((t) => ({ codigo: t.codigo, numeral: t.numeral, nombre: t.nombre, toneladas: toneladas(t.codigo) }));
+      return {
+        gestor: { numero: conf.rcd?.numeroGestor?.trim() || null, razonSocial: empresa.razonSocial, nit: empresa.nit, representante: conf.representanteLegal?.trim() || null,
+          direccion: contacto.direccion?.trim() || null, telefono: contacto.telefono?.trim() || null, correo: contacto.correo?.trim() || null, municipio: contacto.municipio?.trim() || null,
+          tipo: 'DISPOSICION_FINAL' as const },
+        generador: esGenerador
+          ? { numero: s0.registroRcd ?? null, razonSocial: acta.generadorNombre ?? s0.generadorNombre ?? s0.nombre, nit: acta.generadorNit ?? s0.generadorNit ?? '—', representante: null,
+              domicilio: lineaSede(s0), telefono: s0.telefono ?? s0.celular ?? null, correo: s0.emails ?? null, generacion: [...new Set(ls.map((x) => lineaSede(x.sucursal)))] }
+          : { numero: [...new Set(ls.map((x) => x.sucursal.registroRcd).filter(Boolean))].join(', ') || null, razonSocial: acta.cliente.razonSocial,
+              nit: `${acta.cliente.nit}${acta.cliente.dv ? `-${acta.cliente.dv}` : ''}`, representante: acta.cliente.representanteLegal ?? null,
+              domicilio: principal ? lineaSede(principal) : null, telefono: principal?.telefono ?? principal?.celular ?? null,
+              correo: acta.cliente.emailFacturacion ?? principal?.emails ?? null, generacion: [...new Set(ls.map((x) => lineaSede(x.sucursal)))] },
+        cantidades, total: Math.round(cantidades.reduce((acc, q) => acc + q.toneladas, 0) * 1000) / 1000,
+        recepcion: { desde: fechas[0], hasta: fechas[fechas.length - 1] },
+      };
+    });
     return {
-      version: 2, origen: acta.origen, tipo: acta.tipo, numero: acta.numero, emitidaEn: new Date().toISOString(),
+      version: 3, origen: acta.origen, tipo: acta.tipo, numero: acta.numero, emitidaEn: new Date().toISOString(), actividades,
       periodo: { desde: acta.periodoDesde.toISOString().slice(0, 10), hasta: acta.periodoHasta.toISOString().slice(0, 10) },
-      emisor: { razonSocial: empresa.razonSocial, nit: empresa.nit },
+      emisor: { razonSocial: empresa.razonSocial, nit: empresa.nit, contacto: { direccion: contacto.direccion?.trim() || null, municipio: contacto.municipio?.trim() || null,
+        telefono: contacto.telefono?.trim() || null, correo: contacto.correo?.trim() || null } },
       destino: { razonSocial: acta.destino.razonSocial, nit: acta.destino.nit, municipio: acta.destino.municipio },
       cliente: { razonSocial: acta.cliente.razonSocial, nit: acta.cliente.nit, dv: acta.cliente.dv },
       generador: acta.generadorNit ? { razonSocial: acta.generadorNombre ?? acta.generadorNit, nit: acta.generadorNit } : null,
       clienteGestor: acta.cliente.tipo === 'GESTOR',
       sedes: [...sedes.values()].map((s) => ({ codigo: s.codigo, nombre: s.nombre, direccion: s.direccion, municipio: s.municipio ? `${s.municipio.nombre} (${s.municipio.departamento})` : null,
         latitud: s.latitud === null ? null : Number(s.latitud), longitud: s.longitud === null ? null : Number(s.longitud) })),
-      lineas: filas.map(({ disposicion: _d, aliado: _a, ...f }) => f), totales: [...totales.entries()].map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 })),
+      lineas: filas.map(({ disposicion: _d, aliado: _a, recogido: _r, sucursal: _s, numeroDeclaracion: _n, ...f }) => f), totales: [...totales.entries()].map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 })),
       transporte: [...transporte.values()], marcoLegal: [...permisosUsados.values()],
       verificacion: { codigo: acta.codigoVerificacion, url: this.urlVerificacion(acta.codigoVerificacion) },
       textosLegales: textos.map((t) => ({ codigo: t.codigo, version: t.version, titulo: t.titulo, texto: t.texto })),
       firma: { ciudad: conf.ciudadFirma?.trim() || null, representante: conf.representanteLegal?.trim() || null, cargo: conf.cargoFirmante?.trim() || null },
       // Solo los sellos con certificado vigente (respuesta C2: el de NORSOK no se imprime sin certificado)
       certificaciones: (conf.certificaciones ?? []).filter((x) => x?.norma && x.numero?.trim() && (!x.vence || x.vence >= fechaColombia().toISOString().slice(0, 10))),
+      ...(rcd.length ? { rcd } : {}),
     };
   }
 

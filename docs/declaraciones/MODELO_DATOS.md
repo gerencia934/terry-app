@@ -324,6 +324,12 @@ Las preguntas están en `docs/PREGUNTAS_GERENCIA.md`. Esto quedó en el sistema,
     (`trg_cargue_revertido`).
 - La auditoría guarda el lote deshecho y la anulación de cada declaración.
 
+**Tipo de RCD** (19-11-2026): `declaraciones.tipo_rcd`, con los numerales del Anexo II de la Res. 1257 de 2021 (1.1
+excavación, 1.2 cimentaciones, 1.3 pétreos, 1.4 no pétreos, 2.1 contaminados con RESPEL, 2.2 no aprovechables por su
+estado, 2.3 con características de peligrosidad). Se elige en la sección 5 del formulario cuando la disposición es RCD,
+y en la plantilla va en la columna opcional «Tipo de RCD (Anexo II)» (acepta el numeral o el nombre). Lo pide la
+constancia de RCD del certificado: sin él no se emite.
+
 **Cargue desde el portal del cliente** (19-11-2026; `POST portal/declaraciones/cargue/:plantilla/vista-previa · confirmar`):
 - Lo hace el administrador del cliente con la misma plantilla de la oficina, sin las columnas de NIT, métrica y precio
   (`PLANTILLAS_PORTAL` en `packages/shared`): el NIT es el de su empresa y la tarifa la fija Terra Viva.

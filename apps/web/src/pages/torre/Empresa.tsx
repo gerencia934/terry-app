@@ -9,7 +9,13 @@ import { msg, useApi } from '../../lib/servidor';
 
 interface Certificacion { norma: string; numero: string; entidad?: string; vence?: string }
 interface Bascula { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string }
-interface Config { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; notaBascula?: string; certificaciones?: Certificacion[]; bascula?: Bascula }
+interface Config {
+  ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; notaBascula?: string; certificaciones?: Certificacion[]; bascula?: Bascula;
+  /** Dirección, municipio, teléfono y correo que salen al pie del certificado y en la constancia de RCD. */
+  contacto?: { direccion?: string; municipio?: string; telefono?: string; correo?: string };
+  /** Número único de gestor de RCD que asignó la autoridad ambiental (Anexo II de la Res. 1257 de 2021). */
+  rcd?: { numeroGestor?: string };
+}
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
 interface Texto { id: string; codigo: string; version: number; titulo: string; texto: string; disposiciones: string[]; orden: number; revisado: boolean; vigenteDesde: string }
@@ -65,6 +71,15 @@ export function EmpresaServidor() {
             <Field label="Ciudad de firma" id="em-ci" hint="Sale en «Lugar y fecha»"><Input id="em-ci" disabled={!edita} value={c.ciudadFirma ?? ''} onChange={(e) => setC((s) => ({ ...s, ciudadFirma: e.target.value }))} /></Field>
             <Field label="Representante legal" id="em-rl"><Input id="em-rl" disabled={!edita} value={c.representanteLegal ?? ''} onChange={(e) => setC((s) => ({ ...s, representanteLegal: e.target.value }))} /></Field>
             <Field label="Cargo de quien firma" id="em-ca"><Input id="em-ca" disabled={!edita} value={c.cargoFirmante ?? ''} onChange={(e) => setC((s) => ({ ...s, cargoFirmante: e.target.value }))} /></Field>
+          </div>
+          <p className="mb-2 mt-4 text-[13px] font-semibold">Contacto de la planta <span className="font-normal text-muted">(sale al pie del certificado y en la constancia de RCD)</span></p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {([['direccion', 'Dirección'], ['municipio', 'Municipio'], ['telefono', 'Teléfono'], ['correo', 'Correo electrónico']] as const).map(([k, etiqueta]) => (
+              <Field key={k} label={etiqueta} id={`em-c-${k}`}><Input id={`em-c-${k}`} disabled={!edita} value={c.contacto?.[k] ?? ''} onChange={(e) => setC((s) => ({ ...s, contacto: { ...s.contacto, [k]: e.target.value } }))} /></Field>
+            ))}
+            <Field label="N.º único de gestor de RCD" id="em-rcd" hint="El que asignó la autoridad ambiental (Anexo II de la Res. 1257 de 2021). Sale en la constancia de RCD.">
+              <Input id="em-rcd" disabled={!edita} value={c.rcd?.numeroGestor ?? ''} onChange={(e) => setC((s) => ({ ...s, rcd: { ...s.rcd, numeroGestor: e.target.value } }))} />
+            </Field>
           </div>
           <p className="mb-2 mt-4 text-[13px] font-semibold">Certificaciones del sistema de gestión <span className="font-normal text-muted">(solo salen las que tienen número y no han vencido)</span></p>
           <div className="flex flex-col gap-2">

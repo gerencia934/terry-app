@@ -169,6 +169,10 @@ async function main() {
   if (!conf.cargoFirmante || conf.cargoFirmante === 'Representante legal') conf.cargoFirmante = 'Representante Legal';
   conf.representanteLegal ??= '';
   conf.notaBascula ??= '';
+  // Contacto del certificado y de la constancia de RCD (sin teléfonos ni correos: se escriben en Ajustes)
+  conf.contacto = { direccion: 'Parque de Saneamiento Ambiental Los Pinos, vereda Villa de Leyva', municipio: 'Sabana de Torres (Santander)', telefono: '', correo: '', ...(conf.contacto ?? {}) };
+  // Número único de gestor de RCD (Anexo II): por defecto, el acto de inscripción ante la CAS; se cambia en Ajustes
+  conf.rcd = { numeroGestor: 'Res. SAO No. 00235-24 (CAS)', ...(conf.rcd ?? {}) };
   conf.bascula ??= { identificacion: '', certificado: '', fecha: '', laboratorio: '', vigenteHasta: '' };
   const previas = Array.isArray(conf.certificaciones) ? conf.certificaciones : [];
   conf.certificaciones = [

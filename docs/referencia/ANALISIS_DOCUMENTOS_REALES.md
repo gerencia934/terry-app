@@ -2,6 +2,10 @@
 
 Estos son documentos reales de Terra Viva, emitidos en noviembre de 2026 con el sistema actual. Se usan como
 **referencia de contenido y de reglas**, no de diseño gráfico: los formatos nuevos llevan diseño propio de Terra Viva.
+
+> **19-11-2026.** La gerencia confirmó que el modelo del certificado (PSAP2026-296) es propio de Terra Viva. TERRY-GO lo
+> adopta como formato oficial, con las mejoras de este análisis (ver `docs/operacion/MODELO_OPERACION.md` §9). También
+> se agregó la constancia de RCD del Anexo II de la Resolución 1257 de 2021, a partir del modelo en Excel de la empresa.
 Los PDF **no se suben al repositorio** mientras la gerencia no lo autorice, porque contienen datos personales
 (cédulas, firmas, ARL y EPS). Este análisis recoge todo lo necesario para el diseño.
 

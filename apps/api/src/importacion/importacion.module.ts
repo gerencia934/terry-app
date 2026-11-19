@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
   ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm, plantillaPortal,
-  resolverCodigo, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
+  resolverCodigo, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Municipios } from '../common/servicios';
@@ -280,7 +280,7 @@ export class ImportacionService {
         descripcionProceso: d.proceso, composicion: d.composicion || null,
         tipoEmbalajeId: cod('embalajes', d.embalaje), otroTipoEmbalaje: d.otroEmbalaje || null, presentacion: d.presentacion || null,
         materialEmbalajeId: cod('materiales', d.material), otroMaterial: d.otroMaterial || null,
-        estadoFisico: estadoFisico(d.estadoFisico), inflamable: si(d.inflamable), controladaEstupefacientes: si(d.estupefacientes),
+        estadoFisico: estadoFisico(d.estadoFisico), inflamable: si(d.inflamable), controladaEstupefacientes: si(d.estupefacientes), tipoRcd: tipoRcdDe(d.tipoRcd),
         disposiciones: varios('disposiciones', d.disposiciones).map((disposicionId, i) => ({ disposicionId, principal: i === 0 })),
         fichaSeguridadUrl: d.fds || null,
       }),
