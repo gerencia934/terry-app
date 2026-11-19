@@ -38,7 +38,7 @@ export const GRUPOS: Grupo[] = [
     { route: 'catalogos', label: 'Catálogos', icon: ListTree }, { route: 'etapas', label: 'Etapas del recorrido', icon: Milestone }, { route: 'empresa', label: 'Datos de la empresa', icon: Building2 }] },
 ];
 /** Secciones que ya leen y escriben en el servidor (el resto se conecta en la fase 1b). */
-const CONECTADAS = new Set<RouteName>(['declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
+const CONECTADAS = new Set<RouteName>(['clientes', 'declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
 const TODOS = GRUPOS.flatMap((g) => g.items.map((i) => ({ ...i, grupo: g.label })));
 
 export function Logo({ className = 'h-9', onDark }: { className?: string; onDark?: boolean }) {
@@ -176,7 +176,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <main className="safe-x mx-auto max-w-[1500px] py-5 pb-24 lg:py-7">
           {MODO_REAL && !CONECTADAS.has(route) && (
-            <p className="mb-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 px-4 py-2.5 text-[13px] text-warn"><FlaskConical size={16} className="mt-px shrink-0" />Esta sección todavía muestra datos de ejemplo. Ya están conectadas al servidor: inicio de sesión, Declaraciones, Importar datos y las alertas.</p>
+            <p className="mb-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 px-4 py-2.5 text-[13px] text-warn"><FlaskConical size={16} className="mt-px shrink-0" />Esta sección todavía muestra datos de ejemplo: lo que ve aquí no es de su empresa ni se guarda. Las demás secciones ya trabajan con el servidor.</p>
           )}
           {children}
         </main>

@@ -383,6 +383,73 @@ let enUsoBase = false;
 try { await db.declaracion.update({ where: { id: nuevasCsv[0].id }, data: { estado: 'ANULADA', activa: false } }); } catch (e) { enUsoBase = /ya tiene solicitudes/.test(String(e)); }
 prueba('…ni escribiendo directo en la base', enUsoBase);
 
+console.log('\n3c. Clientes y sedes (fase 1c)');
+r = await llamar('GET', '/municipios?q=giron', { token: T });
+prueba('municipios de la DIVIPOLA (1.122): se buscan sin tildes («giron» → Girón)', r.status === 200 && r.json.some((m) => m.codigoDane === '68307' && m.nombre === 'Girón'), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', '/municipios?q=05001', { token: T });
+prueba('…o por su código DANE (05001 → Medellín)', r.status === 200 && r.json[0]?.nombre === 'Medellín', JSON.stringify(r.json).slice(0, 200));
+const nitF1 = '901234567';
+r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Palmas del Magdalena Medio S.A.S.', sector: 'Palma', formaPago: 'CREDITO_30', emailFacturacion: 'facturas@palmas.test', asesorId: comercial.id } });
+const cF1 = r.json;
+prueba('crear un cliente (Comercial) calcula el dígito de verificación y guarda el asesor', r.status === 201 && cF1.dv === dvNit(nitF1) && cF1.asesorId === comercial.id, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/clientes', { token: tcom, cuerpo: { nit: nitF1, razonSocial: 'Repetido S.A.S.' } });
+prueba('…y no repite un NIT', r.status === 400 && /Ya existe/.test(r.json.mensaje), JSON.stringify(r.json));
+const zonasF1 = (await llamar('GET', '/zonas', { token: T })).json;
+r = await llamar('POST', `/clientes/${cF1.id}/sucursales`, { token: tcom, cuerpo: { nombre: 'Planta de beneficio', codigo: 'p1', municipioDane: '68655', zonaId: zonasF1[0]?.id, latitud: 7.39, longitud: -73.5, atencionLvDesde: '07:00', atencionLvHasta: '16:00' } });
+const sedeP1 = r.json;
+prueba('la primera sede queda como principal, con su municipio DANE, zona y horario', r.status === 201 && sedeP1.esPrincipal && sedeP1.codigo === 'P1' && sedeP1.municipioDane === '68655' && sedeP1.atencionLvDesde?.slice(11, 16) === '07:00', JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/clientes/${cF1.id}/sucursales`, { token: tcom, cuerpo: { nombre: 'Vivero', codigo: 'P2', municipioDane: '68575', esPrincipal: true } });
+const sedeP2 = r.json;
+const principalesF1 = await db.sucursal.findMany({ where: { clienteId: cF1.id, esPrincipal: true } });
+prueba('otra sede marcada como principal le quita la marca a la anterior (una sola por cliente)', r.status === 201 && principalesF1.length === 1 && principalesF1[0].id === sedeP2.id, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...formulario, clienteId: cF1.id, alcanceSedes: 'TODAS', codigoInterno: 'F1C-01', fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf' } });
+const declF1 = r.json;
+r = await llamar('PATCH', `/declaraciones/${declF1.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('(declaración autorizada del cliente nuevo en sus dos sedes)', r.status === 200 && r.json.activa === true, JSON.stringify(r.json).slice(0, 200));
+// Cargue de sedes: el municipio se busca en la DIVIPOLA sin tildes; uno mal escrito se avisa sin bloquear la fila
+r = await llamar('POST', '/importacion/sucursales/vista-previa', { token: T, form: await excel('sucursales', [
+  { nit: nitF1, nombre: 'Bodega Girón', codigo: 'P3', direccion: 'Calle 1', municipio: 'Giron', depto: 'Santander' },
+  { nit: nitF1, nombre: 'Sede mal escrita', codigo: 'P4', direccion: 'Calle 2', municipio: 'Sabanna de Torres', depto: 'Santander' },
+]) });
+prueba('cargue de sedes: avisa el municipio que no está en la DIVIPOLA, sin bloquear la fila', r.status === 201 && !r.json.filas[0]?.advertencias.length
+  && r.json.filas[1]?.advertencias.some((a) => /DIVIPOLA/.test(a)) && !r.json.filas[1]?.errores.length, JSON.stringify(r.json.filas ?? r.json).slice(0, 400));
+r = await llamar('POST', '/importacion/sucursales/confirmar', { token: T, form: await excel('sucursales', [{ nit: nitF1, nombre: 'Bodega Girón', codigo: 'P3', direccion: 'Calle 1', municipio: 'Giron', depto: 'Santander' }]) });
+const sedeGiron = await db.sucursal.findFirst({ where: { codigo: 'P3', clienteId: cF1.id } });
+prueba('…y lo encuentra sin tildes: «Giron» queda con el código DANE de Girón (68307)', r.status === 201 && sedeGiron?.municipioDane === '68307', JSON.stringify(r.json).slice(0, 200));
+// Sedes: inactivar no borra; la principal no se inactiva
+r = await llamar('PATCH', `/clientes/${cF1.id}/sucursales/${sedeP2.id}`, { token: tcom, cuerpo: { activa: false } });
+prueba('la sede principal no se inactiva sin marcar otra como principal', r.status === 400 && /principal/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/clientes/${cF1.id}/sucursales/${sedeP1.id}`, { token: tcom, cuerpo: { activa: false } });
+const vinculoP1 = await db.declaracionSucursal.findFirst({ where: { declaracionId: declF1.id, sucursalId: sedeP1.id } });
+prueba('inactivar una sede: su vínculo con la declaración queda inactivo (nada se borra)', r.status === 200 && r.json.activa === false && vinculoP1?.activa === false, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: cF1.id, sucursalId: sedeP1.id, fechaSolicitada: '2026-11-26', items: [{ declaracionId: declF1.id, cantidadEstimada: 10 }] } });
+prueba('…y a esa sede ya no se le programan servicios (regla en la base)', r.status === 409, JSON.stringify(r.json));
+const audSede = await db.auditoria.findFirst({ where: { entidad: 'sucursal', entidadId: sedeP1.id, accion: 'INACTIVAR' } });
+prueba('…la auditoría guarda la sede inactivada y sus vínculos', audSede?.despues?.vinculosInactivados === 1, JSON.stringify(audSede?.despues));
+// Cliente: datos comerciales, paso a gestor e inactivación
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { tipo: 'GESTOR' } });
+prueba('pasar a gestor exige el NIT del generador en cada sede activa', r.status === 400 && /NIT del generador/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { razonSocial: 'Palmas del Magdalena Medio S.A.S.', sector: 'Palma de aceite', formaPago: 'CREDITO_60' } });
+const audCli = await db.auditoria.findFirst({ where: { entidad: 'cliente', entidadId: cF1.id, accion: 'EDITAR' }, orderBy: { fecha: 'desc' } });
+prueba('editar el cliente: la auditoría guarda solo lo que cambió', r.status === 200 && audCli?.antes?.formaPago === 'CREDITO_30' && audCli?.despues?.sector === 'Palma de aceite'
+  && !('razonSocial' in (audCli?.despues ?? {})), JSON.stringify({ antes: audCli?.antes, despues: audCli?.despues }));
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: thseq, cuerpo: { sector: 'Otro' } });
+prueba('sin el permiso «clientes.editar» (HSEQ) no se edita → 403', r.status === 403, String(r.status));
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false } });
+prueba('inactivar un cliente con declaraciones activas pide el motivo', r.status === 400 && /motivo/.test(r.json.mensaje), JSON.stringify(r.json));
+const causalCli = await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL', nombre: 'Cliente cambió de operador' } });
+r = await llamar('PATCH', `/clientes/${cF1.id}`, { token: tcom, cuerpo: { activo: false, causalId: causalCli.id } });
+const declF1b = await db.declaracion.findUnique({ where: { id: declF1.id } });
+prueba('…con el motivo: el cliente y sus declaraciones activas quedan inactivos (siguen autorizadas: nada se borra)', r.status === 200 && r.json.activo === false && r.json.inactivadas === 1
+  && declF1b.activa === false && declF1b.estado === 'AUTORIZADA' && declF1b.causalId === causalCli.id, JSON.stringify(r.json).slice(0, 200));
+const [activosF1, inactivosF1] = await Promise.all([llamar('GET', '/clientes?q=Palmas&activo=true', { token: T }), llamar('GET', '/clientes?q=901234&activo=false', { token: T })]);
+prueba('el listado filtra por estado y busca por NIT', activosF1.json.total === 0 && inactivosF1.json.total === 1 && inactivosF1.json.filas[0].sucursales.length === 3, JSON.stringify(inactivosF1.json).slice(0, 200));
+r = await llamar('POST', `/clientes/${cF1.id}/sucursales`, { token: tcom, cuerpo: { nombre: 'Otra sede' } });
+prueba('a un cliente inactivo no se le agregan sedes', r.status === 400 && /inactivo/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('GET', `/clientes/${cF1.id}`, { token: T });
+prueba('la ficha trae sedes con municipio y zona, y el resumen de declaraciones', r.status === 200 && r.json.sucursales.find((s) => s.id === sedeP1.id)?.municipio?.nombre === 'Sabana de Torres'
+  && r.json._count.declaraciones === 1 && r.json.declaracionesActivas === 0 && r.json.asesor?.id === comercial.id, JSON.stringify(r.json).slice(0, 300));
+
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });
 r = await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-20', items: [{ declaracionId: agua.id, cantidadEstimada: 10 }] } });

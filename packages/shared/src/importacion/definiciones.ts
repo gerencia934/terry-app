@@ -48,7 +48,11 @@ export interface Contexto {
   nombres?: Partial<Record<ClaveCatalogo, Map<string, string[]>>>;
   /** Disposiciones (código en mayúsculas) cubiertas hoy por un permiso, una licencia o el objeto social. */
   disposicionesCubiertas: Set<string>;
+  /** Municipios de la DIVIPOLA: claves «municipio|departamento» (claveMunicipio) y códigos DANE. Sin él no se avisa. */
+  municipios?: Set<string>;
 }
+/** Clave de un municipio para compararlo sin tildes, mayúsculas ni espacios de más. */
+export const claveMunicipio = (municipio: string, departamento: string) => `${norm(municipio).replace(/\s+/g, ' ')}|${norm(departamento).replace(/\s+/g, ' ')}`;
 
 /** Contexto de catálogos con los datos iniciales (modo demostración). */
 export const catalogosBase = (): Record<ClaveCatalogo, Set<string>> =>
@@ -71,7 +75,10 @@ export const L = {
   licencia: ['B1', 'B2', 'B3', 'C1', 'C2', 'C3'],
   tipoSolicitud: ['Recolección en sede', 'Entrega en planta'],
   jornada: ['AM', 'PM'],
-  departamento: ['Santander', 'Norte de Santander', 'Boyacá', 'Cesar', 'Antioquia', 'Bolívar', 'Cundinamarca', 'Meta', 'Casanare', 'Otro'],
+  // Los 33 de la DIVIPOLA del DANE (packages/db/prisma/datos/divipola.json)
+  departamento: ['Amazonas', 'Antioquia', 'Arauca', 'Archipiélago de San Andrés, Providencia y Santa Catalina', 'Atlántico', 'Bogotá, D.C.', 'Bolívar', 'Boyacá',
+    'Caldas', 'Caquetá', 'Casanare', 'Cauca', 'Cesar', 'Chocó', 'Córdoba', 'Cundinamarca', 'Guainía', 'Guaviare', 'Huila', 'La Guajira', 'Magdalena', 'Meta',
+    'Nariño', 'Norte de Santander', 'Putumayo', 'Quindío', 'Risaralda', 'Santander', 'Sucre', 'Tolima', 'Valle del Cauca', 'Vaupés', 'Vichada'],
 };
 
 // ---------------- Validadores ----------------
@@ -136,7 +143,9 @@ export const PLANTILLAS: Plantilla[] = [
         validar: (v) => v && !/^[A-Za-z0-9-]{1,20}$/.test(v) ? 'Use letras, números o guion (máximo 20).' : null },
       { key: 'principal', header: 'Sede principal', tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: 'Solo una por cliente.', ancho: 10 },
       { key: 'direccion', header: 'Dirección', requerido: true, tipo: 'texto', ejemplo: 'Km 4 vía Puerto Wilches', ayuda: '', ancho: 30 },
-      { key: 'municipio', header: 'Municipio', requerido: true, tipo: 'texto', ejemplo: 'Puerto Wilches', ayuda: '', ancho: 18 },
+      { key: 'municipio', header: 'Municipio', requerido: true, tipo: 'texto', ejemplo: 'Puerto Wilches', ayuda: 'Como en la DIVIPOLA del DANE, o su código de 5 dígitos (68655)', ancho: 18,
+        advertir: (v, f, c) => (c.municipios && !c.municipios.has(/^\d{5}$/.test(v.trim()) ? v.trim() : claveMunicipio(v, f.depto ?? ''))
+          ? 'No está en la DIVIPOLA del DANE para ese departamento: la sede quedará sin código de municipio. Revise la ortografía.' : null) },
       { key: 'depto', header: 'Departamento', requerido: true, tipo: 'lista', opciones: L.departamento, ejemplo: 'Santander', ayuda: '', ancho: 16 },
       { key: 'zona', header: 'Zona', tipo: 'texto', ejemplo: 'Magdalena Medio', ayuda: 'Debe existir en Ajustes › Zonas.', ancho: 18 },
       { key: 'contacto', header: 'Contacto', tipo: 'texto', ejemplo: 'Laura Méndez', ayuda: 'Quien entrega el residuo y firma.', ancho: 20 },

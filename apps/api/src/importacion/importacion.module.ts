@@ -12,7 +12,7 @@ import {
   resolverCodigo, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
-import { Auditoria } from '../common/servicios';
+import { Auditoria, Municipios } from '../common/servicios';
 import { ActorActual, Permiso, Zod, type Actor } from '../common/http';
 import { hashClave } from '../auth/auth.service';
 import { DeclaracionesModule, DeclaracionesService } from '../declaraciones/declaraciones.module';
@@ -38,7 +38,7 @@ const conjuntos = (ids: Ids) => Object.fromEntries(Object.entries(ids).map(([k, 
 
 @Injectable()
 class ImportacionService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly declaraciones: DeclaracionesService) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly declaraciones: DeclaracionesService, private readonly municipios: Municipios) {}
 
   plantilla(id: string): Plantilla {
     const p = PLANTILLAS.find((x) => x.id === id);
@@ -94,6 +94,7 @@ class ImportacionService {
       codigosInternos: new Set(decls.filter((d) => d.estado === 'AUTORIZADA' && d.activa && d.codigoInterno).map((d) => d.codigoInterno!.toUpperCase())),
       catalogos: conjuntos(ids), nombres,
       disposicionesCubiertas: new Set(disposiciones.map((d) => d.codigo.toUpperCase())),
+      municipios: await this.municipios.claves(),
     };
   }
 
@@ -231,10 +232,11 @@ class ImportacionService {
       case 'sucursales': {
         const cliente = await tx.cliente.findUniqueOrThrow({ where: { empresaId_nit: { empresaId: emp, nit: digitos(d.nit) } } });
         const zona = d.zona ? await tx.zona.findFirst({ where: { empresaId: emp, nombre: { equals: d.zona, mode: 'insensitive' } } }) : null;
-        const municipio = await tx.municipio.findFirst({ where: { nombre: { equals: d.municipio, mode: 'insensitive' }, departamento: { equals: d.depto, mode: 'insensitive' } } });
+        // DIVIPOLA: por código DANE o por nombre y departamento, sin importar tildes ni mayúsculas
+        const municipioDane = await this.municipios.resolver(d.municipio, d.depto);
         const principal = si(d.principal);
         if (principal) await tx.sucursal.updateMany({ where: { clienteId: cliente.id, esPrincipal: true }, data: { esPrincipal: false } });
-        const datos = { direccion: `${d.direccion}, ${d.municipio} (${d.depto})`, municipioDane: municipio?.codigoDane ?? null, zonaId: zona?.id ?? null, contacto: d.contacto || null, telefono: d.telefono || null,
+        const datos = { direccion: `${d.direccion}, ${d.municipio} (${d.depto})`, municipioDane, zonaId: zona?.id ?? null, contacto: d.contacto || null, telefono: d.telefono || null,
           registroRespel: d.respel || null, latitud: num(d.lat), longitud: num(d.lng), ...(d.codigo ? { codigo: d.codigo.trim().toUpperCase() } : {}), ...(principal ? { esPrincipal: true } : {}) };
         const ex = await tx.sucursal.findFirst({ where: { clienteId: cliente.id, OR: [{ nombre: { equals: d.nombre, mode: 'insensitive' } }, ...(d.codigo ? [{ codigo: { equals: d.codigo, mode: 'insensitive' as const } }] : [])] } });
         if (ex) { await tx.sucursal.update({ where: { id: ex.id }, data: datos }); return 'actualizadas'; }

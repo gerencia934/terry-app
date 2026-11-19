@@ -54,6 +54,8 @@ export class FiltroErrores implements ExceptionFilter {
       status = err.getStatus();
       const r = err.getResponse();
       cuerpo = typeof r === 'string' ? { mensaje: r } : (r as Record<string, unknown>).mensaje ? (r as Record<string, unknown>) : { mensaje: (r as { message?: unknown }).message ?? err.message };
+      // Errores propios del framework (en inglés): se cambian por un mensaje claro en español
+      if (!(typeof r === 'object' && (r as Record<string, unknown>).mensaje) && MENSAJES_HTTP[status]) cuerpo = { mensaje: MENSAJES_HTTP[status] };
     } else if (err instanceof Prisma.PrismaClientKnownRequestError) {
       if (err.code === 'P2002') { status = 409; cuerpo = { mensaje: `Ya existe un registro con ese valor (${(err.meta?.target as string[] | undefined)?.join(', ') ?? 'campo único'}).` }; }
       else if (err.code === 'P2025') { status = 404; cuerpo = { mensaje: 'Registro no encontrado.' }; }
@@ -70,8 +72,19 @@ export class FiltroErrores implements ExceptionFilter {
   }
 }
 
+/** Mensaje en español de los errores HTTP que lanza el framework sin texto propio. */
+const MENSAJES_HTTP: Record<number, string> = {
+  401: 'Su sesión no es válida o venció. Ingrese de nuevo.',
+  403: 'No tiene permiso para esta acción.',
+  404: 'No se encontró lo que busca.',
+  413: 'El archivo es demasiado grande (máximo 10 MB).',
+  429: 'Demasiados intentos seguidos. Espere un minuto y vuelva a intentar.',
+};
+
 /** Mensajes de las restricciones CHECK de la base de datos (código 23514). */
 const CHECKS: Record<string, string> = {
+  chk_cargue_formato: 'Un cargue en CSV debe registrar su separador.',
+  chk_cargue_revertido: 'Para deshacer un cargue se registra quién, cuándo y el motivo (mínimo 10 caracteres).',
   chk_decl_residuo_completo: 'Faltan datos obligatorios del residuo (tipo, embalaje, material, estado físico, inflamable, sustancia controlada o proceso).',
   chk_decl_servicio_completo: 'Falta la descripción del servicio.',
   chk_decl_peligroso: 'Un residuo peligroso necesita la composición y una corriente Y o código A.',

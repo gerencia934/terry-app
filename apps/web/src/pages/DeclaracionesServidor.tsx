@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Check, X, RefreshCw, Upload, ShieldAlert, Layers, Plus, FilePen } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, Tabs, useToast } from '../components/ui';
-import { BuscarCliente } from '../components/BuscarCliente';
+import { BuscarCliente, type ClienteBuscado } from '../components/BuscarCliente';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { useRouter } from '../lib/router';
 import { fmtCOP, fmtFechaHora, fmtNum } from '../lib/format';
@@ -28,12 +28,17 @@ const corriente = (d: DeclApi) => [d.codigoY?.codigo, d.codigoA?.codigo].filter(
 const tarifa = (d: DeclApi) => d.tarifaVigente ? `${fmtCOP(Number(d.tarifaVigente.precioUnitario))}${d.tarifaVigente.metrica ? ` / ${d.tarifaVigente.metrica.abreviacion}` : ' (global)'}` : '—';
 
 /** Declaraciones leídas del API (modo servidor). La autorización la valida el servidor contra los permisos ambientales. */
+/** Cliente con el que se abre el listado (desde Clientes › «Ver sus declaraciones»). */
+let clienteInicial: ClienteBuscado | null = null;
+export const verDeclaracionesDe = (c: ClienteBuscado) => { clienteInicial = c; };
+
 export default function DeclaracionesServidor() {
+  const [inicial] = useState(() => { const c = clienteInicial; clienteInicial = null; return c; });
   const toast = useToast();
   const { go } = useRouter();
   const [tipo, setTipo] = useState<'RESIDUO' | 'SERVICIO'>('RESIDUO');
   const vacio = { estado: '', q: '', codigo: '', clienteId: '' };
-  const [f, setF] = useState(vacio);
+  const [f, setF] = useState(() => ({ ...vacio, clienteId: inicial?.id ?? '' }));
   // Nombre y código se aplican con Enter (no una consulta por tecla); estado y cliente, al elegirlos.
   const [texto, setTexto] = useState({ q: '', codigo: '' });
   const [sel, setSel] = useState<DeclApi | null>(null);
@@ -77,7 +82,7 @@ export default function DeclaracionesServidor() {
       <PageHeader eyebrow="Comercial" title="Declaraciones" subtitle="Datos del servidor. Al autorizar, el API verifica que el tratamiento esté cubierto por un permiso ambiental vigente."
         actions={<>{tienePermiso('declaraciones.crear') && <><Button variant="primary" onClick={() => setFormulario({})}><Plus size={16} /> Nueva declaración</Button><Button onClick={() => setAsignar(true)}><Layers size={16} /> Asignar servicios</Button></>}<Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
       <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => { setF(vacio); setTexto({ q: '', codigo: '' }); }}>
-        <Field label="Cliente" id="ds-cli"><BuscarCliente id="ds-cli" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
+        <Field label="Cliente" id="ds-cli"><BuscarCliente id="ds-cli" valor={f.clienteId} inicial={inicial} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
         <Field label="Estado" id="ds-e"><Select id="ds-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['BORRADOR', 'PENDIENTE', 'AUTORIZADA', 'RECHAZADA', 'ANULADA'].map((x) => <option key={x} value={x}>{x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
         <Field label="Nombre" id="ds-q"><Input id="ds-q" value={texto.q} onChange={(e) => setTexto((s) => ({ ...s, q: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && aplicarTexto()} onBlur={aplicarTexto} placeholder="Enter para buscar" /></Field>
         <Field label="Código" id="ds-c"><Input id="ds-c" value={texto.codigo} onChange={(e) => setTexto((s) => ({ ...s, codigo: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && aplicarTexto()} onBlur={aplicarTexto} /></Field>

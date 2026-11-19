@@ -10,11 +10,13 @@ export interface ClienteBuscado { id: string; razonSocial: string; nit: string; 
  * Escriba parte del nombre o del NIT y elija. `valor` es el id elegido ('' = ninguno); al limpiarlo desde afuera, se
  * borra el texto. `vacio` es el texto de «ninguno» (por ejemplo, «Todos» en un filtro).
  */
-export function BuscarCliente({ id, valor, onChange, vacio = 'Escriba para buscar', disabled }: {
+export function BuscarCliente({ id, valor, onChange, vacio = 'Escriba para buscar', disabled, inicial }: {
   id?: string; valor: string; onChange: (c: ClienteBuscado | null) => void; vacio?: string; disabled?: boolean;
+  /** Cliente ya elegido al abrir (por ejemplo, al llegar desde la ficha del cliente). */
+  inicial?: ClienteBuscado | null;
 }) {
-  const [texto, setTexto] = useState('');
-  const [elegido, setElegido] = useState<ClienteBuscado | null>(null);
+  const [texto, setTexto] = useState(inicial?.razonSocial ?? '');
+  const [elegido, setElegido] = useState<ClienteBuscado | null>(inicial ?? null);
   const [opciones, setOpciones] = useState<ClienteBuscado[]>([]);
   const [abierto, setAbierto] = useState(false);
   const [cargando, setCargando] = useState(false);

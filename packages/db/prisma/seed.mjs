@@ -3,6 +3,7 @@
 import { PrismaClient } from '@prisma/client';
 import { hash } from '@node-rs/argon2';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import shared from '@terraviva/shared';
 
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
@@ -67,6 +68,10 @@ async function main() {
   for (const x of SISTEMAS_ETIQUETADO) await db.sistemaEtiquetado.upsert({ where: { codigo: x.codigo }, update: { nombre: x.nombre }, create: x });
   for (const x of CODIGOS_CLASIFICACION) await db.codigoClasificacion.upsert({ where: { codigo: x.codigo }, update: { descripcion: x.nombre }, create: { tipo: x.tipo, codigo: x.codigo, descripcion: x.nombre } });
   for (const x of MUNICIPIOS) await db.municipio.upsert({ where: { codigoDane: x.codigoDane }, update: { nombre: x.nombre, departamento: x.departamento }, create: x });
+  // DIVIPOLA completa del DANE (1.122 municipios; datos.gov.co): agrega los que falten, sin cambiar los existentes
+  const divipola = JSON.parse(readFileSync(new URL('./datos/divipola.json', import.meta.url), 'utf8')).municipios;
+  const nuevosMunicipios = await db.municipio.createMany({ data: divipola, skipDuplicates: true });
+  if (nuevosMunicipios.count) console.log(`  + ${nuevosMunicipios.count} municipios de la DIVIPOLA`);
 
   // Catálogos del módulo Declaraciones (por empresa). Fuente: packages/shared/src/declaraciones/catalogos.ts
   await porEmpresa('categoriaDeclarado', E, CATEGORIAS);
