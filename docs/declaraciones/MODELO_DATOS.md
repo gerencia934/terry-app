@@ -225,3 +225,61 @@ DeclaracionesServidor (lista con filtros y «Cargar más»)
 
 Falta la fase C (CSV, cargue desde el portal del cliente y reversión de lotes) y adjuntar la FDS como archivo; hoy es un
 enlace.
+
+## 9. Reglas de cumplimiento de las respuestas de la gerencia (19-11-2026)
+
+Las preguntas están en `docs/PREGUNTAS_GERENCIA.md`. Esto quedó en el sistema, casi todo con reglas en la base de datos
+(migración `20261123000000_respuestas_gerencia`):
+
+- **Los tratamientos de Los Pinos (ASP, BIO, RCD, ACU) solo admiten residuos sin características de peligrosidad**
+  (Res. DGL 000632 de 2023, art. 6). Un peligroso nunca se autoriza con ellos: va a un gestor aliado
+  (`disposiciones.admite_peligrosos`, `fn_decl_autorizacion_check`).
+- **Los Pinos no recibe ni almacena peligrosos.** Ningún manifiesto con destino a la planta propia lleva un residuo
+  peligroso (`trg_item_peligroso_destino`). La recepción en planta solo ofrece declaraciones no peligrosas.
+- **Hidrocarburos** (`contiene_hidrocarburos`):
+  - la biorremediación exige la caracterización CRETIB negativa cargada (`caracterizacion_url`);
+  - los RCD con hidrocarburos no se reciben (`disposiciones.hidrocarburos`).
+- **Gestores aliados.** Puede haber varios por disposición (`disposicion_gestores`). Basta uno que cumpla tres cosas:
+  - licencia registrada;
+  - vigente, con fecha o `licencia_indefinida`;
+  - que no excluya el tipo de residuo (`excluye_tipos_residuo`; por ejemplo, Las Bateas no recibe hospitalarios).
+
+  Si la vigencia «no consta», la disposición no queda cubierta.
+- **Inactivas:**
+  - aprovechamiento propio y reciclaje (el objeto social no es una autorización ambiental);
+  - lavado y reúso;
+  - coprocesamiento;
+  - «incineración y celda ordinaria», que se separó en INCH y RS.
+- **Cambios a una autorizada.** Un cambio crítico la devuelve a revisión y la autoriza otra persona
+  (`revision_pedida_por`, `chk_decl_cuatro_ojos`). Son críticos los cambios de:
+  - peligrosidad o corriente Y/A;
+  - hidrocarburos o caracterización;
+  - disposición;
+  - sedes;
+  - unidad de medida.
+- **Certificado:**
+  - textos legales aprobados por la gerencia;
+  - los de RESPEL salen solo si hay residuos peligrosos (`solo_peligrosos`);
+  - GESTOR_ALIADO sale por cada aliado, con su razón social, NIT, licencia, autoridad y el número de su certificado;
+  - ese número se registra en cada línea del acta, y sin él no se emite el certificado final.
+- **Obligaciones reales:**
+  - llevan el código del Cronograma Maestro (OB-xx), el artículo y la periodicidad;
+  - las permanentes y las de por evento no tienen fecha.
+- **Sellos y báscula:**
+  - solo salen las certificaciones con número y vigentes; el sello NORSOK no se imprime sin certificado;
+  - el recibo de báscula cita el certificado de calibración y sale con alerta si está vencido.
+- **Política de datos:** en producción el API no arranca sin `POLITICA_DATOS_URL` y `POLITICA_DATOS_VERSION`.
+
+**Pendiente** (falta información o es una fase propia):
+- La lista de orígenes del art. 6 de la Res. 000632, para validar las ASP. Falta el texto completo del artículo.
+- Las rutas del plan de contingencia, para validar el transporte de RESPEL.
+- La constancia de recolección y entrega, que se emite antes de tener el certificado del aliado.
+- Los campos del Anexo VI del Decreto 0766 de 2026 y los códigos D/R en los certificados.
+- Documentos que la gerencia debe conseguir:
+  - vigencias de las licencias de Sandesol y de Veolia Aseo;
+  - prórroga de Las Bateas;
+  - NIT de Lúmina;
+  - gestor de coprocesamiento;
+  - constancia de ejecutoria de la Res. 000632;
+  - certificado de calibración de la báscula;
+  - política de datos.

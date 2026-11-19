@@ -9,14 +9,25 @@ const texto = (max: number) => opcional(z.string().trim().max(max, `Máximo ${ma
 const lleno = (s?: string | null) => !!s && s.trim().length > 0;
 
 /**
- * Texto que acepta el generador (sección 8) al enviar su declaración. Propuesto; pendiente de revisión jurídica
- * (docs/PREGUNTAS_GERENCIA.md, pregunta A3). Se guarda quién lo aceptó y cuándo.
+ * Declaración de responsabilidad que acepta el generador (sección 8), aprobada por la gerencia (respuesta A3,
+ * 19-11-2026). Se guarda quién la aceptó y cuándo. La autorización de datos personales solo se muestra cuando hay
+ * política de tratamiento publicada (POLITICA_DATOS_URL).
  */
-export const TEXTO_RESPONSABILIDAD_GENERADOR =
-  'Declaro, en nombre del generador, que la información de esta declaración es veraz y completa y que corresponde a los residuos ' +
-  'que efectivamente se entregarán; que informaré cualquier cambio en su composición o peligrosidad; y que conozco que, conforme ' +
-  'a la Ley 1252 de 2008 y el Decreto 1076 de 2015, la responsabilidad del generador subsiste hasta el aprovechamiento o la ' +
-  'disposición final de sus residuos.';
+export const RESPONSABILIDAD_GENERADOR = {
+  intro: 'Declaro, en nombre del generador identificado en esta declaración y con facultad para hacerlo, que:',
+  puntos: [
+    'la información es veraz y completa y corresponde a los residuos que efectivamente se entregarán;',
+    'la clasificación declarada (peligroso o no peligroso, y su corriente Y/A) se basa en la caracterización del residuo o en el conocimiento técnico del proceso que lo genera, y entregaré sus soportes cuando TERRA VIVA S.A.S. E.S.P. los solicite;',
+    'los residuos no contienen materiales radiactivos ni explosivos ni residuos peligrosos no declarados, y no se han mezclado ni diluido para cambiar su clasificación;',
+    'informaré antes de la entrega cualquier cambio en su composición, cantidad o peligrosidad;',
+    'acepto que TERRA VIVA S.A.S. E.S.P. tome muestras al recibirlos y que rechace o devuelva los que no correspondan a lo declarado o a lo que autorizan sus permisos, en las condiciones del contrato;',
+    'conozco que, conforme a la Ley 1252 de 2008 y al Decreto 1076 de 2015, la responsabilidad del generador subsiste hasta el aprovechamiento o la disposición final de sus residuos y se extiende a cualquier contenido no declarado.',
+  ],
+  autorizacionDatos: 'Autorizo el tratamiento de los datos personales de esta declaración según la política de tratamiento de datos de TERRA VIVA S.A.S. E.S.P.',
+} as const;
+/** Texto corrido de la declaración de responsabilidad (para documentos y auditoría). */
+export const textoResponsabilidadGenerador = (conPoliticaDatos: boolean) =>
+  [RESPONSABILIDAD_GENERADOR.intro, ...RESPONSABILIDAD_GENERADOR.puntos.map((p, i) => `${i + 1}. ${p}`), ...(conPoliticaDatos ? [RESPONSABILIDAD_GENERADOR.autorizacionDatos] : [])].join(' ');
 
 export const ESTADOS_FISICOS_DB = ['SOLIDO', 'SEMISOLIDO', 'LIQUIDO', 'GASEOSO'] as const;
 export const ALCANCES_SEDES = ['TODAS', 'PRINCIPAL', 'SELECCION'] as const;
@@ -69,6 +80,8 @@ const base = z.object({
   olor: texto(120),
   densidad: opcional(z.number().positive('Debe ser mayor que cero.')),
   metricaDensidadId: opcional(id),
+  // Borras y lodos aceitosos: biorremediación solo con caracterización CRETIB negativa; los RCD con hidrocarburos no se reciben
+  contieneHidrocarburos: z.boolean().default(false),
 
   // [5] Disposición y manejo (la primera, o la marcada, es la principal)
   disposiciones: z.array(z.object({ disposicionId: id, principal: z.boolean().default(false) })).max(20).default([]),
@@ -76,6 +89,7 @@ const base = z.object({
   // [6] Información adicional
   datosExtras: texto(4000),
   fichaSeguridadUrl: opcional(z.string().trim().url('Enlace inválido.').max(500)),
+  caracterizacionUrl: opcional(z.string().trim().url('Enlace inválido.').max(500)), // caracterización de peligrosidad (CRETIB) del laboratorio
   serial: texto(60),
 
   // [7] Precio (cada cambio crea una nueva vigencia)

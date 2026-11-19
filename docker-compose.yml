@@ -27,6 +27,11 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       WEB_URL: ${WEB_URL:-http://localhost:5173}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      # Entorno local: política de datos en «borrador». En producción (NODE_ENV=production, el de la imagen) el API no
+      # arranca sin POLITICA_DATOS_URL y POLITICA_DATOS_VERSION.
+      NODE_ENV: ${NODE_ENV:-development}
+      POLITICA_DATOS_URL: ${POLITICA_DATOS_URL:-}
+      POLITICA_DATOS_VERSION: ${POLITICA_DATOS_VERSION:-}
     ports: ["3000:3000"]
 
 volumes:

@@ -14,9 +14,12 @@ const Esquema = z.object({
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
   MAIL_FROM: z.string().default('TERRY-GO · Terra Viva <no-responder@terravivasas.com>'),
-  // Ley 1581: versión vigente de la política de tratamiento de datos (al cambiarla, se pide aceptar de nuevo) y su enlace
-  POLITICA_DATOS_VERSION: z.string().max(20).default('2026-11'),
-  POLITICA_DATOS_URL: z.string().default(''),
+  // Ley 1581: versión vigente de la política de tratamiento de datos (al cambiarla, se pide aceptar de nuevo) y su enlace.
+  // Respuesta B1 de la gerencia: sin política publicada nadie entra. En producción el servidor no arranca sin ellas; en
+  // desarrollo y pruebas se usa la versión «borrador» y la pantalla de aceptación lo advierte.
+  POLITICA_DATOS_VERSION: z.string().trim().max(20).default(''),
+  POLITICA_DATOS_URL: z.string().trim().default(''),
+  NODE_ENV: z.string().default('development'),
   // Archivos (firmas, fotos, PDF). En desarrollo, carpeta local; en producción se cambia a S3 / R2.
   ALMACENAMIENTO_DIR: z.string().default('almacenamiento'),
   ARCHIVO_MAX_MB: z.coerce.number().default(10),
@@ -32,6 +35,11 @@ export function validarConfig(env: Record<string, unknown>): Config {
   if (!r.success) {
     const msg = r.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Configuración inválida. Revise el archivo .env:\n${msg}`);
+  }
+  if (!r.data.POLITICA_DATOS_VERSION || !r.data.POLITICA_DATOS_URL) {
+    if (r.data.NODE_ENV === 'production')
+      throw new Error('Falta la política de tratamiento de datos (Ley 1581): defina POLITICA_DATOS_URL y POLITICA_DATOS_VERSION. Sin ella nadie puede entrar.');
+    return { ...r.data, POLITICA_DATOS_VERSION: r.data.POLITICA_DATOS_VERSION || 'borrador' };
   }
   return r.data;
 }

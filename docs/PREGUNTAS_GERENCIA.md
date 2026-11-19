@@ -1,5 +1,9 @@
 # Preguntas para la gerencia de Terra Viva (TERRY-GO)
 
+> **Respondidas el 19-11-2026.** El documento con las respuestas y sus soportes está en `docs/privado/RESPUESTAS_GERENCIA.md`,
+> en el equipo de la gerencia y en su Drive. **No se sube a GitHub mientras el repositorio sea público**: contiene análisis
+> de cumplimiento y datos de personas. Lo aplicado en el sistema está en `docs/declaraciones/MODELO_DATOS.md` §9.
+
 Preguntas abiertas al 19-11-2026. Cada una trae su contexto para que quien la responda (el abogado, HSEQ o un
 asistente con los documentos de la empresa) no tenga que adivinar. Al tener la respuesta, se carga en el sistema donde
 indica «Dónde se usa».

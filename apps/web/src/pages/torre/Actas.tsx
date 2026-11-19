@@ -20,9 +20,10 @@ interface ActaFila {
 interface ActaDetalle extends Omit<ActaFila, '_count' | 'cliente' | 'destino'> {
   codigoVerificacion: string; urlVerificacion: string; motivoAnulacion: string | null; anuladaEn: string | null; pdfSha256: string | null;
   cliente: { razonSocial: string; nit: string }; destino: { razonSocial: string }; cargadaPor: { nombre: string } | null;
-  items: { id: string; cantidadConciliada: string | null; metrica: { abreviacion: string } | null; disposicion: { nombre: string } | null;
-    conciliacion: { manifiesto: { numero: string; fechaServicio: string } };
-    manifiestoItem: { declaracion: { nombre: string }; sucursal: { nombre: string }; metrica: { abreviacion: string } | null } }[];
+  items: { id: string; cantidadConciliada: string | null; metrica: { abreviacion: string } | null; disposicion: { nombre: string; propia: boolean } | null;
+    certificadoAliado: string | null;
+    conciliacion: { manifiesto: { numero: string; fechaServicio: string; destino: { razonSocial: string } } };
+    manifiestoItem: { declaracion: { nombre: string }; sucursal: { nombre: string }; metrica: { abreviacion: string } | null; disposicion: { nombre: string; propia: boolean } | null } }[];
 }
 interface Pendiente { id: string; manifiesto: string; fechaServicio: string; residuo: string; sede: string; cantidad: string | null; unidad: string | null; tratamiento: string | null }
 
@@ -94,7 +95,9 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
   const [motivo, setMotivo] = useState('');
   const [quitar, setQuitar] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
-  useEffect(() => { setAnular(false); setMotivo(''); setQuitar(null); }, [id]);
+  // N.° del certificado del gestor aliado por línea (respuesta A2: sin él no se emite el certificado final)
+  const [certAliado, setCertAliado] = useState<Record<string, string>>({});
+  useEffect(() => { setAnular(false); setMotivo(''); setQuitar(null); setCertAliado({}); }, [id]);
   const a = id && d.datos?.id === id ? d.datos : null;
   const emite = tienePermiso('actas.emitir');
   const hacer = async (fn: () => Promise<unknown>, ok: string) => {
@@ -145,11 +148,16 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
           <section className="flex flex-col gap-2">
             <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Lo que certifica ({a.items.length})</h3>
             {totales.length > 0 && <p className="num text-sm">{totales.map(([u, v]) => `${cant(v)} ${u}`).join(' · ')}</p>}
-            {a.items.map((i) => (
-              <div key={i.id} className="flex items-start justify-between gap-2 rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
+            {a.items.map((i) => {
+              const disp = i.disposicion ?? i.manifiestoItem.disposicion;
+              const aliado = !!disp && !disp.propia;
+              const valor = certAliado[i.id] ?? i.certificadoAliado ?? '';
+              return (
+              <div key={i.id} className="flex flex-col gap-2 rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{i.manifiestoItem.declaracion.nombre}</p>
-                  <p className="truncate text-muted">{i.conciliacion.manifiesto.numero} · {fmtFechaCorta(i.conciliacion.manifiesto.fechaServicio)} · {i.manifiestoItem.sucursal.nombre}{i.disposicion ? ` · ${i.disposicion.nombre}` : ''}</p>
+                  <p className="truncate text-muted">{i.conciliacion.manifiesto.numero} · {fmtFechaCorta(i.conciliacion.manifiesto.fechaServicio)} · {i.manifiestoItem.sucursal.nombre}{disp ? ` · ${disp.nombre}` : ''}{aliado ? ' (gestor aliado)' : ''}</p>
                 </div>
                 <span className="flex shrink-0 items-center gap-1">
                   <span className="num font-medium">{cant(i.cantidadConciliada)} {i.metrica?.abreviacion ?? i.manifiestoItem.metrica?.abreviacion ?? ''}</span>
@@ -158,7 +166,20 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
                     : <Button size="sm" variant="ghost" aria-label="Quitar la línea del acta" onClick={() => setQuitar(i.id)}><Trash2 size={14} /></Button>)}
                 </span>
               </div>
-            ))}
+              {aliado && (a.estado === 'BORRADOR' && emite ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <label htmlFor={`ca-${i.id}`} className="text-[12px] text-muted">Certificado de {i.conciliacion.manifiesto.destino.razonSocial}, N.°</label>
+                  <Input id={`ca-${i.id}`} className="h-8 w-40" maxLength={60} value={valor} placeholder="Obligatorio para emitir"
+                    onChange={(e) => setCertAliado((s) => ({ ...s, [i.id]: e.target.value }))} />
+                  {valor !== (i.certificadoAliado ?? '') && (
+                    <Button size="sm" disabled={ocupado} onClick={() => hacer(() => api(`/actas/lineas/${i.id}/certificado-aliado`, { metodo: 'PATCH', cuerpo: { numero: valor.trim() || null } }), 'Número del certificado del aliado guardado.')}>Guardar</Button>
+                  )}
+                  {!i.certificadoAliado && <span className="text-[12px] text-warn">Sin este número no se emite el certificado final.</span>}
+                </div>
+              ) : i.certificadoAliado ? <p className="text-[12px] text-muted">Certificado del aliado N.° <span className="num">{i.certificadoAliado}</span></p> : null)}
+              </div>
+              );
+            })}
             {!a.items.length && <p className="text-[13px] text-subtle">{a.origen === 'CARGADA' ? 'El acta del aliado se cargó sin relacionar líneas.' : 'Sin líneas: agregue líneas o anule el borrador.'}</p>}
           </section>
         </div>

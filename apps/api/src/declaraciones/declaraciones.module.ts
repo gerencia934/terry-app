@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
-import { EstadoDeclaracion, FormaPago, Prisma, TipoDeclaracion, TipoNegociacion } from '@prisma/client';
+import { EstadoDeclaracion, FormaPago, Prisma, TipoDeclaracion, TipoNegociacion, type Proveedor } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { EsquemaDeclaracion, faltantesParaAutorizar } from '@terraviva/shared';
@@ -14,10 +14,15 @@ const Filtros = z.object({
   tipo: z.nativeEnum(TipoDeclaracion).optional(), clienteId: z.string().uuid().optional(), sucursalId: z.string().uuid().optional(),
   estado: z.nativeEnum(EstadoDeclaracion).optional(), activa: z.enum(['true', 'false']).optional(), numero: z.coerce.number().int().optional(),
   q: z.string().optional(), codigo: z.string().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional(),
+  peligroso: z.enum(['true', 'false']).optional(), // Los Pinos solo recibe residuos no peligrosos
 });
 const CambioEstado = z.object({ estado: z.enum(['AUTORIZADA', 'RECHAZADA']), causalId: z.string().uuid().optional(), observacion: z.string().max(300).optional() });
 const CambioActiva = z.object({ activa: z.boolean(), causalId: z.string().uuid().optional() });
-const ConsultaCobertura = z.object({ disposiciones: z.string().transform((s) => s.split(',').filter(Boolean)).pipe(z.array(z.string().uuid()).max(20)) });
+const ConsultaCobertura = z.object({
+  disposiciones: z.string().transform((s) => s.split(',').filter(Boolean)).pipe(z.array(z.string().uuid()).max(20)),
+  peligroso: z.enum(['true', 'false']).optional(), hidrocarburos: z.enum(['true', 'false']).optional(), caracterizacion: z.enum(['true', 'false']).optional(),
+  tipoResiduoId: z.string().uuid().optional(),
+});
 const Tarifas = z.object({
   declaraciones: z.array(z.string().uuid()).min(1).max(2000),
   modo: z.enum(['porcentaje', 'fijo']), valor: z.number(), vigenteDesde: z.coerce.date(),
@@ -40,8 +45,10 @@ const Asignacion = z.object({
 }).refine((b) => b.catalogoIds.length * b.clienteIds.length <= 2000, { message: 'Máximo 2.000 declaraciones por asignación: divida los clientes en grupos.' })
   .refine((b) => !b.solicitudAutomatica || b.frecuenciaDias, { message: 'La solicitud automática necesita la frecuencia en días.', path: ['frecuenciaDias'] });
 
-/** Cómo queda cubierta legalmente cada disposición de la declaración (misma regla que fn_disposicion_cubierta). */
+/** Cómo queda cubierta legalmente cada disposición de la declaración (mismas reglas que fn_decl_autorizacion_check). */
 export interface Cobertura { cubierto: boolean; mensaje: string; detalle: { codigo: string; nombre: string; cubierta: boolean; soporte: string }[] }
+/** Lo que la cobertura necesita saber de la declaración. */
+export interface ContextoCobertura { esPeligroso: boolean; contieneHidrocarburos: boolean; caracterizacion: boolean; tipoResiduoCodigo: string | null }
 
 const hoy = () => fechaColombia();
 const vigente = () => ({ vigenteDesde: { lte: hoy() }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy() } }] });
@@ -63,31 +70,52 @@ export class DeclaracionesService {
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
 
   async cobertura(empresaId: string, declaracionId: string, db: Tx | PrismaService = this.db): Promise<Cobertura> {
-    const disp = await db.declaracionDisposicion.findMany({ where: { declaracionId }, select: { disposicionId: true } });
-    return this.coberturaDisposiciones(empresaId, disp.map((x) => x.disposicionId), db);
+    const d = await db.declaracion.findUniqueOrThrow({ where: { id: declaracionId }, select: {
+      esPeligroso: true, contieneHidrocarburos: true, caracterizacionUrl: true, tipoResiduo: { select: { codigo: true } },
+      disposiciones: { select: { disposicionId: true } } } });
+    return this.coberturaDisposiciones(empresaId, d.disposiciones.map((x) => x.disposicionId), db, {
+      esPeligroso: d.esPeligroso, contieneHidrocarburos: d.contieneHidrocarburos, caracterizacion: !!d.caracterizacionUrl?.trim(), tipoResiduoCodigo: d.tipoResiduo?.codigo ?? null });
   }
 
-  /** Cobertura legal de una lista de disposiciones (el formulario la muestra en vivo, antes de guardar). */
-  async coberturaDisposiciones(empresaId: string, ids: string[], db: Tx | PrismaService = this.db): Promise<Cobertura> {
+  /**
+   * Cobertura legal de una lista de disposiciones (el formulario la muestra en vivo, antes de guardar). Mismas reglas que la
+   * base (fn_decl_autorizacion_check): permiso o licencia vigente; un residuo peligroso nunca con tratamiento propio en Los
+   * Pinos (Res. DGL 000632 de 2023, art. 6); hidrocarburos; y que algún gestor aliado vigente reciba ese tipo de residuo.
+   */
+  async coberturaDisposiciones(empresaId: string, ids: string[], db: Tx | PrismaService = this.db, ctx?: ContextoCobertura): Promise<Cobertura> {
     const disps = ids.length ? await db.disposicion.findMany({
       where: { id: { in: ids }, empresaId },
-      include: { proveedor: true, permisos: { include: { permiso: true } } },
+      include: { gestores: { include: { proveedor: true } }, permisos: { include: { permiso: true } } },
     }) : [];
     if (!disps.length) return { cubierto: false, mensaje: 'La declaración no tiene disposición o manejo.', detalle: [] };
     const h = hoy();
+    const aliadoVigente = (p: Proveedor) => !!p.licencia?.trim() && (p.licenciaIndefinida || (!!p.licenciaVence && p.licenciaVence >= h));
     const detalle = disps.map((d) => {
-      if (!d.activo) return { codigo: d.codigo, nombre: d.nombre, cubierta: false, soporte: 'Disposición inactiva' };
-      if (!d.requierePermiso) return { codigo: d.codigo, nombre: d.nombre, cubierta: true, soporte: d.soporteLegal ?? 'Objeto social' };
+      const no = (soporte: string) => ({ codigo: d.codigo, nombre: d.nombre, cubierta: false, soporte });
+      const si = (soporte: string) => ({ codigo: d.codigo, nombre: d.nombre, cubierta: true, soporte });
+      if (!d.activo) return no(`Inactiva${d.soporteLegal ? `: ${d.soporteLegal}` : ''}`);
+      if (ctx?.esPeligroso && !d.admitePeligrosos) return no('Solo admite residuos sin características de peligrosidad (Res. DGL 000632 de 2023, art. 6): los peligrosos van directo a un gestor aliado');
+      if (ctx?.contieneHidrocarburos && d.hidrocarburos === 'NO_ADMITE') return no('No admite residuos con hidrocarburos');
+      if (ctx?.contieneHidrocarburos && d.hidrocarburos === 'CON_CARACTERIZACION' && !ctx.caracterizacion) return no('Con hidrocarburos solo se admite con la caracterización de peligrosidad (CRETIB) negativa cargada');
+      if (!d.requierePermiso) return si(d.soporteLegal ?? 'Objeto social');
       if (!d.propia) {
-        const p = d.proveedor;
-        const ok = !!p && !!p.licencia?.trim() && !!p.licenciaVence && p.licenciaVence >= h;
-        return { codigo: d.codigo, nombre: d.nombre, cubierta: ok, soporte: ok ? `Licencia del gestor ${p!.razonSocial} (${p!.licencia}) hasta ${p!.licenciaVence!.toISOString().slice(0, 10)}` : 'El gestor aliado no tiene licencia registrada y vigente' };
+        const vigentes = d.gestores.map((g) => g.proveedor).filter(aliadoVigente);
+        const aceptan = ctx?.tipoResiduoCodigo ? vigentes.filter((p) => !p.excluyeTiposResiduo.includes(ctx.tipoResiduoCodigo!)) : vigentes;
+        if (aceptan.length) return si(aceptan.map((p) => `${p.razonSocial} (${p.licencia}; ${p.licenciaIndefinida ? 'vigencia indefinida' : `hasta ${p.licenciaVence!.toISOString().slice(0, 10)}`})`).join(' · '));
+        return no(!d.gestores.length ? 'No hay gestor aliado registrado' : vigentes.length ? 'Ningún gestor aliado vigente recibe este tipo de residuo'
+          : 'Ningún gestor aliado tiene la licencia registrada y vigente (falta la vigencia o venció)');
       }
       const permiso = d.permisos.map((x) => x.permiso).find((p) => p.empresaId === empresaId && ['VIGENTE', 'POR_VENCER'].includes(p.estado) && (!p.vence || p.vence >= h));
-      return { codigo: d.codigo, nombre: d.nombre, cubierta: !!permiso, soporte: permiso ? `${permiso.acto} (${permiso.autoridad})` : 'Ningún permiso vigente la ampara' };
+      return permiso ? si(`${permiso.acto} (${permiso.autoridad})`) : no('Ningún permiso vigente la ampara');
     });
     const sin = detalle.filter((x) => !x.cubierta);
-    return { cubierto: !sin.length, detalle, mensaje: sin.length ? `Ningún permiso o licencia vigente cubre: ${sin.map((x) => x.nombre).join(', ')}.` : `Cubierta por ${detalle.map((x) => x.soporte).join('; ')}.` };
+    return { cubierto: !sin.length, detalle, mensaje: sin.length ? `No queda cubierta: ${sin.map((x) => `${x.nombre} (${x.soporte})`).join('; ')}.` : `Cubierta por ${detalle.map((x) => x.soporte).join('; ')}.` };
+  }
+
+  /** Contexto de cobertura para el formulario (antes de guardar): peligrosidad, hidrocarburos y tipo de residuo. */
+  async contextoCobertura(a: Actor, q: z.infer<typeof ConsultaCobertura>): Promise<ContextoCobertura> {
+    const tipo = q.tipoResiduoId ? await this.db.tipoResiduo.findFirst({ where: { id: q.tipoResiduoId, empresaId: a.empresaId }, select: { codigo: true } }) : null;
+    return { esPeligroso: q.peligroso === 'true', contieneHidrocarburos: q.hidrocarburos === 'true', caracterizacion: q.caracterizacion === 'true', tipoResiduoCodigo: tipo?.codigo ?? null };
   }
 
   async listar(a: Actor, f: z.infer<typeof Filtros>) {
@@ -95,6 +123,7 @@ export class DeclaracionesService {
     const where: Prisma.DeclaracionWhereInput = {
       empresaId: a.empresaId, tipo: f.tipo, clienteId: f.clienteId, estado: f.estado, numero: f.numero,
       activa: f.activa ? f.activa === 'true' : undefined,
+      esPeligroso: f.peligroso ? f.peligroso === 'true' : undefined,
       sucursales: f.sucursalId ? { some: { sucursalId: f.sucursalId } } : undefined,
       nombre: f.q ? { contains: f.q, mode: 'insensitive' } : undefined,
       codigoInterno: f.codigo ? { contains: f.codigo, mode: 'insensitive' } : undefined,
@@ -166,8 +195,9 @@ export class DeclaracionesService {
   /**
    * Edita una declaración desde el formulario de 8 secciones. No cambia el cliente ni el tipo.
    * - Borrador, pendiente o rechazada: queda en borrador o vuelve a revisión (pendiente).
-   * - Autorizada: si la edita quien puede autorizar, sigue autorizada y se revisa de nuevo su cobertura legal;
-   *   si no, vuelve a «pendiente» (inactiva) hasta que HSEQ la revise.
+   * - Autorizada: si la edita quien puede autorizar, sigue autorizada y se revisa de nuevo su cobertura legal; si la edita
+   *   otro rol, o el cambio es crítico (peligrosidad, corriente, hidrocarburos, disposición, sedes o unidad de medida),
+   *   vuelve a «pendiente» (inactiva) y la autoriza otra persona (respuesta D2 de la gerencia).
    * - El precio nunca se sobrescribe: un cambio crea una vigencia nueva desde hoy (el mismo día, corrige la de hoy).
    */
   async editar(a: Actor, id: string, b: Datos) {
@@ -182,9 +212,26 @@ export class DeclaracionesService {
       if (b.tipo !== d.tipo) throw new BadRequestException({ mensaje: 'No se puede cambiar el tipo (residuo o servicio) de una declaración.' });
       const autorizada = d.estado === 'AUTORIZADA';
       if (autorizada && b.borrador) throw new BadRequestException({ mensaje: 'Una declaración autorizada no vuelve a borrador.' });
-      const sigueAutorizada = autorizada && puedeAutorizar;
-      const estado = sigueAutorizada ? 'AUTORIZADA' : b.borrador ? 'BORRADOR' : 'PENDIENTE';
       const sedes = await this.sedes(t, d.clienteId, b);
+      const hayPrincipal = b.disposiciones.some((x) => x.principal);
+      const disp = b.disposiciones.map((x, i) => ({ disposicionId: x.disposicionId, principal: hayPrincipal ? x.principal : i === 0 }));
+      const actual = d.tarifas[0];
+
+      // Respuesta D2 de la gerencia: un cambio crítico devuelve la declaración autorizada a revisión aunque lo haga HSEQ, y
+      // la autoriza otra persona (la base lo exige con chk_decl_cuatro_ojos). Los demás cambios de quien autoriza la dejan autorizada.
+      const firma = (xs: { disposicionId: string; principal: boolean }[]) => JSON.stringify(xs.map((x) => `${x.disposicionId}:${x.principal}`).sort());
+      const mismas = (x: string[], y: string[]) => x.length === y.length && x.every((v) => y.includes(v));
+      const criticos = [
+        d.esPeligroso !== b.esPeligroso && 'la peligrosidad',
+        ((d.codigoYId ?? null) !== (b.codigoYId ?? null) || (d.codigoAId ?? null) !== (b.codigoAId ?? null)) && 'la corriente Y/A',
+        (d.contieneHidrocarburos !== b.contieneHidrocarburos || (d.caracterizacionUrl ?? null) !== (b.caracterizacionUrl ?? null)) && 'los hidrocarburos o su caracterización',
+        firma(d.disposiciones) !== firma(disp) && 'la disposición o tratamiento',
+        (d.alcanceSedes !== b.alcanceSedes || !mismas(d.sucursales.map((s) => s.sucursalId), sedes)) && 'el generador o las sedes',
+        !!b.precio && !!actual && (actual.metricaId ?? null) !== (b.precio.metricaId ?? null) && 'la unidad de medida',
+      ].filter(Boolean) as string[];
+      const sigueAutorizada = autorizada && puedeAutorizar && !criticos.length;
+      const vuelveARevision = autorizada && !sigueAutorizada;
+      const estado = sigueAutorizada ? 'AUTORIZADA' : b.borrador ? 'BORRADOR' : 'PENDIENTE';
 
       // Qué columnas cambian (para la auditoría)
       const cols = this.columnas(b) as Record<string, unknown>;
@@ -200,6 +247,7 @@ export class DeclaracionesService {
         ...this.columnas(b), ...responsabilidad, estado,
         ...(b.borrador ? {} : { origenFase1: false }), // completa: deja de ser «convertida de la fase 1»
         ...(sigueAutorizada ? {} : { activa: false, aprobadaPorId: null, aprobadaEn: null, causalId: null }),
+        ...(vuelveARevision ? { revisionPedidaPorId: a.id } : {}),
       } });
 
       // Sedes: quita las que ya no van y agrega las nuevas (las que siguen conservan si están suspendidas)
@@ -209,8 +257,6 @@ export class DeclaracionesService {
       if (sedesAgregar.length) await t.declaracionSucursal.createMany({ data: sedesAgregar.map((sucursalId) => ({ declaracionId: id, sucursalId })) });
 
       // Disposiciones: la marcada (o la primera) es la principal
-      const hayPrincipal = b.disposiciones.some((x) => x.principal);
-      const disp = b.disposiciones.map((x, i) => ({ disposicionId: x.disposicionId, principal: hayPrincipal ? x.principal : i === 0 }));
       const dispAntes = new Map(d.disposiciones.map((x) => [x.disposicionId, x.principal]));
       const dispQuitar = [...dispAntes.keys()].filter((k) => !disp.some((x) => x.disposicionId === k));
       if (dispQuitar.length) await t.declaracionDisposicion.deleteMany({ where: { declaracionId: id, disposicionId: { in: dispQuitar } } });
@@ -226,7 +272,6 @@ export class DeclaracionesService {
 
       // Precio: solo si cambió. Nueva vigencia desde hoy; si la vigente empezó hoy, se corrige esa misma
       let precioCambio = false;
-      const actual = d.tarifas[0];
       if (b.precio) {
         const p = {
           precioUnitario: b.precio.precioUnitario, metricaId: b.precio.metricaId ?? null,
@@ -264,8 +309,8 @@ export class DeclaracionesService {
           sedes: d.sucursales.length, disposiciones: d.disposiciones.length, ...(precioCambio ? { precio: actual ? Number(actual.precioUnitario) : null } : {}) },
         { estado, ...Object.fromEntries(cambiados.map((k) => [k, norm(cols[k])])), sedes: sedes.length, disposiciones: disp.length,
           ...(precioCambio ? { precio: b.precio?.precioUnitario ?? null } : {}),
-          ...(autorizada && !sigueAutorizada ? { nota: 'Editada por un rol que no autoriza: vuelve a revisión' } : {}) }, t);
-      return t.declaracion.findUniqueOrThrow({ where: { id } });
+          ...(vuelveARevision ? { nota: criticos.length ? `Cambio crítico (${criticos.join(', ')}): vuelve a revisión y la autoriza otra persona` : 'Editada por un rol que no autoriza: vuelve a revisión' } : {}) }, t);
+      return { ...(await t.declaracion.findUniqueOrThrow({ where: { id } })), cambiosCriticos: vuelveARevision ? criticos : [] };
     });
   }
 
@@ -285,6 +330,8 @@ export class DeclaracionesService {
     if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
     if (d.estado === 'BORRADOR') throw new BadRequestException({ mensaje: 'La declaración está en borrador: el cliente debe enviarla primero.' });
     if (b.estado === 'AUTORIZADA') {
+      if (d.revisionPedidaPorId === a.id)
+        throw new ForbiddenException({ mensaje: 'Esta declaración volvió a revisión por un cambio crítico que hizo usted: la debe autorizar otra persona con ese permiso.' });
       const faltan = faltantesParaAutorizar({ tipo: d.tipo, esPeligroso: d.esPeligroso, fichaSeguridadUrl: d.fichaSeguridadUrl, sedes: d._count.sucursales, disposiciones: d._count.disposiciones, tarifaVigente: d.tarifas.length > 0 });
       if (faltan.length) throw new BadRequestException({ mensaje: `No se puede autorizar: ${faltan.join('; ')}.` });
       if (d.tipo === 'RESIDUO') {
@@ -430,7 +477,9 @@ class DeclaracionesController {
   @Get('catalogo-servicios') catalogoServicios(@ActorActual() a: Actor) { return this.s.catalogoServicios(a); }
   @Permiso('declaraciones.crear') @Post('catalogo-servicios') crearServicio(@ActorActual() a: Actor, @Body(new Zod(ServicioCatalogo)) b: z.infer<typeof ServicioCatalogo>) { return this.s.crearServicioCatalogo(a, b); }
   @Permiso('declaraciones.crear') @Post('asignacion-masiva') asignacion(@ActorActual() a: Actor, @Body(new Zod(Asignacion)) b: z.infer<typeof Asignacion>) { return this.s.asignacionMasiva(a, b); }
-  @Get('cobertura') coberturaDe(@ActorActual() a: Actor, @Query(new Zod(ConsultaCobertura)) q: z.infer<typeof ConsultaCobertura>) { return this.s.coberturaDisposiciones(a.empresaId, q.disposiciones); }
+  @Get('cobertura') async coberturaDe(@ActorActual() a: Actor, @Query(new Zod(ConsultaCobertura)) q: z.infer<typeof ConsultaCobertura>) {
+    return this.s.coberturaDisposiciones(a.empresaId, q.disposiciones, undefined, await this.s.contextoCobertura(a, q));
+  }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
   @Permiso('declaraciones.crear') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(EsquemaDeclaracion)) b: Datos) { return this.s.crear(a, b); }
   @Permiso('declaraciones.crear') @Put(':id') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EsquemaDeclaracion)) b: Datos) { return this.s.editar(a, id, b); }

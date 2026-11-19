@@ -7,7 +7,9 @@ import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha } from '../../lib/format';
 import { msg, useApi } from '../../lib/servidor';
 
-interface Config { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; notaBascula?: string; certificaciones?: { norma: string; numero: string }[] }
+interface Certificacion { norma: string; numero: string; entidad?: string; vence?: string }
+interface Bascula { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string }
+interface Config { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; notaBascula?: string; certificaciones?: Certificacion[]; bascula?: Bascula }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
 interface Texto { id: string; codigo: string; version: number; titulo: string; texto: string; disposiciones: string[]; orden: number; revisado: boolean; vigenteDesde: string }
@@ -63,19 +65,27 @@ export function EmpresaServidor() {
             <Field label="Ciudad de firma" id="em-ci" hint="Sale en «Lugar y fecha»"><Input id="em-ci" disabled={!edita} value={c.ciudadFirma ?? ''} onChange={(e) => setC((s) => ({ ...s, ciudadFirma: e.target.value }))} /></Field>
             <Field label="Representante legal" id="em-rl"><Input id="em-rl" disabled={!edita} value={c.representanteLegal ?? ''} onChange={(e) => setC((s) => ({ ...s, representanteLegal: e.target.value }))} /></Field>
             <Field label="Cargo de quien firma" id="em-ca"><Input id="em-ca" disabled={!edita} value={c.cargoFirmante ?? ''} onChange={(e) => setC((s) => ({ ...s, cargoFirmante: e.target.value }))} /></Field>
-            <Field label="Nota de calibración de la báscula" id="em-nb" hint="Sale en el recibo y el manifiesto"><Input id="em-nb" disabled={!edita} value={c.notaBascula ?? ''} onChange={(e) => setC((s) => ({ ...s, notaBascula: e.target.value }))} placeholder="Báscula calibrada el …, certificado …" /></Field>
           </div>
-          <p className="mb-2 mt-4 text-[13px] font-semibold">Certificaciones del sistema de gestión <span className="font-normal text-muted">(solo salen las que tienen número)</span></p>
+          <p className="mb-2 mt-4 text-[13px] font-semibold">Certificaciones del sistema de gestión <span className="font-normal text-muted">(solo salen las que tienen número y no han vencido)</span></p>
           <div className="flex flex-col gap-2">
             {(c.certificaciones ?? []).map((x, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[1.2fr_1fr_0.9fr_0.9fr_auto]">
                 <Input aria-label="Norma" disabled={!edita} value={x.norma} onChange={(e) => setC((s) => ({ ...s, certificaciones: (s.certificaciones ?? []).map((y, j) => (j === i ? { ...y, norma: e.target.value } : y)) }))} />
                 <Input aria-label="Número del certificado" disabled={!edita} placeholder="Número del certificado" value={x.numero} onChange={(e) => setC((s) => ({ ...s, certificaciones: (s.certificaciones ?? []).map((y, j) => (j === i ? { ...y, numero: e.target.value } : y)) }))} />
+                <Input aria-label="Entidad certificadora" disabled={!edita} placeholder="Entidad (ICONTEC…)" value={x.entidad ?? ''} onChange={(e) => setC((s) => ({ ...s, certificaciones: (s.certificaciones ?? []).map((y, j) => (j === i ? { ...y, entidad: e.target.value } : y)) }))} />
+                <Input aria-label="Vence" type="date" disabled={!edita} value={x.vence ?? ''} onChange={(e) => setC((s) => ({ ...s, certificaciones: (s.certificaciones ?? []).map((y, j) => (j === i ? { ...y, vence: e.target.value } : y)) }))} />
                 {edita && <Button size="sm" variant="ghost" aria-label="Quitar la certificación" onClick={() => setC((s) => ({ ...s, certificaciones: (s.certificaciones ?? []).filter((_, j) => j !== i) }))}><Trash2 size={14} /></Button>}
               </div>
             ))}
-            {edita && <Button size="sm" className="self-start" onClick={() => setC((s) => ({ ...s, certificaciones: [...(s.certificaciones ?? []), { norma: '', numero: '' }] }))}><Plus size={14} /> Certificación</Button>}
+            {edita && <Button size="sm" className="self-start" onClick={() => setC((s) => ({ ...s, certificaciones: [...(s.certificaciones ?? []), { norma: '', numero: '', entidad: '', vence: '' }] }))}><Plus size={14} /> Certificación</Button>}
           </div>
+          <p className="mb-2 mt-4 text-[13px] font-semibold">Calibración de la báscula <span className="font-normal text-muted">(sale en el recibo; si está vencida, el recibo sale con alerta para que HSEQ revise el pesaje)</span></p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {([['identificacion', 'Báscula (identificación)', 'text'], ['certificado', 'N.° del certificado de calibración', 'text'], ['fecha', 'Fecha del certificado', 'date'], ['laboratorio', 'Laboratorio que lo expidió', 'text'], ['vigenteHasta', 'Vigente hasta', 'date']] as const).map(([k, etiqueta, tipo]) => (
+              <Field key={k} label={etiqueta} id={`em-b-${k}`}><Input id={`em-b-${k}`} type={tipo} disabled={!edita} value={c.bascula?.[k] ?? ''} onChange={(e) => setC((s) => ({ ...s, bascula: { ...s.bascula, [k]: e.target.value } }))} /></Field>
+            ))}
+          </div>
+          {!c.bascula?.certificado?.trim() && <Field label="Nota libre del recibo (mientras no registre la calibración)" id="em-nb"><Input id="em-nb" disabled={!edita} value={c.notaBascula ?? ''} onChange={(e) => setC((s) => ({ ...s, notaBascula: e.target.value }))} /></Field>}
           {!c.ciudadFirma && <p className="mt-3 rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">Complete la ciudad de firma: el certificado la necesita en «Lugar y fecha».</p>}
         </Card>
 

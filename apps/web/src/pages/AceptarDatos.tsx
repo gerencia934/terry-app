@@ -29,6 +29,7 @@ export default function AceptarDatos() {
             <li><b className="text-fg">Sus derechos:</b> conocer, actualizar y rectificar sus datos, y revocar la autorización cuando no exista un deber legal de conservarlos.</li>
           </ul>
           {politica?.url && <a className="text-[14px] font-medium text-brand underline" href={politica.url} target="_blank" rel="noreferrer">Leer la política completa</a>}
+          {!politica?.url && <p className="rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">Política de datos en borrador: este servidor es de pruebas. Antes de cargar datos reales, la empresa debe publicar su política y configurarla.</p>}
           <label className="flex items-start gap-2.5 rounded-lg bg-surface-2 p-3 text-[14px]">
             <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-[rgb(var(--brand))]" checked={marcado} onChange={(e) => setMarcado(e.target.checked)} />
             <span>He leído y acepto la política de tratamiento de datos personales{politica?.version ? ` (versión ${politica.version})` : ''}.</span>

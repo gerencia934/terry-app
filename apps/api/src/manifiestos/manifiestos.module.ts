@@ -279,12 +279,20 @@ export class ManifiestosService {
     } });
     if (!m) throw new NotFoundException({ mensaje: 'Manifiesto no encontrado.' });
     const leer = async (clave: string | null) => (clave ? (await this.archivos.leer(clave, a.empresaId).catch(() => null))?.buf ?? null : null);
-    const conf = (m.empresa.configuracion ?? {}) as { notaBascula?: string };
+    const conf = (m.empresa.configuracion ?? {}) as { notaBascula?: string; bascula?: { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string } };
+    // Nota de báscula (respuesta C2): cita el certificado de calibración; vencido a la fecha del servicio, sale con alerta
+    const b = conf.bascula;
+    const fecha = (iso: string) => iso.split('-').reverse().join('-');
+    const notaBascula = b?.certificado?.trim()
+      ? `${b.vigenteHasta && b.vigenteHasta < m.fechaServicio.toISOString().slice(0, 10) ? `ATENCIÓN: el certificado de calibración venció el ${fecha(b.vigenteHasta)}; HSEQ debe revisar este pesaje. ` : ''}`
+        + `Pesaje en báscula ${b.identificacion?.trim() || ''}, calibrada según el certificado N.° ${b.certificado.trim()}${b.fecha ? ` del ${fecha(b.fecha)}` : ''}`
+        + `${b.laboratorio?.trim() ? `, expedido por ${b.laboratorio.trim()}` : ''}${b.vigenteHasta ? `, vigente hasta ${fecha(b.vigenteHasta)}` : ''}.`
+      : conf.notaBascula?.trim() || null;
     const t = m.transporte;
     const n = (v: Prisma.Decimal | null) => (v === null ? null : Number(v));
     return {
       numero: m.numero, tipo: m.tipo, estado: m.estado, fechaServicio: m.fechaServicio.toISOString(),
-      emisor: { razonSocial: m.empresa.razonSocial, nit: m.empresa.nit, notaBascula: conf.notaBascula?.trim() || null },
+      emisor: { razonSocial: m.empresa.razonSocial, nit: m.empresa.nit, notaBascula },
       cliente: { razonSocial: m.cliente.razonSocial, nit: `${m.cliente.nit}${m.cliente.dv ? `-${m.cliente.dv}` : ''}` },
       destino: m.destino.razonSocial, ordenCompra: m.ordenCompra, manifiestoCliente: m.manifiestoCliente, ruta: m.ruta?.codigo ?? null,
       transporte: t

@@ -7,7 +7,7 @@ import shared from '@terraviva/shared';
 
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
   PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS,
-  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR, TEXTOS_LEGALES_INICIALES } = shared;
+  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR, TEXTOS_LEGALES, TEXTOS_LEGALES_RETIRADOS, GESTORES_ALIADOS } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
@@ -82,40 +82,101 @@ async function main() {
   await porEmpresa('metrica', E, METRICAS, (x) => ({ nombre: x.nombre, abreviacion: x.abreviacion, uso: x.uso, factorAKg: x.factorAKg }));
   await porEmpresa('tipoEmbalaje', E, TIPOS_EMBALAJE, (x) => ({ nombre: x.nombre, esOtro: !!x.esOtro }));
   await porEmpresa('materialEmbalaje', E, MATERIALES_EMBALAJE, (x) => ({ nombre: x.nombre, esOtro: !!x.esOtro }));
-  await porEmpresa('disposicion', E, DISPOSICIONES, (x) => ({ nombre: x.nombre, requierePermiso: x.requierePermiso, propia: x.propia, soporteLegal: x.soporteLegal }));
+  await porEmpresa('disposicion', E, DISPOSICIONES, (x) => ({ nombre: x.nombre, requierePermiso: x.requierePermiso, propia: x.propia, soporteLegal: x.soporteLegal, activo: x.activo !== false, admitePeligrosos: x.admitePeligrosos !== false, hidrocarburos: x.hidrocarburos ?? 'ADMITE' }));
 
-  // Permisos ambientales (CAS y CDMB) y qué disposiciones ampara cada uno, tomados del certificado real PSAP2026-296.
-  // ⚠ Las obligaciones y fechas son de ejemplo: ajústelas al acto administrativo.
-  for (const { acto, autoridad = 'CAS', expedicion, alcance, disposiciones, obligacion: [desc, per, f] } of PERMISOS_CAS) {
-    let p = await db.permisoAmbiental.findFirst({ where: { empresaId: E, acto } });
-    if (!p) p = await db.permisoAmbiental.create({ data: { empresaId: E, acto, autoridad, alcance, estado: 'VIGENTE', expedicion: expedicion ? new Date(expedicion) : null } });
-    for (const codigo of disposiciones) {
+  // Permisos ambientales y obligaciones reales (respuestas de la gerencia A1 y A4, 19-11-2026).
+  // Idempotente: crea lo que falta y completa fechas vacías; no pisa lo que se haya cambiado en la aplicación.
+  for (const x of PERMISOS_CAS) {
+    const autoridad = x.autoridad ?? 'CAS';
+    let p = await db.permisoAmbiental.findFirst({ where: { empresaId: E, acto: x.acto } });
+    if (!p) p = await db.permisoAmbiental.create({ data: { empresaId: E, acto: x.acto, autoridad, alcance: x.alcance, estado: 'VIGENTE',
+      expedicion: x.expedicion ? new Date(x.expedicion) : null, vence: x.vence ? new Date(x.vence) : null } });
+    else p = await db.permisoAmbiental.update({ where: { id: p.id }, data: {
+      alcance: x.alcance, autoridad, expedicion: p.expedicion ?? (x.expedicion ? new Date(x.expedicion) : null),
+      // El vencimiento solo se mueve hacia adelante (Res. 000632: provisional hasta la constancia de ejecutoria)
+      vence: x.vence && (!p.vence || p.vence < new Date(x.vence)) ? new Date(x.vence) : p.vence,
+    } });
+    for (const codigo of x.disposiciones) {
       const d = await db.disposicion.findUniqueOrThrow({ where: { empresaId_codigo: { empresaId: E, codigo } } });
       await db.permisoDisposicion.upsert({ where: { permisoId_disposicionId: { permisoId: p.id, disposicionId: d.id } }, update: {}, create: { permisoId: p.id, disposicionId: d.id } });
     }
-    if (!(await db.obligacionPermiso.count({ where: { permisoId: p.id } })))
-      await db.obligacionPermiso.create({ data: { permisoId: p.id, descripcion: `${desc} (VERIFICAR fecha y periodicidad en el acto)`, periodicidad: per, proximaFecha: new Date(f) } });
+    for (const o of x.obligaciones) {
+      if (await db.obligacionPermiso.findFirst({ where: { permisoId: p.id, descripcion: o.descripcion } })) continue;
+      await db.obligacionPermiso.create({ data: { permisoId: p.id, codigo: o.codigo ?? null, descripcion: o.descripcion, periodicidad: o.periodicidad,
+        meses: o.meses ?? null, proximaFecha: o.proxima ? new Date(o.proxima) : null, articulo: o.articulo } });
+    }
   }
 
-  // Textos legales del certificado: texto inicial por revisar (revisado = false); cada cambio en Ajustes crea una versión.
-  for (const t of TEXTOS_LEGALES_INICIALES) {
-    if (await db.textoLegal.findFirst({ where: { empresaId: E, codigo: t.codigo } })) continue;
-    await db.textoLegal.create({ data: { empresaId: E, version: 1, revisado: false, ...t } });
+  // Gestores aliados (respuesta A5): licencia, autoridad, vigencia (o indefinida), alcance y exclusiones; varios por
+  // disposición. Completa solo lo vacío: lo que se registre después en la aplicación se respeta.
+  for (const g of GESTORES_ALIADOS) {
+    let p = await db.proveedor.findFirst({ where: { empresaId: E, nit: g.nit } });
+    const vigencia = { licenciaVence: g.vence ? new Date(g.vence) : null, licenciaIndefinida: !!g.indefinida };
+    if (!p) p = await db.proveedor.create({ data: { empresaId: E, nit: g.nit, razonSocial: g.razonSocial, municipio: g.municipio ?? null, esDestino: true, esPropio: false,
+      licencia: g.licencia, licenciaAutoridad: g.autoridad, alcance: g.alcance, excluyeTiposResiduo: g.excluyeTiposResiduo ?? [], ...vigencia } });
+    else p = await db.proveedor.update({ where: { id: p.id }, data: {
+      licencia: p.licencia || g.licencia, licenciaAutoridad: p.licenciaAutoridad || g.autoridad, alcance: p.alcance || g.alcance,
+      excluyeTiposResiduo: p.excluyeTiposResiduo.length ? p.excluyeTiposResiduo : g.excluyeTiposResiduo ?? [],
+      ...(p.licenciaVence || p.licenciaIndefinida ? {} : vigencia),
+    } });
+    for (const codigo of g.disposiciones) {
+      const d = await db.disposicion.findUniqueOrThrow({ where: { empresaId_codigo: { empresaId: E, codigo } } });
+      await db.disposicionGestor.upsert({ where: { disposicionId_proveedorId: { disposicionId: d.id, proveedorId: p.id } }, update: {}, create: { disposicionId: d.id, proveedorId: p.id } });
+    }
   }
-  // Configuración de la empresa para los documentos (se completa en Ajustes › Datos de la empresa)
+
+  // Textos legales del certificado (respuesta A2). Van por versiones: si la versión vigente la puso esta siembra y el texto
+  // cambió, se retira y se crea la siguiente; si la cambió una persona en Ajustes, se respeta.
+  const mismoTexto = (a, b) => a.texto === b.texto && a.titulo === b.titulo && a.orden === b.orden && a.soloPeligrosos === !!b.soloPeligrosos
+    && JSON.stringify([...a.disposiciones].sort()) === JSON.stringify([...b.disposiciones].sort());
+  for (const t of TEXTOS_LEGALES) {
+    const versiones = await db.textoLegal.findMany({ where: { empresaId: E, codigo: t.codigo }, orderBy: { version: 'desc' } });
+    const vigente = versiones.find((v) => v.activo);
+    const datos = { titulo: t.titulo, texto: t.texto, disposiciones: t.disposiciones, orden: t.orden, soloPeligrosos: !!t.soloPeligrosos, revisado: !!t.revisado };
+    if (!versiones.length) { await db.textoLegal.create({ data: { empresaId: E, codigo: t.codigo, version: 1, activo: t.activo !== false, ...datos } }); continue; }
+    if (!vigente || vigente.creadoPorId) continue;
+    if (mismoTexto(vigente, t)) {
+      if (vigente.revisado !== !!t.revisado) await db.textoLegal.update({ where: { id: vigente.id }, data: { revisado: !!t.revisado } });
+      continue;
+    }
+    await db.$transaction([
+      db.textoLegal.update({ where: { id: vigente.id }, data: { activo: false } }),
+      ...(t.activo === false ? [] : [db.textoLegal.create({ data: { empresaId: E, codigo: t.codigo, version: versiones[0].version + 1, activo: true, ...datos } })]),
+    ]);
+  }
+  for (const codigo of TEXTOS_LEGALES_RETIRADOS)
+    await db.textoLegal.updateMany({ where: { empresaId: E, codigo, activo: true, creadoPorId: null }, data: { activo: false } });
+
+  // Configuración de los documentos (respuesta C2). Completa solo lo vacío. El nombre del representante legal y los datos
+  // de calibración de la báscula se escriben en Ajustes › Datos de la empresa.
+  const CERTIFICACIONES = [
+    { norma: 'ISO 9001:2015', numero: 'SC-CER627273', entidad: 'ICONTEC', vence: '2027-08-02' },
+    { norma: 'ISO 14001:2015', numero: 'SA-CER627275', entidad: 'ICONTEC', vence: '2027-08-02' },
+    { norma: 'ISO 45001:2018', numero: 'OS-CER627378', entidad: 'ICONTEC', vence: '2027-08-02' },
+    { norma: 'NORSOK S-006', numero: '', entidad: '', vence: '' }, // sin certificado vigente: el sello no se imprime
+  ];
   const emp = await db.empresa.findUniqueOrThrow({ where: { id: E } });
-  if (!emp.configuracion || !Object.keys(emp.configuracion).length) await db.empresa.update({ where: { id: E }, data: { configuracion: {
-    ciudadFirma: '', representanteLegal: '', cargoFirmante: 'Representante legal', notaBascula: '',
-    certificaciones: ['ISO 9001:2015', 'ISO 14001:2015', 'ISO 45001:2018', 'NORSOK S-006'].map((norma) => ({ norma, numero: '' })),
-  } } });
+  const conf = { ...(emp.configuracion ?? {}) };
+  if (!conf.ciudadFirma) conf.ciudadFirma = 'Sabana de Torres';
+  if (!conf.cargoFirmante || conf.cargoFirmante === 'Representante legal') conf.cargoFirmante = 'Representante Legal';
+  conf.representanteLegal ??= '';
+  conf.notaBascula ??= '';
+  conf.bascula ??= { identificacion: '', certificado: '', fecha: '', laboratorio: '', vigenteHasta: '' };
+  const previas = Array.isArray(conf.certificaciones) ? conf.certificaciones : [];
+  conf.certificaciones = [
+    ...CERTIFICACIONES.map((c) => { const p = previas.find((x) => x?.norma === c.norma); return p?.numero ? { entidad: c.entidad, vence: c.vence, ...p } : c; }),
+    ...previas.filter((p) => p?.norma && !CERTIFICACIONES.some((c) => c.norma === p.norma)),
+  ];
+  await db.empresa.update({ where: { id: E }, data: { configuracion: conf } });
 
   // Zonas, bodegas, destinos
   for (const [nombre, color] of [['Área Metropolitana BGA', '#2A78D6'], ['Magdalena Medio', '#EB6834'], ['Sabana – Lebrija', '#1BAF7A'], ['Provincia de Mares / Chucurí', '#EDA100']])
     if (!(await db.zona.findFirst({ where: { empresaId: E, nombre } }))) await db.zona.create({ data: { empresaId: E, nombre, color } });
-  for (const nombre of ['PSA Los Pinos · Celda temporal RESPEL', 'PSA Los Pinos · Acopio aprovechables', 'PSA Los Pinos · Tanque ACU'])
+  for (const nombre of ['PSA Los Pinos · Acopio aprovechables', 'PSA Los Pinos · Tanque ACU']) // la celda de RESPEL no: Los Pinos no almacena peligrosos sin licencia
     if (!(await db.bodega.findFirst({ where: { empresaId: E, nombre } }))) await db.bodega.create({ data: { empresaId: E, nombre } });
   if (!(await db.proveedor.findFirst({ where: { empresaId: E, esPropio: true } })))
-    await db.proveedor.create({ data: { empresaId: E, nit: '901089780', razonSocial: 'TERRA VIVA S.A.S. E.S.P. · Parque de Saneamiento Ambiental Los Pinos', esPropio: true, municipio: 'Sabana de Torres', licencia: 'Res. CAS 0632-2023 / 0235-2024' } });
+    await db.proveedor.create({ data: { empresaId: E, nit: '901089780', razonSocial: 'TERRA VIVA S.A.S. E.S.P. · Parque de Saneamiento Ambiental Los Pinos', esPropio: true, municipio: 'Sabana de Torres', licencia: 'Res. DGL 000632 de 2023 y Res. SAO No. 00235-24 (CAS)' } });
+  await db.proveedor.updateMany({ where: { empresaId: E, esPropio: true, licencia: 'Res. CAS 0632-2023 / 0235-2024' }, data: { licencia: 'Res. DGL 000632 de 2023 y Res. SAO No. 00235-24 (CAS)' } });
 
   // Etapas del recorrido. Las de orden > 1 que no son finales exigen vehículo, conductor e inspección aprobada.
   // «rastreo»: GPS solo mientras la ruta está en esa etapa. «cancela»: libera las líneas sin recoger.

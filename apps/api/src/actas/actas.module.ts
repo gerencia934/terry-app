@@ -1,8 +1,8 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
-import { EstadoActa, Prisma, TipoActa } from '@prisma/client';
+import { EstadoActa, Prisma, TipoActa, type Proveedor } from '@prisma/client';
 import type { Response } from 'express';
 import JSZip from 'jszip';
 import { createHash } from 'node:crypto';
@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos } from '../common/archivos';
-import { ActorActual, Permiso, Publico, Zod, paginar, type Actor } from '../common/http';
+import { ActorActual, Permiso, Publico, Zod, fechaColombia, paginar, type Actor } from '../common/http';
 import type { Config } from '../config';
 import { pdfActa, type ContenidoActa } from './pdf';
 
@@ -31,9 +31,11 @@ const Crear = z.object({
 }).refine((b) => b.periodoHasta >= b.periodoDesde, { message: 'El periodo está invertido.' });
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 /** Configuración de la empresa que usa el certificado (Ajustes › Datos de la empresa). */
-interface ConfigEmpresa { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; certificaciones?: { norma: string; numero: string }[] }
+interface ConfigEmpresa { ciudadFirma?: string; representanteLegal?: string; cargoFirmante?: string; certificaciones?: { norma: string; numero: string; entidad?: string; vence?: string }[] }
 const Items = z.object({ agregar: z.array(id).max(2000).default([]), quitar: z.array(id).max(2000).default([]) });
 const Anular = z.object({ motivo: z.string().trim().min(5).max(300) });
+/** N.° del certificado que expidió el gestor aliado para esa línea (vacío = quitarlo). */
+const CertificadoAliado = z.object({ numero: z.string().trim().max(60).nullable() });
 const Cargar = z.object({
   tipo: z.nativeEnum(TipoActa).default('DISPOSICION'), clienteId: id, destinoId: id, periodoDesde: z.coerce.date(), periodoHasta: z.coerce.date(),
   conciliacionItemIds: idsCsv,
@@ -44,10 +46,10 @@ const lineasActa = {
   orderBy: [{ conciliacion: { manifiesto: { fechaServicio: 'asc' as const } } }, { id: 'asc' as const }],
   include: {
     metrica: true,
-    disposicion: { include: { proveedor: true, permisos: { include: { permiso: true } } } },
+    disposicion: { include: { gestores: { include: { proveedor: true } }, permisos: { include: { permiso: true } } } },
     conciliacion: { include: { manifiesto: { include: { vehiculo: true, transporte: true, destino: true } } } },
     manifiestoItem: { include: {
-      metrica: true, disposicion: { include: { proveedor: true, permisos: { include: { permiso: true } } } },
+      metrica: true, disposicion: { include: { gestores: { include: { proveedor: true } }, permisos: { include: { permiso: true } } } },
       declaracion: { include: { codigoY: true, codigoA: true } }, sucursal: { include: { municipio: true } },
     } },
   },
@@ -105,9 +107,10 @@ class ActasService {
     const x = await this.db.acta.findFirst({ where: { id, empresaId: a.empresaId }, include: {
       cliente: { select: { id: true, razonSocial: true, nit: true } }, destino: { select: { id: true, razonSocial: true } },
       emitidaPor: { select: { nombre: true } }, cargadaPor: { select: { nombre: true } },
-      items: { include: { metrica: { select: { abreviacion: true } }, disposicion: { select: { nombre: true } },
-        conciliacion: { select: { manifiesto: { select: { numero: true, fechaServicio: true } } } },
-        manifiestoItem: { select: { declaracion: { select: { nombre: true } }, sucursal: { select: { nombre: true } }, metrica: { select: { abreviacion: true } } } } } },
+      items: { include: { metrica: { select: { abreviacion: true } }, disposicion: { select: { nombre: true, propia: true } },
+        conciliacion: { select: { manifiesto: { select: { numero: true, fechaServicio: true, destino: { select: { razonSocial: true } } } } } },
+        manifiestoItem: { select: { declaracion: { select: { nombre: true } }, sucursal: { select: { nombre: true } }, metrica: { select: { abreviacion: true } },
+          disposicion: { select: { nombre: true, propia: true } } } } } },
     } });
     if (!x) throw new NotFoundException({ mensaje: 'Acta no encontrada.' });
     return { ...x, urlVerificacion: this.urlVerificacion(x.codigoVerificacion) };
@@ -176,16 +179,25 @@ class ActasService {
       this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId } }),
       this.db.conciliacionItem.findMany({ where: { actaId: acta.id }, ...lineasActa }),
     ]);
-    const sinSoporte: string[] = [];
+    const sinSoporte: string[] = [], sinCertificadoAliado: string[] = [];
     const permisosUsados = new Map<string, { acto: string; autoridad: string; alcance: string; vence: string | null }>();
+    /** Gestor aliado de la línea, vigente a la fecha del servicio: el destino del manifiesto si es uno de los aliados de la disposición. */
+    const aliadoDe = (l: LineaActa) => {
+      const d = l.disposicion ?? l.manifiestoItem.disposicion;
+      if (!d || d.propia) return null;
+      const f = l.conciliacion.manifiesto.fechaServicio;
+      const vigente = (p: Proveedor) => !!p.licencia?.trim() && (p.licenciaIndefinida || (!!p.licenciaVence && p.licenciaVence >= f));
+      const candidatos = d.gestores.map((g) => g.proveedor);
+      return candidatos.find((p) => p.id === l.conciliacion.manifiesto.destinoId && vigente(p)) ?? candidatos.find(vigente) ?? null;
+    };
     const soporte = (l: LineaActa) => {
       const d = l.disposicion ?? l.manifiestoItem.disposicion;
       const fechaServicio = l.conciliacion.manifiesto.fechaServicio;
       if (!d) return null;
       if (!d.requierePermiso) return [d.soporteLegal ?? 'Objeto social de la empresa'];
       if (!d.propia) {
-        const p = d.proveedor;
-        return p?.licencia && p.licenciaVence && p.licenciaVence >= fechaServicio ? [`${p.razonSocial}: ${p.licencia}`] : null;
+        const p = aliadoDe(l);
+        return p ? [`${p.razonSocial}: ${p.licencia}`] : null;
       }
       const vigentes = d.permisos.map((x) => x.permiso).filter((p) => p.empresaId === a.empresaId &&
         (p.vence ? p.vence >= fechaServicio : ['VIGENTE', 'POR_VENCER'].includes(p.estado)));
@@ -196,19 +208,38 @@ class ActasService {
       const m = l.conciliacion.manifiesto, mi = l.manifiestoItem, d = l.disposicion ?? mi.disposicion;
       const s = soporte(l);
       if (exigirSoporte && (!s || !d)) sinSoporte.push(`${m.numero} · ${mi.declaracion.nombre}${d ? ` (${d.nombre})` : ' (sin tratamiento)'}`);
+      // Respuesta A2 de la gerencia: sin el número del certificado del aliado no se emite el certificado final de esa línea
+      const aliado = d && !d.propia && d.requierePermiso ? aliadoDe(l) : null;
+      if (exigirSoporte && d && !d.propia && d.requierePermiso && !l.certificadoAliado?.trim()) sinCertificadoAliado.push(`${m.numero} · ${mi.declaracion.nombre}`);
       return {
         disposicion: d?.codigo ?? null, generador: mi.sucursal.generadorNombre ?? mi.sucursal.nombre, generadorNit: mi.sucursal.generadorNit,
         manifiesto: m.numero, fechaServicio: m.fechaServicio.toISOString().slice(0, 10), residuo: mi.declaracion.nombre, codigoInterno: mi.declaracion.codigoInterno,
         peligroso: mi.declaracion.esPeligroso, corrientes: [mi.declaracion.codigoY?.codigo, mi.declaracion.codigoA?.codigo].filter(Boolean) as string[],
         sede: mi.sucursal.nombre, cantidad: Number(l.cantidadConciliada ?? l.cantidadCargada), unidad: l.metrica?.abreviacion ?? mi.metrica?.abreviacion ?? 'und',
-        tratamiento: d?.nombre ?? '—', soporte: s ?? [],
+        tratamiento: d ? (d.propia ? d.nombre : `${d.nombre} (gestor aliado)`) : '—', soporte: s ?? [],
+        aliado: aliado ? { razonSocial: aliado.razonSocial, nit: aliado.nit, licencia: aliado.licencia ?? '', autoridad: aliado.licenciaAutoridad ?? '', operacion: d!.nombre, certificado: l.certificadoAliado?.trim() || null } : null,
       };
     });
     if (sinSoporte.length) throw new BadRequestException({ mensaje: `No se puede emitir: sin permiso o licencia vigente a la fecha del servicio para ${sinSoporte.join('; ')}.` });
-    // Párrafos de respaldo: solo los que aplican a las disposiciones de este certificado (vacío = van siempre)
+    if (sinCertificadoAliado.length) throw new BadRequestException({ mensaje: `No se puede emitir el certificado final: falta el número del certificado del gestor aliado en ${sinCertificadoAliado.join('; ')}. Regístrelo en cada línea del acta.` });
+    // Párrafos de respaldo: los de las disposiciones de este certificado (vacío = siempre); los «solo peligrosos», si hay alguno.
+    // GESTOR_ALIADO sale una vez por cada aliado, con sus datos y el número de su certificado.
     const presentes = new Set(filas.map((f) => f.disposicion).filter(Boolean) as string[]);
+    const hayPeligrosos = filas.some((f) => f.peligroso);
+    const aliados = new Map<string, { razonSocial: string; nit: string; licencia: string; autoridad: string; operaciones: Set<string>; certificados: Set<string> }>();
+    for (const f of filas) {
+      if (!f.aliado) continue;
+      const x = aliados.get(f.aliado.nit) ?? { ...f.aliado, operaciones: new Set<string>(), certificados: new Set<string>() };
+      x.operaciones.add(f.aliado.operacion.charAt(0).toLowerCase() + f.aliado.operacion.slice(1));
+      if (f.aliado.certificado) x.certificados.add(f.aliado.certificado);
+      aliados.set(f.aliado.nit, x);
+    }
+    const llenar = (texto: string, v: Record<string, string>) => texto.replace(/\{(\w+)\}/g, (m, k: string) => v[k] ?? m);
     const textos = (await this.db.textoLegal.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ orden: 'asc' }, { codigo: 'asc' }] }))
-      .filter((t) => !t.disposiciones.length || t.disposiciones.some((x) => presentes.has(x)));
+      .filter((t) => (!t.disposiciones.length || t.disposiciones.some((x) => presentes.has(x))) && (!t.soloPeligrosos || hayPeligrosos))
+      .flatMap((t) => (t.codigo !== 'GESTOR_ALIADO' ? [t] : [...aliados.values()].map((x) => ({ ...t, texto: llenar(t.texto, {
+        razon_social: x.razonSocial, nit: x.nit, operacion: [...x.operaciones].join(' y '), licencia: x.licencia, autoridad: x.autoridad || 'la autoridad ambiental',
+        certificado: [...x.certificados].join(', ') || 'pendiente' }) }))));
     const conf = (empresa.configuracion ?? {}) as ConfigEmpresa;
     const totales = new Map<string, number>();
     filas.forEach((f) => totales.set(f.unidad, (totales.get(f.unidad) ?? 0) + f.cantidad));
@@ -227,12 +258,13 @@ class ActasService {
       clienteGestor: acta.cliente.tipo === 'GESTOR',
       sedes: [...sedes.values()].map((s) => ({ codigo: s.codigo, nombre: s.nombre, direccion: s.direccion, municipio: s.municipio ? `${s.municipio.nombre} (${s.municipio.departamento})` : null,
         latitud: s.latitud === null ? null : Number(s.latitud), longitud: s.longitud === null ? null : Number(s.longitud) })),
-      lineas: filas.map(({ disposicion: _d, ...f }) => f), totales: [...totales.entries()].map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 })),
+      lineas: filas.map(({ disposicion: _d, aliado: _a, ...f }) => f), totales: [...totales.entries()].map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 })),
       transporte: [...transporte.values()], marcoLegal: [...permisosUsados.values()],
       verificacion: { codigo: acta.codigoVerificacion, url: this.urlVerificacion(acta.codigoVerificacion) },
       textosLegales: textos.map((t) => ({ codigo: t.codigo, version: t.version, titulo: t.titulo, texto: t.texto })),
       firma: { ciudad: conf.ciudadFirma?.trim() || null, representante: conf.representanteLegal?.trim() || null, cargo: conf.cargoFirmante?.trim() || null },
-      certificaciones: (conf.certificaciones ?? []).filter((x) => x?.norma),
+      // Solo los sellos con certificado vigente (respuesta C2: el de NORSOK no se imprime sin certificado)
+      certificaciones: (conf.certificaciones ?? []).filter((x) => x?.norma && x.numero?.trim() && (!x.vence || x.vence >= fechaColombia().toISOString().slice(0, 10))),
     };
   }
 
@@ -269,6 +301,20 @@ class ActasService {
     await this.db.acta.update({ where: { id: acta.id }, data: { contenido: contenido as unknown as Prisma.InputJsonValue, estado: 'EMITIDA', emitidaPorId: a.id, emitidaEn: new Date(contenido.emitidaEn) } });
     await this.audit.registrar(a, 'acta', acta.id, 'CARGAR', undefined, { numero: acta.numero, archivo: file.originalname });
     return this.obtener(a, acta.id);
+  }
+
+  /** Registra en la línea el número del certificado del gestor aliado (antes de emitir; después la copia queda fija). */
+  async certificadoAliado(a: Actor, lineaId: string, b: z.infer<typeof CertificadoAliado>) {
+    const l = await this.db.conciliacionItem.findFirst({ where: { id: lineaId, conciliacion: { empresaId: a.empresaId } },
+      include: { acta: { select: { numero: true, estado: true } }, disposicion: true, manifiestoItem: { select: { disposicion: true } } } });
+    if (!l) throw new NotFoundException({ mensaje: 'Línea no encontrada.' });
+    if (l.acta && l.acta.estado !== 'BORRADOR') throw new BadRequestException({ mensaje: `La línea ya está en el acta ${l.acta.numero}, emitida o anulada.` });
+    const d = l.disposicion ?? l.manifiestoItem.disposicion;
+    if (!d || d.propia) throw new BadRequestException({ mensaje: 'Solo las líneas tratadas por un gestor aliado llevan el certificado del aliado.' });
+    const numero = b.numero?.trim() || null;
+    const r = await this.db.conciliacionItem.update({ where: { id: lineaId }, data: { certificadoAliado: numero } });
+    await this.audit.registrar(a, 'conciliacion_item', lineaId, 'CERT_ALIADO', { numero: l.certificadoAliado }, { numero });
+    return r;
   }
 
   async anular(a: Actor, id: string, b: z.infer<typeof Anular>) {
@@ -331,6 +377,7 @@ class ActasController {
   cargar(@ActorActual() a: Actor, @Body(new Zod(Cargar)) b: z.infer<typeof Cargar>, @UploadedFile() f?: Express.Multer.File) { return this.s.cargar(a, b, f); }
   @Permiso('actas.emitir') @Post(':id/items') items(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Items)) b: z.infer<typeof Items>) { return this.s.items(a, id, b); }
   @Permiso('actas.emitir') @Post(':id/emitir') emitir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.emitir(a, id); }
+  @Permiso('actas.emitir') @Patch('lineas/:lineaId/certificado-aliado') certificadoAliado(@ActorActual() a: Actor, @Param('lineaId', ParseUUIDPipe) lineaId: string, @Body(new Zod(CertificadoAliado)) b: z.infer<typeof CertificadoAliado>) { return this.s.certificadoAliado(a, lineaId, b); }
   @Permiso('actas.emitir') @Post(':id/anular') anular(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Anular)) b: z.infer<typeof Anular>) { return this.s.anular(a, id, b); }
 }
 

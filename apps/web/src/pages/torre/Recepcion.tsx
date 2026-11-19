@@ -65,7 +65,8 @@ function NuevaRecepcion({ volver }: { volver: () => void }) {
   const [manifiestoId, setManifiestoId] = useState<string | null>(null); // si el grabado falla, se reintenta sin crear otro
   const [listo, setListo] = useState<{ id: string; numero: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
-  const decls = useApi<{ filas: Decl[] }>(f.clienteId ? `/declaraciones?clienteId=${f.clienteId}&tipo=RESIDUO&estado=AUTORIZADA&activa=true&porPagina=200` : null); // en planta se reciben residuos, no servicios
+  // En planta se reciben residuos (no servicios) y solo no peligrosos: Los Pinos no recibe RESPEL (Res. DGL 000632 de 2023, art. 6)
+  const decls = useApi<{ filas: Decl[] }>(f.clienteId ? `/declaraciones?clienteId=${f.clienteId}&tipo=RESIDUO&estado=AUTORIZADA&activa=true&peligroso=false&porPagina=200` : null);
   useEffect(() => { if (!manifiestoId) setLineas([{ sucursalId: '', declaracionId: '', cantidad: '', embalajes: '' }]); }, [f.clienteId]); // eslint-disable-line react-hooks/exhaustive-deps
   const sedes = useMemo(() => [...new Map((decls.datos?.filas ?? []).flatMap((d) => d.sucursales.filter((s) => s.activa).map((s) => [s.sucursal.id, s.sucursal] as const))).values()], [decls.datos]);
   const set = (k: keyof ReturnType<typeof formVacio>) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -124,7 +125,7 @@ function NuevaRecepcion({ volver }: { volver: () => void }) {
         <Card title="1. Cliente y residuos">
           <div className="flex flex-col gap-3">
             <Field label="Cliente" id="rp-c"><BuscarCliente id="rp-c" valor={f.clienteId} disabled={!!manifiestoId} vacio="Escriba el nombre o el NIT" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
-            {f.clienteId && decls.datos && !sedes.length && <p className="rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">El cliente no tiene declaraciones autorizadas y activas.</p>}
+            {f.clienteId && decls.datos && !sedes.length && <p className="rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">El cliente no tiene declaraciones autorizadas y activas de residuos no peligrosos (Los Pinos no recibe residuos peligrosos).</p>}
             {lineas.map((l, i) => {
               const delaSede = (decls.datos?.filas ?? []).filter((d) => d.sucursales.some((s) => s.activa && s.sucursal.id === l.sucursalId));
               const unidad = delaSede.find((d) => d.id === l.declaracionId)?.tarifaVigente?.metrica?.abreviacion ?? '';

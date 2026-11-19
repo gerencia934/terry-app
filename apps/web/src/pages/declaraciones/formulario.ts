@@ -23,11 +23,11 @@ export interface FormDecl {
   tipoEmbalajeId: string; otroTipoEmbalaje: string; presentacion: string; materialEmbalajeId: string; otroMaterial: string; tipoSellado: string;
   // [4] Fisicoquímicas
   estadoFisico: '' | 'SOLIDO' | 'SEMISOLIDO' | 'LIQUIDO' | 'GASEOSO'; inflamable: SiNo; controladaEstupefacientes: SiNo;
-  color: string; olor: string; densidad: string; metricaDensidadId: string;
+  color: string; olor: string; densidad: string; metricaDensidadId: string; contieneHidrocarburos: SiNo;
   // [5] Disposición
   disposiciones: { disposicionId: string; principal: boolean }[];
   // [6] Adicional
-  datosExtras: string; fichaSeguridadUrl: string; serial: string;
+  datosExtras: string; fichaSeguridadUrl: string; caracterizacionUrl: string; serial: string;
   // [7] Precio (vacío = sin precio todavía)
   precio: string; metricaId: string; tipoNegociacion: string; formaPago: string; mostrarPrecioApp: boolean;
   // [8] Estado
@@ -40,8 +40,8 @@ export const formVacio = (tipo: Tipo = 'RESIDUO'): FormDecl => ({
   esPeligroso: false, frecuenciaDias: '', cantidadFrecuencia: '', solicitudAutomatica: false,
   etiquetadoIds: [], codigoAId: '', codigoYId: '', codigoUn: '', riesgoIds: [], descripcionProceso: '', composicion: '', descripcionServicio: '',
   tipoEmbalajeId: '', otroTipoEmbalaje: '', presentacion: '', materialEmbalajeId: '', otroMaterial: '', tipoSellado: '',
-  estadoFisico: '', inflamable: '', controladaEstupefacientes: '', color: '', olor: '', densidad: '', metricaDensidadId: '',
-  disposiciones: [], datosExtras: '', fichaSeguridadUrl: '', serial: '',
+  estadoFisico: '', inflamable: '', controladaEstupefacientes: '', color: '', olor: '', densidad: '', metricaDensidadId: '', contieneHidrocarburos: 'no',
+  disposiciones: [], datosExtras: '', fichaSeguridadUrl: '', caracterizacionUrl: '', serial: '',
   precio: '', metricaId: '', tipoNegociacion: '', formaPago: '', mostrarPrecioApp: false,
   vigenteHasta: '', observaciones: '', responsabilidadAceptada: false,
 });
@@ -57,9 +57,9 @@ export interface DetalleDecl {
   descripcionProceso: string | null; composicion: string | null; descripcionServicio: string | null;
   tipoEmbalajeId: string | null; otroTipoEmbalaje: string | null; presentacion: string | null; materialEmbalajeId: string | null; otroMaterial: string | null; tipoSellado: string | null;
   estadoFisico: FormDecl['estadoFisico'] | null; inflamable: boolean | null; controladaEstupefacientes: boolean | null;
-  color: string | null; olor: string | null; densidad: string | null; metricaDensidadId: string | null;
+  color: string | null; olor: string | null; densidad: string | null; metricaDensidadId: string | null; contieneHidrocarburos: boolean;
   disposiciones: { principal: boolean; disposicion: { id: string; codigo: string; nombre: string } }[];
-  datosExtras: string | null; fichaSeguridadUrl: string | null; serial: string | null; mostrarPrecioApp: boolean;
+  datosExtras: string | null; fichaSeguridadUrl: string | null; caracterizacionUrl: string | null; serial: string | null; mostrarPrecioApp: boolean;
   vigenteHasta: string | null; observaciones: string | null; responsabilidadAceptada: boolean; aceptadaEn: string | null;
   aceptadaPor: { nombre: string } | null; aprobadaPor: { nombre: string } | null; aprobadaEn: string | null; causal: { nombre: string } | null;
   tarifaVigente: { precioUnitario: string; metricaId: string | null; tipoNegociacion: string; formaPago: string } | null;
@@ -80,9 +80,9 @@ export function desdeDetalle(d: DetalleDecl): FormDecl {
     descripcionServicio: s(d.descripcionServicio), tipoEmbalajeId: s(d.tipoEmbalajeId), otroTipoEmbalaje: s(d.otroTipoEmbalaje), presentacion: s(d.presentacion),
     materialEmbalajeId: s(d.materialEmbalajeId), otroMaterial: s(d.otroMaterial), tipoSellado: s(d.tipoSellado), estadoFisico: d.estadoFisico ?? '',
     inflamable: siNo(d.inflamable), controladaEstupefacientes: siNo(d.controladaEstupefacientes), color: s(d.color), olor: s(d.olor),
-    densidad: d.densidad === null ? '' : String(Number(d.densidad)), metricaDensidadId: s(d.metricaDensidadId),
+    densidad: d.densidad === null ? '' : String(Number(d.densidad)), metricaDensidadId: s(d.metricaDensidadId), contieneHidrocarburos: d.contieneHidrocarburos ? 'si' : 'no',
     disposiciones: d.disposiciones.map((x) => ({ disposicionId: x.disposicion.id, principal: x.principal })),
-    datosExtras: s(d.datosExtras), fichaSeguridadUrl: s(d.fichaSeguridadUrl), serial: s(d.serial),
+    datosExtras: s(d.datosExtras), fichaSeguridadUrl: s(d.fichaSeguridadUrl), caracterizacionUrl: s(d.caracterizacionUrl), serial: s(d.serial),
     precio: d.tarifaVigente ? String(Number(d.tarifaVigente.precioUnitario)) : '', metricaId: s(d.tarifaVigente?.metricaId),
     tipoNegociacion: s(d.tarifaVigente?.tipoNegociacion), formaPago: s(d.tarifaVigente?.formaPago), mostrarPrecioApp: d.mostrarPrecioApp,
     vigenteHasta: d.vigenteHasta ? d.vigenteHasta.slice(0, 10) : '', observaciones: s(d.observaciones), responsabilidadAceptada: d.responsabilidadAceptada,
@@ -115,8 +115,9 @@ export function aPayload(f: FormDecl, borrador: boolean): DeclaracionEntrada {
     controladaEstupefacientes: residuo && f.controladaEstupefacientes ? f.controladaEstupefacientes === 'si' : null,
     color: residuo ? txt(f.color) : null, olor: residuo ? txt(f.olor) : null,
     densidad: residuo ? num(f.densidad) : null, metricaDensidadId: residuo ? idONull(f.metricaDensidadId) : null,
+    contieneHidrocarburos: residuo && f.contieneHidrocarburos === 'si',
     disposiciones: f.disposiciones,
-    datosExtras: txt(f.datosExtras), fichaSeguridadUrl: txt(f.fichaSeguridadUrl), serial: txt(f.serial),
+    datosExtras: txt(f.datosExtras), fichaSeguridadUrl: txt(f.fichaSeguridadUrl), caracterizacionUrl: residuo ? txt(f.caracterizacionUrl) : null, serial: txt(f.serial),
     precio: f.precio.trim() === '' ? null : {
       precioUnitario: Number(f.precio.replace(',', '.')), metricaId: idONull(f.metricaId),
       tipoNegociacion: (f.tipoNegociacion || null) as Negociacion | null, formaPago: (f.formaPago || null) as FormaPago | null,
@@ -138,8 +139,8 @@ const SECCION_DE: Record<string, number> = {
   cantidadFrecuencia: 2, solicitudAutomatica: 2, etiquetadoIds: 2, codigoAId: 2, codigoYId: 2, codigoUn: 2, riesgoIds: 2,
   descripcionProceso: 2, composicion: 2, descripcionServicio: 2,
   tipoEmbalajeId: 3, otroTipoEmbalaje: 3, presentacion: 3, materialEmbalajeId: 3, otroMaterial: 3, tipoSellado: 3,
-  estadoFisico: 4, inflamable: 4, controladaEstupefacientes: 4, color: 4, olor: 4, densidad: 4, metricaDensidadId: 4,
-  disposiciones: 5, datosExtras: 6, fichaSeguridadUrl: 6, serial: 6, precio: 7, mostrarPrecioApp: 7,
+  estadoFisico: 4, inflamable: 4, controladaEstupefacientes: 4, color: 4, olor: 4, densidad: 4, metricaDensidadId: 4, contieneHidrocarburos: 4,
+  disposiciones: 5, datosExtras: 6, fichaSeguridadUrl: 6, caracterizacionUrl: 6, serial: 6, precio: 7, mostrarPrecioApp: 7,
   vigenteHasta: 8, observaciones: 8, responsabilidadAceptada: 8,
 };
 export const seccionDe = (campo: string) => SECCION_DE[campo] ?? 8;

@@ -91,67 +91,202 @@ export const MATERIALES_EMBALAJE: (ItemCatalogo & { esOtro?: boolean })[] = [
   { codigo: 'VID', nombre: 'Vidrio' }, { codigo: 'OTRO', nombre: 'Otro', esOtro: true },
 ];
 
-/** Disposición / manejo y cómo queda cubierta legalmente (ver regla fn_disposicion_cubierta). */
-export const DISPOSICIONES: (ItemCatalogo & { requierePermiso: boolean; propia: boolean; soporteLegal: string })[] = [
-  { codigo: 'APR', nombre: 'Aprovechamiento', requierePermiso: false, propia: true, soporteLegal: 'Objeto social — Certificado de existencia y representación legal' },
-  { codigo: 'REC', nombre: 'Reciclaje o valorización', requierePermiso: false, propia: true, soporteLegal: 'Objeto social — Certificado de existencia y representación legal' },
-  { codigo: 'BIO', nombre: 'Biorremediación (landfarming)', requierePermiso: true, propia: true, soporteLegal: 'Res. DGL 000632 de 2023 (CAS)' },
-  { codigo: 'ASP', nombre: 'Tratamiento y vertimiento a suelo de aguas residuales, lodos, cortes y salmueras', requierePermiso: true, propia: true, soporteLegal: 'Res. DGL 000632 de 2023 (CAS)' },
-  { codigo: 'RCD', nombre: 'Gestión integral de RCD (aprovechamiento y disposición final)', requierePermiso: true, propia: true, soporteLegal: 'Res. CAS 0235-2024' },
-  { codigo: 'ACU', nombre: 'Aprovechamiento de ACU (biodiésel)', requierePermiso: true, propia: true, soporteLegal: 'Oficio SAA 0311-21 (CAS), conforme a la Res. 316 de 2018' },
-  { codigo: 'TRA', nombre: 'Transporte de RESPEL, hidrocarburos y sustancias nocivas', requierePermiso: true, propia: true, soporteLegal: 'Auto SAA 0244-21 (CAS) y Exp. TH 0013-2021 (CDMB)' },
-  { codigo: 'LAV', nombre: 'Lavado y reúso', requierePermiso: true, propia: true, soporteLegal: 'VERIFICAR' },
-  { codigo: 'INCH', nombre: 'Incineración (hospitalarios y similares)', requierePermiso: true, propia: false, soporteLegal: 'Res. 0144 de 2000 CDMB (gestor aliado)' },
-  { codigo: 'INCO', nombre: 'Incineración y celda ordinaria', requierePermiso: true, propia: false, soporteLegal: 'Res. 0144 de 2000 CDMB (gestor aliado)' },
-  { codigo: 'RS', nombre: 'Relleno sanitario', requierePermiso: true, propia: false, soporteLegal: 'Res. CAS 0001121 de 2014 (gestor aliado)' },
-  { codigo: 'COP', nombre: 'Coprocesamiento', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
-  { codigo: 'DES', nombre: 'Desensamble y aprovechamiento (RAEE)', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
-  { codigo: 'DF', nombre: 'Disposición final (celda de seguridad)', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
-  { codigo: 'POS', nombre: 'Posconsumo', requierePermiso: true, propia: false, soporteLegal: 'Programa posconsumo del fabricante' },
+/**
+ * Disposición / manejo y cómo queda cubierta legalmente (reglas fn_disposicion_cubierta y fn_decl_autorizacion_check).
+ * Ajustada con las respuestas de la gerencia del 19-11-2026 (docs/PREGUNTAS_GERENCIA.md):
+ * - los tratamientos de Los Pinos (ASP, BIO, RCD, ACU) solo admiten residuos SIN características de peligrosidad
+ *   (Res. DGL 000632 de 2023, art. 6); mientras no exista la licencia ambiental, los peligrosos van a un gestor aliado;
+ * - el aprovechamiento propio, el lavado y reúso y el coprocesamiento quedan inactivos: ningún acto los ampara;
+ * - «incineración y celda ordinaria» se separa en incineración (INCH) y relleno sanitario (RS).
+ */
+export interface DisposicionCatalogo extends ItemCatalogo {
+  requierePermiso: boolean; propia: boolean; soporteLegal: string;
+  activo?: boolean; // por omisión, activa
+  admitePeligrosos?: boolean; // por omisión, sí
+  hidrocarburos?: 'ADMITE' | 'CON_CARACTERIZACION' | 'NO_ADMITE'; // por omisión, ADMITE
+}
+export const DISPOSICIONES: DisposicionCatalogo[] = [
+  { codigo: 'ASP', nombre: 'Tratamiento y vertimiento a suelo de ARD y ARnD sin características de peligrosidad', requierePermiso: true, propia: true, admitePeligrosos: false,
+    soporteLegal: 'Res. DGL 000632 de 2023 (CAS), arts. 1 y 6' },
+  { codigo: 'BIO', nombre: 'Biorremediación (landfarming) de lodos no peligrosos y cortes de perforación base agua', requierePermiso: true, propia: true, admitePeligrosos: false,
+    hidrocarburos: 'CON_CARACTERIZACION', soporteLegal: 'Res. DGL 000632 de 2023 (CAS), arts. 5 y 6' },
+  { codigo: 'RCD', nombre: 'Gestión de RCD sin mezcla con ordinarios, peligrosos ni hidrocarburos', requierePermiso: true, propia: true, admitePeligrosos: false,
+    hidrocarburos: 'NO_ADMITE', soporteLegal: 'Res. SAO No. 00235-24 (CAS) y licencia de funcionamiento de Sabana de Torres' },
+  { codigo: 'ACU', nombre: 'Recolección y gestión de aceite de cocina usado (ACU)', requierePermiso: true, propia: true, admitePeligrosos: false,
+    soporteLegal: 'Oficio SAA No. 0311/21 (CAS), conforme a la Res. 316 de 2018' },
+  { codigo: 'TRA', nombre: 'Transporte de RESPEL, hidrocarburos y sustancias nocivas', requierePermiso: true, propia: true, soporteLegal: 'Auto SAA No. 0244-20 (CAS) y Exp. TH 0013-2021 (CDMB)' },
+  { codigo: 'INCH', nombre: 'Incineración (hospitalarios e industriales)', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
+  { codigo: 'RS', nombre: 'Relleno sanitario', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
+  { codigo: 'DF', nombre: 'Disposición final en celda de seguridad', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
+  { codigo: 'DES', nombre: 'Desensamble y aprovechamiento de RAEE', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
+  { codigo: 'POS', nombre: 'Posconsumo', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado o sistema de posconsumo' },
+  // Inactivas: ningún acto las ampara (decisión de la gerencia, 19-11-2026)
+  { codigo: 'APR', nombre: 'Aprovechamiento propio', requierePermiso: true, propia: true, activo: false,
+    soporteLegal: 'Sin acto que lo ampare: el objeto social no es una autorización ambiental (inscripción, Res. 1342 de 2020, sin acto)' },
+  { codigo: 'REC', nombre: 'Reciclaje o valorización propia', requierePermiso: true, propia: true, activo: false, soporteLegal: 'Sin acto que lo ampare' },
+  { codigo: 'LAV', nombre: 'Lavado y reúso de envases', requierePermiso: true, propia: true, activo: false,
+    soporteLegal: 'Requiere la licencia ambiental en trámite (Exp. CAS 210.40.00113.2026)' },
+  { codigo: 'COP', nombre: 'Coprocesamiento', requierePermiso: true, propia: false, activo: false, soporteLegal: 'Sin gestor aliado registrado' },
+  { codigo: 'INCO', nombre: 'Incineración y celda ordinaria (reemplazada por INCH y RS)', requierePermiso: true, propia: false, activo: false,
+    soporteLegal: 'Separada en incineración y relleno sanitario' },
+];
+
+/** Obligación de un acto: con su código del Cronograma Maestro de Cumplimiento (OB-xx) cuando lo tiene. */
+export interface ObligacionCatalogo { codigo?: string; descripcion: string; periodicidad: string; meses?: number; proxima?: string; articulo: string }
+/** Acto administrativo de Terra Viva. Sin `vence`: indefinido (el acto no fija término). */
+export interface PermisoCatalogo {
+  acto: string; autoridad?: string; expedicion?: string; vence?: string; alcance: string;
+  disposiciones: string[]; // disposiciones que ampara (vacío: complemento o soporte, no ampara por sí solo)
+  obligaciones: ObligacionCatalogo[];
+}
+/** Actos administrativos y obligaciones reales (respuestas de la gerencia A1 y A4, 19-11-2026). */
+export const PERMISOS_CAS: PermisoCatalogo[] = [
+  {
+    acto: 'Resolución DGL No. 000632 de 2023', expedicion: '2023-08-15',
+    // Provisional: cinco años desde la resolución. La ejecutoria solo puede ser igual o posterior; ajustar al recibir la
+    // constancia (solo hacia adelante).
+    vence: '2028-08-15',
+    alcance: 'Tratamiento y vertimiento a suelo de ARD y ARnD sin características de peligrosidad, hasta 3,65 L/s; tratamiento por landfarming de lodos no peligrosos y cortes base agua (arts. 1, 5 y 6). Exp. 210.60.00032.2023',
+    disposiciones: ['ASP', 'BIO'],
+    obligaciones: [
+      { descripcion: 'Caracterizar las ARnD antes y después de la planta, con muestreo y análisis por laboratorio acreditado por el IDEAM', periodicidad: 'Semestral', meses: 6, proxima: '2026-11-25', articulo: 'Art. 10, par. 2 y 3' },
+      { descripcion: 'Caracterizar las ARD (Res. 699 de 2021, art. 4, tabla 2)', periodicidad: 'Anual', meses: 12, proxima: '2026-11-25', articulo: 'Art. 10 y par. 2' },
+      { codigo: 'OB-14', descripcion: 'Avisar a la CAS la fecha de cada monitoreo, 15 días antes de cada campaña', periodicidad: '15 días antes de cada campaña', proxima: '2027-01-27', articulo: 'Art. 10, par. 4' },
+      { descripcion: 'Monitorear agua subterránea (piezómetros) y suelo según el Plan de Monitoreo aprobado', periodicidad: 'Semestral o anual según el parámetro', meses: 6, proxima: '2026-11-25', articulo: 'Art. 9' },
+      { codigo: 'OB-36', descripcion: 'Radicar los resultados, con soportes de mantenimiento y del manejo de lodos y cortes, en el Exp. 210.60.00032.2023', periodicidad: 'Con cada caracterización', proxima: '2027-01-22', articulo: 'Art. 10, par. 5; art. 12' },
+      { descripcion: 'Presentar los costos del proyecto (Acuerdo CAS 208 de 2012), en los primeros 30 días del año', periodicidad: 'Anual', meses: 12, proxima: '2027-01-22', articulo: 'Art. 20, parágrafo' },
+      { codigo: 'OB-24', descripcion: 'Hacer campañas educativas sobre manejo de residuos sólidos (mínimo 3 al año)', periodicidad: 'Mínimo 3 al año', meses: 4, proxima: '2026-12-02', articulo: 'Art. 14' },
+      { descripcion: 'Informar las fallas cuya reparación tarde más de 24 horas y las emergencias que cambien el vertimiento', periodicidad: 'Por evento', articulo: 'Art. 14' },
+      { descripcion: 'Informar de inmediato cualquier evento que afecte los recursos naturales', periodicidad: 'Por evento', articulo: 'Art. 17' },
+      { descripcion: 'Llevar registros del tratamiento, del mantenimiento y del destino de los lodos', periodicidad: 'Permanente', articulo: 'Art. 14' },
+      { descripcion: 'Mantener el manual de operación y mantenimiento en la planta', periodicidad: 'Permanente', articulo: 'Art. 11' },
+      { descripcion: 'Pedir la modificación del permiso antes de cambiar el sistema de tratamiento', periodicidad: 'Por evento', articulo: 'Art. 16' },
+      { descripcion: 'No ceder el permiso sin autorización escrita', periodicidad: 'Permanente', articulo: 'Art. 18' },
+      { codigo: 'OB-26A', descripcion: 'Obtener la constancia de ejecutoria (fija el vencimiento exacto y la ventana de renovación)', periodicidad: 'Única', proxima: '2026-11-30', articulo: 'Art. 1, par. 2' },
+      { codigo: 'OB-26', descripcion: 'Solicitar la renovación en el primer trimestre del último año de vigencia; si no se pide, el permiso queda sin vigencia', periodicidad: 'Única', proxima: '2027-09-06', articulo: 'Art. 1, par. 4 y 5' },
+      { codigo: 'OB-39', descripcion: 'Hacer el simulacro del plan de gestión del riesgo para el manejo de vertimientos', periodicidad: 'Anual', meses: 12, proxima: '2027-09-15', articulo: 'Art. 2' },
+    ],
+  },
+  {
+    acto: 'Oficio SAO No. 1762-2023', expedicion: '2023-12-26', vence: '2028-08-15',
+    alcance: 'Aclara el alcance del art. 6 de la Res. DGL 000632 de 2023: lodos, cortes, salmueras y borras solo si no tienen características de peligrosidad. No amplía a residuos peligrosos',
+    disposiciones: [], obligaciones: [],
+  },
+  {
+    acto: 'Oficio SAO No. 846.2026', expedicion: '2026-04-27',
+    alcance: 'Certifica el estado de los permisos y que no hay procesos sancionatorios (Rad. 80.30.9272.2024). Soporte ante clientes; no impone obligaciones',
+    disposiciones: [], obligaciones: [],
+  },
+  {
+    acto: 'Resolución SAO No. 00235-24',
+    alcance: 'Gestor de RCD no contaminados, en el polígono del art. 2 (agosto de 2024; confirmar el día en el original). No fija término de vigencia',
+    disposiciones: ['RCD'],
+    obligaciones: [
+      { descripcion: 'Reportar a la CAS la cantidad y el destino de los RCD (Anexo III), dentro de los 15 días calendario siguientes al trimestre', periodicidad: 'Trimestral', meses: 3, proxima: '2027-01-15', articulo: 'Art. 8' },
+      { descripcion: 'Expedir al generador la constancia del Anexo II de la Res. 0472 de 2017', periodicidad: 'Cada servicio', articulo: 'Art. 9' },
+      { codigo: 'OB-35', descripcion: 'Presentar el registro de los pesajes diarios', periodicidad: 'Semestral', meses: 6, proxima: '2027-01-15', articulo: 'Art. 15' },
+      { descripcion: 'Presentar el reporte anual del año anterior (Anexo III), en el primer trimestre', periodicidad: 'Anual', meses: 12, proxima: '2027-03-31', articulo: 'Res. 0472 de 2017, art. 16, num. 4' },
+      { codigo: 'OB-42', descripcion: 'Instalar la valla informativa (a 30 días de la notificación): verificar que esté instalada', periodicidad: 'Única', articulo: 'Art. 14' },
+      { codigo: 'OB-52', descripcion: 'Presentar la ficha de manejo de tráfico: verificar el radicado', periodicidad: 'Única', articulo: 'Art. 11' },
+      { codigo: 'OB-40', descripcion: 'Tener plan de emergencia y contingencia para la disposición de RCD y hacer su simulacro', periodicidad: 'Anual', meses: 12, proxima: '2027-03-10', articulo: 'Art. 17' },
+      { descripcion: 'Cumplir las obligaciones de clausura y posclausura (mantenimiento e informe semestral por 3 años)', periodicidad: 'Se activa con la clausura', articulo: 'Art. 6' },
+    ],
+  },
+  {
+    acto: 'Licencia de funcionamiento RCD (28-04-2025)', autoridad: 'Secretaría de Planeación de Sabana de Torres', expedicion: '2025-04-28',
+    alcance: 'Operación del gestor de RCD. Vigente por la duración del proyecto o hasta que la CAS lo considere (art. 1)',
+    disposiciones: ['RCD'],
+    obligaciones: [
+      { codigo: 'OB-44', descripcion: 'Rendir el informe de operación a la Secretaría de Planeación', periodicidad: 'Trimestral', meses: 3, proxima: '2027-01-15', articulo: 'Art. 2, num. 8, lit. H' },
+      { codigo: 'OB-43', descripcion: 'Llevar la bitácora diaria y tener los instrumentos de pesaje calibrados (calibración anual)', periodicidad: 'Diaria; calibración anual', meses: 12, proxima: '2027-02-26', articulo: 'Art. 2, num. 8, lits. B y H' },
+    ],
+  },
+  {
+    acto: 'Oficio SAA No. 0311/21', expedicion: '2021-04-19',
+    alcance: 'Inscripción como gestor de aceite de cocina usado (ACU), conforme a la Res. 316 de 2018. No fija término de vigencia',
+    disposiciones: ['ACU'],
+    obligaciones: [
+      { descripcion: 'Reportar a la CAS los generadores, los kg de cada uno y los kg totales recolectados, tratados o aprovechados (primeros 15 días de enero)', periodicidad: 'Anual', meses: 12, proxima: '2027-01-15', articulo: 'Res. 316 de 2018, art. 10, lit. b' },
+      { descripcion: 'Expedir constancia al generador industrial, comercial o de servicios', periodicidad: 'Cada entrega', articulo: 'Res. 316 de 2018, art. 10, lit. c' },
+      { descripcion: 'Mantener el ACU contenido y etiquetado, y tener plan de contingencia para ACU', periodicidad: 'Permanente', articulo: 'Res. 316 de 2018, art. 10, lits. d y g' },
+    ],
+  },
+  {
+    acto: 'Auto SAA No. 0244-20', expedicion: '2020-09-29',
+    alcance: 'Plan de contingencia para el transporte de hidrocarburos, derivados y sustancias nocivas, actualizado con el Rad. CAS 80.30.17312.2024. Rutas: Sabana de Torres, Bucaramanga, Puerto Wilches y Puerto Nare a Aguachica; en la actualización, Sabana de Torres a Mosquera y Cisneros a Aguachica',
+    disposiciones: ['TRA'],
+    obligaciones: [
+      { descripcion: 'Actualizar el plan en su totalidad: cada 4 años, o antes si cambia la organización, falla en una emergencia o un simulacro, o lo pide la CAS', periodicidad: 'Cada 4 años', meses: 48, proxima: '2028-09-04', articulo: 'Art. 3' },
+      { descripcion: 'Ajustar el plan antes de operar rutas o tramos nuevos', periodicidad: 'Por evento', articulo: 'Art. 1, parágrafo' },
+      { descripcion: 'Informar a la CAS cualquier derrame dentro de las 8 horas siguientes', periodicidad: 'Por evento', articulo: 'Art. 4' },
+      { descripcion: 'Mantener las pólizas actualizadas', periodicidad: 'Permanente', articulo: 'Art. 4, parágrafo' },
+      { descripcion: 'Remitir copia del auto a las autoridades ambientales de las rutas, y cada vez que haya rutas nuevas', periodicidad: 'Por evento', articulo: 'Art. 6' },
+    ],
+  },
+  {
+    acto: 'Expediente TH 0013-2021 / SINCA 33950', autoridad: 'CDMB',
+    alcance: 'Plan de contingencia para el transporte (jurisdicción de la CDMB). Vencimiento y obligaciones: no constan (pedir el expediente)',
+    disposiciones: ['TRA'], obligaciones: [],
+  },
 ];
 
 /**
- * Actos administrativos de Terra Viva, tomados del certificado real PSAP2026-296 (19-11-2026).
- * Cada uno ampara las disposiciones indicadas; el certificado los cita en «Licencia y/o permiso».
- * Las obligaciones son de ejemplo: los datos iniciales las marcan «VERIFICAR» hasta revisar cada acto.
+ * Gestores aliados (respuesta A5 de la gerencia). Sin `vence` ni `indefinida`, la vigencia «no consta» y la disposición
+ * queda sin cobertura hasta registrarla. Lúmina (posconsumo de bombillas) no se registra: su NIT no consta.
  */
-export const PERMISOS_CAS: { acto: string; autoridad?: string; expedicion?: string; alcance: string; disposiciones: string[]; obligacion: [string, string, string] }[] = [
-  { acto: 'Resolución 0235-2024', alcance: 'Disposición final de residuos de construcción y demolición (RCD)', disposiciones: ['RCD'], obligacion: ['Informe semestral de volúmenes recibidos en escombrera', 'semestral', '2026-12-15'] },
-  // El certificado ampara también aguas residuales domésticas (ARD) con este acto: la gerencia debe verificar que lo cubre
-  // (alerta 1 de docs/referencia/ANALISIS_DOCUMENTOS_REALES.md).
-  { acto: 'Resolución DGL No. 000632 de 2023', expedicion: '2023-08-15', alcance: 'Tratamiento y vertimiento al suelo de aguas residuales industriales (ARI) y lodos; caudal autorizado 3,65 L/s', disposiciones: ['BIO', 'ASP'], obligacion: ['Caracterización del vertimiento a suelo (laboratorio acreditado IDEAM)', 'semestral', '2026-11-30'] },
-  // Complemento de la Res. 000632: precisa su alcance técnico pero no ampara por sí solo (sin disposiciones), así que si la
-  // resolución vence, la cobertura cae aunque este oficio siga vigente.
-  { acto: 'Oficio SAO No. 1762-2023', alcance: 'Alcance técnico de la Res. DGL 000632 de 2023: lodos, cortes de perforación, salmueras y borras de los sectores de hidrocarburos, manufactura y minería', disposiciones: [], obligacion: ['Revisar las condiciones del alcance técnico', 'anual', '2027-01-15'] },
-  { acto: 'Auto SAA No. 0244-21', alcance: 'Plan de contingencia para el transporte de hidrocarburos, derivados y residuos peligrosos (Rad. 80.30.17312.2024)', disposiciones: ['TRA'], obligacion: ['Simulacro anual del plan de contingencia', 'anual', '2026-12-05'] },
-  { acto: 'Expediente TH 0013-2021 / SINCA 33950', autoridad: 'CDMB', alcance: 'Plan de contingencia para el transporte (jurisdicción de la CDMB)', disposiciones: ['TRA'], obligacion: ['Simulacro anual del plan de contingencia (CDMB)', 'anual', '2026-12-05'] },
-  // ACU: el acto es el Oficio SAA 0311-21 (inscripción como gestor); la Res. 316 de 2018 es la norma bajo la que se inscribió.
-  { acto: 'Oficio SAA No. 0311-21', alcance: 'Inscripción como gestor de aceite de cocina usado (ACU), conforme a la Resolución 316 de 2018', disposiciones: ['ACU'], obligacion: ['Reporte trimestral de volúmenes de ACU gestionados', 'trimestral', '2027-01-10'] },
+export interface GestorAliado {
+  nit: string; razonSocial: string; municipio?: string; disposiciones: string[];
+  licencia: string; autoridad: string; vence?: string; indefinida?: boolean; alcance: string; excluyeTiposResiduo?: string[];
+}
+export const GESTORES_ALIADOS: GestorAliado[] = [
+  { nit: '805001538-5', razonSocial: 'Veolia Servicios Industriales Colombia S.A.S. E.S.P. (CIGE Las Bateas)', municipio: 'Aguachica', disposiciones: ['DF'],
+    licencia: 'Res. 858 del 10-06-2011, modificada por la Res. 877 del 21-07-2015; cesión parcial por la Res. 1741 del 26-12-2018', autoridad: 'Corpocesar',
+    vence: '2027-01-03', alcance: 'Celda de seguridad para RESPEL industriales. No recibe hospitalarios, explosivos ni patógenos (Res. 1741)', excluyeTiposResiduo: ['HOSP'] },
+  { nit: '901483038-1', razonSocial: 'Centro de Gestión Sostenible S.A.S. E.S.P. (CGS)', municipio: 'Mosquera', disposiciones: ['DF'],
+    licencia: 'Res. 20217000362 de 2021, cesión de la licencia otorgada por la Res. 0869 del 09-09-2004 y sus modificaciones', autoridad: 'CAR Cundinamarca',
+    indefinida: true, alcance: 'Celda de seguridad para residuos peligrosos y no peligrosos. Vigente por la vida útil del proyecto' },
+  { nit: '900293868-7', razonSocial: 'Veolia Aseo Santander y Cesar S.A. E.S.P. (Parque Tecnológico Ambiental San Silvestre)', municipio: 'Barrancabermeja', disposiciones: ['RS'],
+    licencia: 'Res. DGL 1121 del 27-11-2014, otorgada a Rediba S.A. E.S.P. y cedida por la Res. 000063 del 25-02-2021', autoridad: 'CAS',
+    alcance: 'Relleno sanitario (celda ordinaria). Vigencia: no consta' },
+  { nit: '804001490-7', razonSocial: 'Sandesol S.A. E.S.P.', disposiciones: ['INCH', 'POS'],
+    licencia: 'Res. 0144 del 09-02-2000, modificada por la Res. 1194 de 2004 (industriales especiales); Res. 0477 de 2012 (autoclaves); Res. 0851 de 2017 (posconsumo)', autoridad: 'CDMB',
+    alcance: 'Incineración de hospitalarios e industriales, autoclave y posconsumo. Destino de los hospitalarios. Vigencia: no consta' },
+  { nit: '900812833-8', razonSocial: 'Social RAEE S.A.S.', disposiciones: ['DES'],
+    licencia: 'Res. 000756 del 14-09-2016 (LA-0008-2015)', autoridad: 'CDMB', indefinida: true, alcance: 'Desensamble de RAEE. Vigente por la vida útil del proyecto' },
 ];
 
 /**
- * Párrafos de respaldo legal del certificado: TEXTOS INICIALES, factuales, para que el área jurídica los revise o los
- * reemplace por el texto propio de Terra Viva (Ajustes › Datos de la empresa; cada cambio queda como versión nueva).
- * Cada uno sale solo si el certificado tiene residuos con alguna de sus disposiciones (vacío = siempre).
- * Atienden las alertas 2 y 3 de docs/referencia/ANALISIS_DOCUMENTOS_REALES.md: sin afirmar «vertimiento cero» y sin
- * «eliminar» la responsabilidad del generador (Ley 1252 de 2008).
+ * Párrafos de respaldo legal del certificado, aprobados por la gerencia (respuesta A2, 19-11-2026).
+ * Cada uno sale si el certificado tiene residuos con alguna de sus disposiciones (vacío = siempre) y, si `soloPeligrosos`,
+ * solo cuando hay al menos un residuo peligroso. Cada cambio en Ajustes › Datos de la empresa crea una versión nueva.
+ * GESTOR_ALIADO se llena por cada aliado con {razon_social}, {nit}, {operacion}, {licencia}, {autoridad} y {certificado}.
  */
-export const TEXTOS_LEGALES_INICIALES: { codigo: string; titulo: string; texto: string; disposiciones: string[]; orden: number }[] = [
-  { codigo: 'RESPONSABILIDAD', orden: 1, disposiciones: [], titulo: 'Responsabilidad del generador',
-    texto: 'De acuerdo con la Ley 1252 de 2008 y el Decreto 1076 de 2015, la responsabilidad del generador sobre sus residuos peligrosos subsiste hasta que se realice su aprovechamiento o disposición final. Este certificado acredita que el tratamiento y la disposición final de los residuos relacionados se realizaron en las condiciones aquí descritas.' },
-  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], titulo: 'Tratamiento y vertimiento al suelo',
-    texto: 'Las aguas residuales y lodos relacionados se trataron en el Parque de Saneamiento Ambiental Los Pinos, y su vertimiento al suelo se realizó en los términos del permiso otorgado por la Corporación Autónoma Regional de Santander (CAS) mediante la Resolución DGL No. 000632 de 2023, con el alcance técnico del Oficio SAO No. 1762-2023.' },
-  { codigo: 'BIORREMEDIACION', orden: 11, disposiciones: ['BIO'], titulo: 'Biorremediación',
-    texto: 'Los residuos relacionados se trataron por biorremediación (landfarming) en el Parque de Saneamiento Ambiental Los Pinos, al amparo de la Resolución DGL No. 000632 de 2023 de la CAS y del alcance técnico del Oficio SAO No. 1762-2023.' },
-  { codigo: 'RCD', orden: 12, disposiciones: ['RCD'], titulo: 'Residuos de construcción y demolición',
-    texto: 'Los residuos de construcción y demolición relacionados se gestionaron conforme a la Resolución 0235 de 2024 de la CAS y a la Resolución 0472 de 2017 del Ministerio de Ambiente y Desarrollo Sostenible.' },
-  { codigo: 'ACU', orden: 13, disposiciones: ['ACU'], titulo: 'Aceite de cocina usado',
-    texto: 'El aceite de cocina usado relacionado se gestionó por la empresa como gestor inscrito ante la CAS (Oficio SAA No. 0311-21), conforme a la Resolución 316 de 2018 del Ministerio de Ambiente y Desarrollo Sostenible.' },
-  { codigo: 'GESTOR_ALIADO', orden: 14, disposiciones: ['INCH', 'INCO', 'RS', 'COP', 'DES', 'DF', 'POS'], titulo: 'Gestores aliados',
-    texto: 'Los residuos cuyo tratamiento realizó un gestor aliado se entregaron a un gestor con licencia o programa vigente a la fecha del servicio, citado en la columna «Licencia y/o permiso».' },
-  { codigo: 'APROVECHAMIENTO', orden: 15, disposiciones: ['APR', 'REC'], titulo: 'Aprovechamiento',
-    texto: 'Los materiales relacionados se aprovecharon o valorizaron dentro del objeto social de la empresa, según su certificado de existencia y representación legal.' },
+export interface TextoLegalCatalogo {
+  codigo: string; titulo: string; texto: string; disposiciones: string[]; orden: number;
+  soloPeligrosos?: boolean; activo?: boolean; revisado?: boolean;
+}
+export const TEXTOS_LEGALES: TextoLegalCatalogo[] = [
+  { codigo: 'CERTIFICACION', orden: 0, disposiciones: [], revisado: true, titulo: 'Certificación',
+    texto: 'TERRA VIVA S.A.S. E.S.P. certifica la gestión de los residuos relacionados en este documento, en las fechas, cantidades y condiciones aquí descritas, según la información declarada por el generador y los registros de recepción y tratamiento. Cada línea indica la licencia o el permiso que ampara su tratamiento y disposición final.' },
+  { codigo: 'RESPONSABILIDAD_RESPEL', orden: 1, disposiciones: [], soloPeligrosos: true, revisado: true, titulo: 'Responsabilidad del generador de residuos peligrosos',
+    texto: 'Conforme a la Ley 1252 de 2008 y al Decreto 1076 de 2015, la responsabilidad integral del generador sobre sus residuos peligrosos subsiste hasta que sean aprovechados como insumo o dispuestos con carácter definitivo (artículo 2.2.6.1.3.3). El generador debe conservar este certificado (artículo 2.2.6.1.3.1).' },
+  { codigo: 'TRANSPORTE_RESPEL', orden: 2, disposiciones: [], soloPeligrosos: true, revisado: true, titulo: 'Transporte de residuos peligrosos',
+    texto: 'El transporte de los residuos peligrosos relacionados lo realizó TERRA VIVA S.A.S. E.S.P. conforme al Decreto 1079 de 2015 (transporte terrestre automotor de mercancías peligrosas) y a su Plan de Contingencia para el transporte de hidrocarburos, derivados y sustancias nocivas, presentado a la CAS y declarado recibido mediante el Auto SAA No. 0244-20 del 29 de septiembre de 2020, actualizado con el radicado CAS 80.30.17312.2024.' },
+  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], revisado: true, titulo: 'Tratamiento y vertimiento a suelo',
+    texto: 'Las aguas residuales domésticas (ARD) y no domésticas (ARnD) sin características de peligrosidad relacionadas se recibieron y trataron en la Planta de Tratamiento de Aguas Residuales «Los Pinos», en el Parque de Saneamiento Ambiental Los Pinos (vereda Villa de Leyva, Sabana de Torres). El efluente tratado se dispuso al suelo por evaporación, dispersión o riego, al amparo del permiso de vertimiento a suelo otorgado por la Corporación Autónoma Regional de Santander (CAS) mediante la Resolución DGL No. 000632 del 15 de agosto de 2023 (Expediente 210.60.00032.2023), cuyo alcance precisó el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023.' },
+  { codigo: 'BIORREMEDIACION', orden: 11, disposiciones: ['BIO'], revisado: true, titulo: 'Biorremediación',
+    texto: 'Los lodos no peligrosos y los cortes de perforación base agua relacionados se trataron por biorremediación (landfarming) en la celda de operación de landfarming de la planta «Los Pinos», unidad de tratamiento aprobada en el artículo quinto de la Resolución DGL No. 000632 del 15 de agosto de 2023 de la CAS, dentro del alcance de su artículo sexto, precisado por el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023.' },
+  { codigo: 'RCD', orden: 12, disposiciones: ['RCD'], revisado: true, titulo: 'Residuos de construcción y demolición',
+    texto: 'Los residuos de construcción y demolición (RCD) relacionados, recibidos sin mezcla con residuos ordinarios ni peligrosos, se gestionaron en el sitio de disposición final de RCD «Los Pinos» por TERRA VIVA S.A.S. E.S.P., gestor de RCD inscrito ante la CAS mediante la Resolución SAO No. 00235-24 de agosto de 2024, con licencia de funcionamiento de la Secretaría de Planeación de Sabana de Torres del 28 de abril de 2025, conforme a la Resolución 0472 de 2017 del Ministerio de Ambiente y Desarrollo Sostenible, modificada por la Resolución 1257 de 2021.' },
+  { codigo: 'ACU', orden: 13, disposiciones: ['ACU'], revisado: true, titulo: 'Aceite de cocina usado',
+    texto: 'El aceite de cocina usado (ACU) relacionado fue recolectado y gestionado por TERRA VIVA S.A.S. E.S.P., gestor de ACU inscrito ante la CAS (Oficio SAA No. 0311/21 del 19 de abril de 2021), conforme a la Resolución 316 de 2018 del Ministerio de Ambiente y Desarrollo Sostenible.' },
+  { codigo: 'GESTOR_ALIADO', orden: 14, disposiciones: ['INCH', 'RS', 'DF', 'DES', 'POS', 'COP', 'INCO'], revisado: true, titulo: 'Gestores aliados',
+    texto: 'TERRA VIVA S.A.S. E.S.P. realizó la recolección y el transporte de los residuos relacionados en las líneas marcadas «gestor aliado» y los entregó, en la fecha indicada, a {razon_social}, NIT {nit}, para su {operacion}, al amparo de {licencia}, expedido por {autoridad} y vigente a la fecha de entrega. El tratamiento y la disposición final de esos residuos constan en el certificado que expide dicho gestor (N.° {certificado}).' },
+  { codigo: 'LICENCIA_LOS_PINOS', orden: 20, disposiciones: [], activo: false, revisado: true, titulo: 'Licencia ambiental de Los Pinos',
+    texto: 'Los residuos relacionados se gestionaron en el Parque de Saneamiento Ambiental Los Pinos al amparo de la licencia ambiental otorgada por la CAS mediante la Resolución {resolucion} del {fecha}, actividad {actividad}.' },
 ];
+/** Textos que ya no salen: RESPONSABILIDAD se dividió (CERTIFICACION + RESPONSABILIDAD_RESPEL); APROVECHAMIENTO no fue aprobado. */
+export const TEXTOS_LEGALES_RETIRADOS = ['RESPONSABILIDAD', 'APROVECHAMIENTO'];
 
 /** «Y9.1» → «Y9»; null si no es subcorriente. Las subcorrientes del IDEAM cuelgan de su corriente Y o código A. */
 export const corrienteDe = (codigo: string): string | null => /^(Y\d{1,2}|A\d{4})\.\d{1,2}$/i.exec(codigo.trim())?.[1].toUpperCase() ?? null;

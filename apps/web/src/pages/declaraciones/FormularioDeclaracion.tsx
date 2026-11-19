@@ -3,10 +3,10 @@
 // vuelve a revisar todo al guardar: el formulario solo avisa antes y explica qué falta y dónde.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, CircleAlert, CircleCheck, Save, Send, ShieldAlert, ShieldCheck, Star, Trash2 } from 'lucide-react';
-import { FORMAS_PAGO, NEGOCIACIONES, TEXTO_RESPONSABILIDAD_GENERADOR, faltantesParaAutorizar } from '@terraviva/shared';
+import { FORMAS_PAGO, NEGOCIACIONES, RESPONSABILIDAD_GENERADOR, faltantesParaAutorizar } from '@terraviva/shared';
 import { Badge, Button, Card, EstadoBadge, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { BuscarCliente } from '../../components/BuscarCliente';
-import { api, tienePermiso } from '../../lib/api';
+import { api, sesionActual, tienePermiso } from '../../lib/api';
 import { cx, fmtCOP, fmtFecha } from '../../lib/format';
 import { cant, msg, useApi } from '../../lib/servidor';
 import { SECCIONES, aPayload, desdeDetalle, formVacio, revisar, seccionDe, type Alcance, type DetalleDecl, type FormDecl, type SiNo, type Tipo } from './formulario';
@@ -107,7 +107,7 @@ const ir = (n: number) => document.getElementById(`decl-sec-${n}`)?.scrollIntoVi
 
 // ---------- Formulario ----------
 export function FormularioDeclaracion({ id, volver, onGuardada }: {
-  id?: string; volver: () => void; onGuardada: (d: { id: string; numero: number; estado: string }) => void;
+  id?: string; volver: () => void; onGuardada: (d: { id: string; numero: number; estado: string; cambiosCriticos?: string[] }) => void;
 }) {
   const toast = useToast();
   const cat = useApi<Catalogos>('/declaraciones/catalogos');
@@ -132,8 +132,14 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
 
   const cliente = useApi<ClienteDet>(f.clienteId ? `/clientes/${f.clienteId}` : null);
   const servicios = useApi<ServicioCat[]>(!residuo ? '/declaraciones/catalogo-servicios' : null);
+  // Cobertura en vivo con el contexto de la declaración: un peligroso no va a Los Pinos; hidrocarburos; exclusiones del aliado
   const idsDisp = f.disposiciones.map((x) => x.disposicionId).join(',');
-  const cobertura = useApi<Cobertura>(idsDisp ? `/declaraciones/cobertura?disposiciones=${idsDisp}` : null);
+  const ctxCobertura = new URLSearchParams({
+    disposiciones: idsDisp, peligroso: String(residuo && f.esPeligroso), hidrocarburos: String(residuo && f.contieneHidrocarburos === 'si'),
+    caracterizacion: String(!!f.caracterizacionUrl.trim()), ...(residuo && f.tipoResiduoId ? { tipoResiduoId: f.tipoResiduoId } : {}),
+  });
+  const cobertura = useApi<Cobertura>(idsDisp ? `/declaraciones/cobertura?${ctxCobertura}` : null);
+  const conPoliticaDatos = !!sesionActual()?.usuario.politicaDatos?.url;
 
   const c = cat.datos;
   const otro = {
@@ -199,7 +205,7 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
     setOcupado(true);
     try {
       const cuerpo = aPayload(f, borrador);
-      const g = id ? await api<{ id: string; numero: number; estado: string }>(`/declaraciones/${id}`, { metodo: 'PUT', cuerpo })
+      const g = id ? await api<{ id: string; numero: number; estado: string; cambiosCriticos?: string[] }>(`/declaraciones/${id}`, { metodo: 'PUT', cuerpo })
         : await api<{ id: string; numero: number; estado: string }>('/declaraciones', { cuerpo });
       setInicial(f);
       onGuardada(g);
@@ -215,9 +221,10 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
   const pendientes = Object.entries(revEnviar.errores).sort(([a], [b]) => seccionDe(a) - seccionDe(b)).map(([, m]) => m);
   const resumen = vuelveARevision ? 'Está autorizada: al guardar los cambios vuelve a revisión de HSEQ y queda inactiva hasta que la autoricen.'
     : revEnviar.total ? `Para enviar falta: ${pendientes.slice(0, 3).join(' ')}${revEnviar.total > 3 ? ` (y ${revEnviar.total - 3} más)` : ''}`
-    : autorizada ? 'Los cambios se guardan sin perder la autorización si siguen cumpliendo.' : 'Todo listo para enviar a revisión.';
+    : autorizada ? 'Los cambios menores la dejan autorizada. Si cambia la peligrosidad, la corriente, los hidrocarburos, la disposición, las sedes o la unidad de medida, vuelve a revisión y la autoriza otra persona.'
+    : 'Todo listo para enviar a revisión.';
   const resumenCorto = vuelveARevision ? 'Al guardar vuelve a revisión de HSEQ.'
-    : revEnviar.total ? `Faltan ${revEnviar.total} ${revEnviar.total === 1 ? 'dato' : 'datos'} para enviar.` : autorizada ? 'Sigue autorizada si cumple.' : 'Lista para enviar.';
+    : revEnviar.total ? `Faltan ${revEnviar.total} ${revEnviar.total === 1 ? 'dato' : 'datos'} para enviar.` : autorizada ? 'Un cambio crítico la devuelve a revisión.' : 'Lista para enviar.';
   const etiquetaEnviar = autorizada ? (vuelveARevision ? 'Guardar y enviar a revisión' : 'Guardar cambios') : d?.estado === 'RECHAZADA' ? 'Corregir y reenviar' : 'Enviar a revisión';
 
   return (
@@ -368,6 +375,10 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
                 <Select id="dc-dm" value={f.metricaDensidadId} onChange={(x) => set({ metricaDensidadId: x.target.value })}><option value="">Sin densidad</option>{c.metricasDensidad.map((x) => <option key={x.id} value={x.id}>{x.abreviacion} · {x.nombre}</option>)}</Select>
               </Campo>
             </div>
+            <Campo label="¿Contiene hidrocarburos o aceites? (borras, lodos aceitosos…)" error={e.contieneHidrocarburos}
+              hint="Si contiene: la biorremediación exige la caracterización de peligrosidad (CRETIB) negativa, y los RCD no se reciben.">
+              <Opciones<Exclude<SiNo, ''>> value={f.contieneHidrocarburos} onChange={(v) => set({ contieneHidrocarburos: v })} items={SI_NO} />
+            </Campo>
           </Seccion>
 
           <Seccion n={5} titulo="Disposición y manejo" errores={err(5)}>
@@ -407,6 +418,12 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
             <Campo label="Ficha de datos de seguridad (FDS)" id="dc-fds" error={e.fichaSeguridadUrl} hint={residuo && f.esPeligroso ? 'Obligatoria para autorizar un residuo peligroso. Pegue el enlace al PDF (Drive, página del fabricante…).' : 'Opcional. Enlace al PDF.'}>
               <Input id="dc-fds" type="url" maxLength={500} placeholder="https://…" value={f.fichaSeguridadUrl} onChange={(x) => set({ fichaSeguridadUrl: x.target.value })} />
             </Campo>
+            {residuo && (
+              <Campo label="Caracterización de peligrosidad (CRETIB) del laboratorio" id="dc-car" error={e.caracterizacionUrl}
+                hint={f.contieneHidrocarburos === 'si' ? 'Obligatoria para biorremediación de residuos con hidrocarburos: debe demostrar que no son peligrosos. Enlace al PDF.' : 'Opcional. Enlace al PDF del laboratorio.'}>
+                <Input id="dc-car" type="url" maxLength={500} placeholder="https://…" value={f.caracterizacionUrl} onChange={(x) => set({ caracterizacionUrl: x.target.value })} />
+              </Campo>
+            )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Campo label="Serial" id="dc-ser" hint="Opcional. Serial genérico o del proveedor."><Input id="dc-ser" maxLength={60} value={f.serial} onChange={(x) => set({ serial: x.target.value })} /></Campo>
             </div>
@@ -453,9 +470,17 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
             </div>
             <Campo label="Observaciones" id="dc-obs" error={e.observaciones}><Area id="dc-obs" maxLength={1000} value={f.observaciones} onChange={(x) => set({ observaciones: x.target.value })} /></Campo>
             <div className={cx('rounded-xl border p-3', e.responsabilidadAceptada ? 'border-bad' : 'border-line')}>
-              <Casilla id="dc-resp" checked={f.responsabilidadAceptada} onChange={(v) => set({ responsabilidadAceptada: v })}>
-                <span className="font-medium">Declaración de responsabilidad del generador.</span> {TEXTO_RESPONSABILIDAD_GENERADOR}
-              </Casilla>
+              <div className="text-[13px] text-muted">
+                <p className="font-medium text-fg">Declaración de responsabilidad del generador</p>
+                <p className="mt-1">{RESPONSABILIDAD_GENERADOR.intro}</p>
+                <ol className="mt-1.5 list-decimal space-y-1 pl-5">{RESPONSABILIDAD_GENERADOR.puntos.map((p) => <li key={p}>{p}</li>)}</ol>
+                {conPoliticaDatos && <p className="mt-1.5">{RESPONSABILIDAD_GENERADOR.autorizacionDatos}</p>}
+              </div>
+              <div className="mt-3">
+                <Casilla id="dc-resp" checked={f.responsabilidadAceptada} onChange={(v) => set({ responsabilidadAceptada: v })}>
+                  <span className="font-medium">Acepto la declaración de responsabilidad en nombre del generador.</span>
+                </Casilla>
+              </div>
               {d?.responsabilidadAceptada && d.aceptadaEn && <p className="mt-1.5 pl-6 text-[12px] text-muted">Aceptada{d.aceptadaPor ? ` por ${d.aceptadaPor.nombre}` : ''} el {fmtFecha(d.aceptadaEn)}.</p>}
               {e.responsabilidadAceptada && <p role="alert" className="mt-1.5 pl-6 text-[12px] text-bad">{e.responsabilidadAceptada}</p>}
             </div>

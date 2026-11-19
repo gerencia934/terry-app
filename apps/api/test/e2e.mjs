@@ -75,8 +75,8 @@ const filaResiduo = (x) => ({ nit: NIT, sedes: 'C001', categoria: 'RESPEL', tipo
   composicion: 'Agua 60 %, grasas 30 %, sólidos 10 %', embalaje: 'CANECA', presentacion: '55 gal', material: 'MET', estadoFisico: 'Semisólido / lodo', inflamable: 'No', estupefacientes: 'No',
   riesgos: 'T', etiquetado: 'ONU;SGA', fds: 'https://docs.terravivasas.com/fds/demo.pdf', responsabilidad: 'Sí', ...x });
 const libroDecl = await excelBuf('decl-residuos', [
-  filaResiduo({ codigo: 'RP-018', residuo: 'Lodos aceitosos', corrienteY: 'Y18', disposiciones: 'BIO', frecuenciaDias: '30', cantidad: '8000', metrica: 'kg', precio: '780' }),
-  filaResiduo({ codigo: 'AR-IND', residuo: 'Agua residual industrial', sedes: 'C001;C002', corrienteY: 'Y9', estadoFisico: 'Líquido', disposiciones: 'ASP', metrica: 'm3', precio: '165000' }),
+  filaResiduo({ codigo: 'RP-018', residuo: 'Lodos de trampa de grasa', categoria: 'NOPEL', peligroso: 'No', corrienteY: '', riesgos: '', disposiciones: 'BIO', frecuenciaDias: '30', cantidad: '8000', metrica: 'kg', precio: '780' }),
+  filaResiduo({ codigo: 'AR-IND', residuo: 'Agua residual no doméstica', categoria: 'NOPEL', peligroso: 'No', sedes: 'C001;C002', corrienteY: '', riesgos: '', estadoFisico: 'Líquido', disposiciones: 'ASP', metrica: 'm3', precio: '165000' }),
   filaResiduo({ codigo: 'RP-009', residuo: 'X', sedes: 'Sede que no existe', corrienteY: 'Y9', disposiciones: 'BIO', precio: '100' }),
   filaResiduo({ codigo: 'RP-010', residuo: 'Y', corrienteY: 'Y9', embalaje: 'BARRIL', disposiciones: 'BIO', precio: '100' }),
 ]);
@@ -143,7 +143,7 @@ prueba('repetir la asignación no duplica: las omite y dice por qué', r.status 
 // Formulario de 8 secciones (POST /declaraciones)
 const cat = (await llamar('GET', '/declaraciones/catalogos', { token: T })).json;
 const idDe = (lista, codigo) => lista.find((x) => x.codigo === codigo)?.id;
-prueba('catálogos del formulario', cat.lineas?.length === 15 && cat.disposiciones?.length === 15 && cat.metricasDensidad?.length === 5);
+prueba('catálogos del formulario: solo las disposiciones activas (sin aprovechamiento propio, lavado ni coprocesamiento)', cat.lineas?.length === 15 && cat.disposiciones?.length === 10 && !idDe(cat.disposiciones, 'APR') && cat.metricasDensidad?.length === 5, String(cat.disposiciones?.length));
 const cliente = await db.cliente.findFirst({ where: { nit: NIT } });
 const formulario = {
   tipo: 'RESIDUO', clienteId: cliente.id, alcanceSedes: 'TODAS', nombre: 'Aceite usado de motor', codigoInterno: 'AU-01',
@@ -152,7 +152,7 @@ const formulario = {
   descripcionProceso: 'Cambio de aceite de la flota', composicion: 'Aceite mineral con trazas metálicas',
   tipoEmbalajeId: idDe(cat.tiposEmbalaje, 'CANECA'), materialEmbalajeId: idDe(cat.materiales, 'MET'), estadoFisico: 'LIQUIDO', inflamable: true, controladaEstupefacientes: false,
   densidad: 0.88, metricaDensidadId: idDe(cat.metricasDensidad, 'g/mL'),
-  disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'APR') }], precio: { precioUnitario: 500, metricaId: idDe(cat.metricasPrecio, 'gal') },
+  disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'DF') }], precio: { precioUnitario: 500, metricaId: idDe(cat.metricasPrecio, 'gal') },
   responsabilidadAceptada: true,
 };
 r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...formulario, responsabilidadAceptada: false } });
@@ -167,7 +167,7 @@ r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuer
 prueba('peligroso sin ficha de datos de seguridad NO se autoriza → 400', r.status === 400 && /ficha de datos de seguridad/.test(r.json.mensaje), JSON.stringify(r.json));
 await db.declaracion.update({ where: { id: aceite.id }, data: { fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf' } });
 r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
-prueba('con la FDS se autoriza (aprovechamiento: objeto social)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json));
+prueba('con la FDS se autoriza: peligroso a celda de seguridad de un gestor aliado con licencia indefinida (CGS)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json));
 r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede nueva', codigo: 'C003', municipioDane: '68001' } });
 prueba('una sede nueva se suma sola a las declaraciones con alcance TODAS', r.status === 201 && (await db.declaracionSucursal.count({ where: { declaracionId: aceite.id } })) === 3, JSON.stringify(r.json));
 r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede rara', municipioDane: '99999' } });
@@ -187,6 +187,36 @@ prueba('el precio anterior se conserva con fecha de cierre', tarifas.length === 
 r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'ASP')},${idDe(cat.disposiciones, 'INCH')}`, { token: T });
 const cobAsp = r.json.detalle?.find((x) => x.codigo === 'ASP'), cobInch = r.json.detalle?.find((x) => x.codigo === 'INCH');
 prueba('cobertura en vivo: vertimiento a suelo cubierto por la Res. 000632; incineración sin licencia del aliado no', r.status === 200 && cobAsp?.cubierta && /000632/.test(cobAsp.soporte) && cobInch && !cobInch.cubierta && !r.json.cubierto, JSON.stringify(r.json).slice(0, 300));
+
+// Respuestas de la gerencia (19-11-2026): los peligrosos nunca en Los Pinos, hidrocarburos y exclusiones de los aliados
+r = await llamar('PATCH', `/declaraciones/${borras.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('un residuo peligroso con biorremediación en Los Pinos NO se autoriza (Res. 000632, art. 6)', r.status === 403 && /sin características de peligrosidad/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 300));
+let bloqueoBase = false;
+try { await db.declaracion.update({ where: { id: borras.id }, data: { estado: 'AUTORIZADA', activa: true, aprobadaEn: new Date() } }); } catch (e) { bloqueoBase = /sin características de peligrosidad/.test(String(e)); }
+prueba('…ni escribiendo directo en la base', bloqueoBase);
+r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'ASP')}&peligroso=true`, { token: T });
+prueba('cobertura en vivo: un peligroso no va a vertimiento a suelo', r.status === 200 && !r.json.cubierto && /peligrosidad/.test(r.json.detalle?.[0]?.soporte ?? ''), JSON.stringify(r.json).slice(0, 200));
+const hosp = idDe(cat.tiposResiduo, 'HOSP');
+r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
+prueba('hospitalario a celda de seguridad: lo cubre CGS (Las Bateas no recibe hospitalarios)', r.status === 200 && r.json.cubierto && /Centro de Gestión Sostenible/.test(r.json.detalle[0].soporte) && !/Veolia/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 300));
+const cgs = await db.proveedor.findFirst({ where: { nit: '901483038-1' } });
+await db.proveedor.update({ where: { id: cgs.id }, data: { excluyeTiposResiduo: ['HOSP'] } });
+r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'DF')}&peligroso=true&tipoResiduoId=${hosp}`, { token: T });
+prueba('…si ningún gestor aliado vigente lo recibe, no queda cubierta', r.status === 200 && !r.json.cubierto && /recibe este tipo/.test(r.json.detalle[0].soporte), JSON.stringify(r.json).slice(0, 200));
+await db.proveedor.update({ where: { id: cgs.id }, data: { excluyeTiposResiduo: [] } });
+const sinPeligro = { ...formulario, esPeligroso: false, codigoYId: null, codigoUn: null, riesgoIds: [], composicion: null, categoriaId: idDe(cat.categorias, 'NOPEL'),
+  fichaSeguridadUrl: null, contieneHidrocarburos: true, disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'BIO') }] };
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...sinPeligro, codigoInterno: 'HC-01', nombre: 'Lodo con hidrocarburos' } });
+const lodoHc = r.json;
+r = await llamar('PATCH', `/declaraciones/${lodoHc.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('lodo con hidrocarburos a biorremediación sin caracterización CRETIB → no se autoriza', r.status === 403 && /caracterización/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('PUT', `/declaraciones/${lodoHc.id}`, { token: T, cuerpo: { ...sinPeligro, codigoInterno: 'HC-01', nombre: 'Lodo con hidrocarburos', caracterizacionUrl: 'https://docs.terravivasas.com/cretib/hc-01.pdf' } });
+r = await llamar('PATCH', `/declaraciones/${lodoHc.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…con la caracterización CRETIB negativa cargada sí se autoriza', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...sinPeligro, codigoInterno: 'HC-02', nombre: 'Escombro con hidrocarburos', caracterizacionUrl: 'https://docs.terravivasas.com/cretib/hc-02.pdf', disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'RCD') }] } });
+const rcdHc = r.json;
+r = await llamar('PATCH', `/declaraciones/${rcdHc.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('los RCD con hidrocarburos no se reciben, aun con caracterización', r.status === 403 && /hidrocarburos/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 300));
 const aMedias = await db.declaracion.findFirst({ where: { nombre: 'Borrador a medias', clienteId: cliente.id } });
 const conFds = { ...formulario, fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf' };
 r = await llamar('PUT', `/declaraciones/${aMedias.id}`, { token: T, cuerpo: { ...conFds, nombre: 'Borrador completado', codigoInterno: 'BC-01', borrador: true, responsabilidadAceptada: false } });
@@ -202,7 +232,16 @@ prueba('quien autoriza edita una autorizada y sigue autorizada y activa', r.stat
 r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, borrador: true } });
 prueba('una autorizada no vuelve a borrador → 400', r.status === 400 && /borrador/.test(r.json.mensaje));
 r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, disposiciones: [] } });
-prueba('una autorizada no puede quedar sin disposición → 400, y no cambia nada', r.status === 400 && /disposición/.test(r.json.mensaje) && (await db.declaracionDisposicion.count({ where: { declaracionId: aceite.id } })) === 1, JSON.stringify(r.json));
+prueba('quitar la disposición de una autorizada es un cambio crítico: vuelve a revisión e inactiva (no queda autorizada incompleta)', r.status === 200 && r.json.estado === 'PENDIENTE' && !r.json.activa && r.json.cambiosCriticos?.includes('la disposición o tratamiento'), JSON.stringify(r.json).slice(0, 200));
+// Otra persona con el permiso (HSEQ) la vuelve a autorizar después de corregirla
+const rolHseq = await db.rol.findFirst({ where: { nombre: 'HSEQ', empresaId: cliente.empresaId } });
+const hseq = await db.usuario.upsert({ where: { email: 'hseq.e2e@terravivasas.com' }, update: {},
+  create: { empresaId: cliente.empresaId, rolId: rolHseq.id, nombre: 'HSEQ E2E', documento: '4', email: 'hseq.e2e@terravivasas.com',
+    passwordHash: await (await import('@node-rs/argon2')).hash('Hseq2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+const thseq = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: hseq.email, clave: 'Hseq2026!' } })).json)).accessToken;
+await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15 } });
+r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: thseq, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…corregida, la autoriza otra persona (HSEQ)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
 r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, precio: { precioUnitario: 550, metricaId: idDe(cat.metricasPrecio, 'gal') } } });
 let tarifasAceite = await db.tarifa.findMany({ where: { declaracionId: aceite.id } });
 prueba('el mismo día, cambiar el precio corrige la vigencia de hoy (no la duplica)', r.status === 200 && tarifasAceite.length === 1 && Number(tarifasAceite[0].precioUnitario) === 550, JSON.stringify(tarifasAceite));
@@ -224,6 +263,22 @@ r = await llamar('PUT', `/declaraciones/${paraComercial.id}`, { token: tcom, cue
 prueba('si la edita un rol que no autoriza (Comercial), vuelve a revisión e inactiva', r.status === 200 && r.json.estado === 'PENDIENTE' && !r.json.activa, JSON.stringify(r.json).slice(0, 200));
 const audEditar = await db.auditoria.findFirst({ where: { entidad: 'declaracion', entidadId: paraComercial.id, accion: 'EDITAR' }, orderBy: { fecha: 'desc' } });
 prueba('…y la auditoría guarda qué cambió y que volvió a revisión', audEditar?.antes?.estado === 'AUTORIZADA' && Number(audEditar?.despues?.cantidadFrecuencia) === 30 && /revisión/.test(audEditar?.despues?.nota ?? ''), JSON.stringify({ antes: audEditar?.antes, despues: audEditar?.despues }));
+
+// Respuesta D2: un cambio crítico a una autorizada la devuelve a revisión aunque lo haga quien autoriza, y la autoriza otra persona
+const conTransporte = { ...conFds, frecuenciaDias: 15, precio: { precioUnitario: 600, metricaId: idDe(cat.metricasPrecio, 'gal') },
+  disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'DF'), principal: true }, { disposicionId: idDe(cat.disposiciones, 'TRA') }] };
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: conTransporte });
+prueba('cambio crítico (disposición) hecho por quien autoriza: vuelve a revisión', r.status === 200 && r.json.estado === 'PENDIENTE' && !r.json.activa && r.json.cambiosCriticos?.includes('la disposición o tratamiento'), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…quien hizo el cambio no la puede autorizar (cuatro ojos)', r.status === 403 && /otra persona/.test(r.json.mensaje), JSON.stringify(r.json));
+const idAdmin = (await llamar('GET', '/auth/yo', { token: T })).json.id;
+let cuatroOjos = false;
+try { await db.declaracion.update({ where: { id: aceite.id }, data: { estado: 'AUTORIZADA', activa: true, aprobadaPorId: idAdmin, aprobadaEn: new Date() } }); } catch (e) { cuatroOjos = /chk_decl_cuatro_ojos/.test(String(e)); }
+prueba('…ni escribiendo directo en la base', cuatroOjos);
+r = await llamar('PATCH', `/declaraciones/${aceite.id}/estado`, { token: thseq, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…la autoriza otra persona con el permiso (HSEQ)', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 300));
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: thseq, cuerpo: { ...conTransporte, cantidadFrecuencia: 45 } });
+prueba('un cambio no crítico de quien autoriza la deja autorizada', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa && !r.json.cambiosCriticos?.length, JSON.stringify(r.json).slice(0, 200));
 
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });
@@ -480,6 +535,34 @@ prueba('…se graba con las dos firmas y báscula (neto 12.100 kg)', r.status ==
 const pdfMf = await descargar(`/manifiestos/${mfTv.id}/pdf`, T8);
 const recibo = await descargar(`/manifiestos/${mfTv.id}/recibo`, T8);
 prueba('manifiesto completo y recibo angosto en PDF (mismo número)', pdfMf.status === 200 && pdfMf.buf.subarray(0, 4).toString() === '%PDF' && recibo.status === 200 && recibo.buf.subarray(0, 4).toString() === '%PDF');
+// Respuestas de la gerencia: Los Pinos no recibe ni almacena peligrosos; van directo al gestor aliado
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE', clienteId: suc.clienteId, fechaServicio: '2026-11-28',
+  transporte: { empresaTransportadora: 'Limpieza y Logística E2E', nit: '901234567', placa: 'LPM847', tipoVehiculo: 'Vacuum', conductorNombre: 'Conductor del cliente', conductorDocumento: '91000111', conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id },
+  items: [{ declaracionId: aceite.id, sucursalId: suc.id, cantidad: 5 }] } });
+prueba('Los Pinos no recibe un residuo peligroso (Res. 000632, art. 6) → 409', r.status === 409 && /no puede recibir/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+const gestorCgs = await db.proveedor.findFirst({ where: { nit: '901483038-1' } });
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'CARGUE', clienteId: suc.clienteId, destinoId: gestorCgs.id, fechaServicio: '2026-11-29', vehiculoId: veh.id, conductorId: yo.id,
+  items: [{ declaracionId: aceite.id, sucursalId: suc.id, cantidad: 40 }] } });
+const mfAliado = r.json;
+prueba('el peligroso se recoge con destino directo al gestor aliado (CGS)', r.status === 201 && mfAliado.destinoId === gestorCgs.id, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/manifiestos/${mfAliado.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-29T08:00:00-05:00', horaSalida: '2026-11-29T09:00:00-05:00' } });
+const concAliado = await db.conciliacion.findUnique({ where: { manifiestoId: mfAliado.id }, include: { items: true } });
+await llamar('POST', `/conciliaciones/${concAliado.id}/igualar`, { token: T8, cuerpo: {} });
+r = await llamar('POST', `/conciliaciones/${concAliado.id}/aprobar`, { token: T8 });
+prueba('…se graba y se aprueba su conciliación', r.status === 201 && r.json.estado === 'APROBADA', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.clienteId, periodoDesde: '2026-11-29', periodoHasta: '2026-11-29', conciliacionItemIds: [concAliado.items[0].id] } });
+const actaAliado = r.json;
+r = await llamar('POST', `/actas/${actaAliado.id}/emitir`, { token: T8 });
+prueba('sin el número del certificado del gestor aliado no se emite el certificado final', r.status === 400 && /certificado del gestor aliado/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PATCH', `/actas/lineas/${concAliado.items[0].id}/certificado-aliado`, { token: T8, cuerpo: { numero: 'CGS-2026-0457' } });
+prueba('registrar en la línea el número del certificado del aliado', r.status === 200 && r.json.certificadoAliado === 'CGS-2026-0457', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/actas/${actaAliado.id}/emitir`, { token: T8 });
+const textosAliado = r.json.contenido?.textosLegales ?? [];
+const textoGestor = textosAliado.find((x) => x.codigo === 'GESTOR_ALIADO')?.texto ?? '';
+prueba('…ya se emite: el texto del aliado lleva su razón social, NIT, licencia, autoridad y el número de su certificado', r.status === 201
+  && /Centro de Gestión Sostenible/.test(textoGestor) && textoGestor.includes('901483038-1') && textoGestor.includes('CAR Cundinamarca') && textoGestor.includes('CGS-2026-0457') && !textoGestor.includes('{'), textoGestor.slice(0, 300));
+prueba('…y con un peligroso salen la certificación y los textos de responsabilidad y transporte de RESPEL', ['CERTIFICACION', 'RESPONSABILIDAD_RESPEL', 'TRANSPORTE_RESPEL'].every((c) => textosAliado.some((x) => x.codigo === c))
+  && !textosAliado.some((x) => x.codigo === 'BIORREMEDIACION'), JSON.stringify(textosAliado.map((x) => x.codigo)));
 // Facturación por contrato: la línea no necesita precio
 const concAuto = await db.conciliacion.findUnique({ where: { manifiestoId: mfAuto.id }, include: { items: true } });
 r = await llamar('PATCH', `/conciliaciones/${concAuto.id}/items`, { token: T8, cuerpo: { items: concAuto.items.map((i) => ({ id: i.id, tipoNegociacion: 'CONTRATO', precioUnitario: null })) } });
@@ -499,7 +582,8 @@ const contenido = r.json.contenido ?? {};
 const textos = (contenido.textosLegales ?? []).map((t) => t.codigo);
 prueba('el certificado lleva al generador, la firma con ciudad y representante, y la certificación ISO', r.status === 201 && contenido.version === 2 && contenido.generador?.razonSocial === 'Generador Tercero S.A.S.'
   && contenido.firma?.ciudad === 'Sabana de Torres' && contenido.certificaciones?.some((c) => c.numero === 'CO-SC-123'), JSON.stringify(contenido).slice(0, 300));
-prueba('solo los textos legales que aplican (responsabilidad y biorremediación; no RCD)', textos.includes('RESPONSABILIDAD') && textos.includes('BIORREMEDIACION') && !textos.includes('RCD'), JSON.stringify(textos));
+prueba('solo los textos legales que aplican: certificación y biorremediación; sin peligrosos no van los de RESPEL; no RCD', textos.includes('CERTIFICACION') && textos.includes('BIORREMEDIACION') && !textos.includes('RCD')
+  && !textos.includes('RESPONSABILIDAD_RESPEL') && !textos.includes('TRANSPORTE_RESPEL') && !textos.includes('RESPONSABILIDAD'), JSON.stringify(textos));
 const pdfGen = await descargar(`/actas/${actaGen.id}/pdf`, T8);
 const { createHash } = await import('node:crypto');
 prueba('se guarda el hash SHA-256 del PDF emitido y coincide con el descargado', r.json.pdfSha256 === createHash('sha256').update(pdfGen.buf).digest('hex'));

@@ -224,13 +224,13 @@ enum UnidadMedida {
 // MULTIEMPRESA Y SEGURIDAD
 // ---------------------------------------------------------------------
 model Empresa {
-  id          String   @id @default(uuid()) @db.Uuid
-  nit         String   @unique @db.VarChar(15)
-  razonSocial String   @map("razon_social") @db.VarChar(200)
-  logoUrl     String?  @map("logo_url")
+  id            String   @id @default(uuid()) @db.Uuid
+  nit           String   @unique @db.VarChar(15)
+  razonSocial   String   @map("razon_social") @db.VarChar(200)
+  logoUrl       String?  @map("logo_url")
   /// Ciudad de firma, representante legal, certificaciones (ISO, Norsok) y nota de calibración de la báscula
-  configuracion Json   @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  configuracion Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   usuarios         Usuario[]
   roles            Rol[]
@@ -299,28 +299,28 @@ model RolPermiso {
 }
 
 model Usuario {
-  id            String    @id @default(uuid()) @db.Uuid
-  empresaId     String    @map("empresa_id") @db.Uuid
-  rolId         String    @map("rol_id") @db.Uuid
-  nombre        String    @db.VarChar(150)
-  documento     String    @db.VarChar(20)
-  email         String    @unique @db.VarChar(150)
-  passwordHash  String    @map("password_hash")
-  telefono      String?   @db.VarChar(20)
-  esConductor   Boolean   @default(false) @map("es_conductor")
-  esAuxiliar    Boolean   @default(false) @map("es_auxiliar")
-  licenciaCat   String?   @map("licencia_cat") @db.VarChar(5)
-  licenciaVence DateTime? @map("licencia_vence") @db.Date
-  cursoMpVence  DateTime? @map("curso_mp_vence") @db.Date // Res. 1223/2014
-  arlId         String?   @map("arl_id") @db.Uuid // seguridad social: requisito de ingreso a planta
-  epsId         String?   @map("eps_id") @db.Uuid
-  activo        Boolean   @default(true)
-  ultimoLogin   DateTime? @map("ultimo_login") @db.Timestamptz
+  id                   String    @id @default(uuid()) @db.Uuid
+  empresaId            String    @map("empresa_id") @db.Uuid
+  rolId                String    @map("rol_id") @db.Uuid
+  nombre               String    @db.VarChar(150)
+  documento            String    @db.VarChar(20)
+  email                String    @unique @db.VarChar(150)
+  passwordHash         String    @map("password_hash")
+  telefono             String?   @db.VarChar(20)
+  esConductor          Boolean   @default(false) @map("es_conductor")
+  esAuxiliar           Boolean   @default(false) @map("es_auxiliar")
+  licenciaCat          String?   @map("licencia_cat") @db.VarChar(5)
+  licenciaVence        DateTime? @map("licencia_vence") @db.Date
+  cursoMpVence         DateTime? @map("curso_mp_vence") @db.Date // Res. 1223/2014
+  arlId                String?   @map("arl_id") @db.Uuid // seguridad social: requisito de ingreso a planta
+  epsId                String?   @map("eps_id") @db.Uuid
+  activo               Boolean   @default(true)
+  ultimoLogin          DateTime? @map("ultimo_login") @db.Timestamptz
   // Ley 1581 de 2012: aceptación de la política de tratamiento de datos (versión, fecha e IP)
   datosPoliticaVersion String?   @map("datos_politica_version") @db.VarChar(20)
   datosAceptadosEn     DateTime? @map("datos_aceptados_en") @db.Timestamptz
   datosAceptadosIp     String?   @map("datos_aceptados_ip") @db.VarChar(64)
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   empresa                 Empresa                 @relation(fields: [empresaId], references: [id])
   rol                     Rol                     @relation(fields: [rolId], references: [id])
@@ -352,6 +352,7 @@ model Usuario {
   auditoria               Auditoria[]
   declaracionesAprobadas  Declaracion[]           @relation("DeclAprobadaPor")
   declaracionesAceptadas  Declaracion[]           @relation("DeclAceptadaPor")
+  declaracionesRevision   Declaracion[]           @relation("DeclRevisionPedidaPor")
   declaracionesCreadas    Declaracion[]           @relation("DeclCreadaPor")
 
   @@index([empresaId])
@@ -458,23 +459,30 @@ model Sucursal {
 }
 
 model Proveedor {
-  id              String    @id @default(uuid()) @db.Uuid
-  empresaId       String    @map("empresa_id") @db.Uuid
-  nit             String    @db.VarChar(15)
-  razonSocial     String    @map("razon_social") @db.VarChar(200)
-  esDestino       Boolean   @default(true) @map("es_destino") // planta / gestor de destino
-  esPropio        Boolean   @default(false) @map("es_propio") // Parque de Saneamiento Ambiental Los Pinos
-  esTransportador Boolean   @default(false) @map("es_transportador") // dueño de vehículos que Terra Viva contrata
-  licencia        String?   @db.VarChar(120) // acto administrativo del gestor
-  licenciaVence   DateTime? @map("licencia_vence") @db.Date // sin fecha o vencida ⇒ no cubre la disposición
-  municipio       String?   @db.VarChar(80)
+  id                    String    @id @default(uuid()) @db.Uuid
+  empresaId             String    @map("empresa_id") @db.Uuid
+  nit                   String    @db.VarChar(15)
+  razonSocial           String    @map("razon_social") @db.VarChar(200)
+  esDestino             Boolean   @default(true) @map("es_destino") // planta / gestor de destino
+  esPropio              Boolean   @default(false) @map("es_propio") // Parque de Saneamiento Ambiental Los Pinos
+  esTransportador       Boolean   @default(false) @map("es_transportador") // dueño de vehículos que Terra Viva contrata
+  licencia              String?   @db.VarChar(300) // acto administrativo del gestor (número, fecha y modificaciones)
+  licenciaAutoridad     String?   @map("licencia_autoridad") @db.VarChar(80)
+  licenciaIndefinida    Boolean   @default(false) @map("licencia_indefinida") // el acto no fija término (vida útil del proyecto)
+  licenciaUrl           String?   @map("licencia_url") // PDF de la licencia
+  alcance               String? // qué residuos acepta y cuáles excluye
+  excluyeTiposResiduo   String[]  @default([]) @map("excluye_tipos_residuo") @db.VarChar(20) // códigos de tipos_residuo (p. ej. HOSP)
+  soporteComercial      String?   @map("soporte_comercial") @db.VarChar(200)
+  soporteComercialFecha DateTime? @map("soporte_comercial_fecha") @db.Date
+  licenciaVence         DateTime? @map("licencia_vence") @db.Date // vencida, o sin fecha y no indefinida ⇒ no cubre la disposición
+  municipio             String?   @db.VarChar(80)
 
-  empresa       Empresa       @relation(fields: [empresaId], references: [id])
-  disposiciones Disposicion[]
-  manifiestos   Manifiesto[]
-  actas         Acta[]
-  vehiculos     Vehiculo[] // vehículos de terceros (flete)
-  solicitudes   Solicitud[] // destino de descarga
+  empresa                  Empresa             @relation(fields: [empresaId], references: [id])
+  disposicionesGestionadas DisposicionGestor[] // disposiciones que hace como gestor aliado
+  manifiestos              Manifiesto[]
+  actas                    Acta[]
+  vehiculos                Vehiculo[] // vehículos de terceros (flete)
+  solicitudes              Solicitud[] // destino de descarga
 
   @@map("proveedores")
 }
@@ -578,8 +586,11 @@ model ObligacionPermiso {
   id           String           @id @default(uuid()) @db.Uuid
   permisoId    String           @map("permiso_id") @db.Uuid
   descripcion  String // ICA, monitoreo de suelos, caracterización de vertimiento…
-  periodicidad String           @db.VarChar(30)
-  proximaFecha DateTime         @map("proxima_fecha") @db.Date
+  codigo       String?          @db.VarChar(10) // ID del Cronograma Maestro de Cumplimiento (OB-xx)
+  periodicidad String           @db.VarChar(120)
+  meses        Int?             @db.SmallInt // al cumplirla, la próxima fecha avanza estos meses (vacío = no se repite)
+  articulo     String?          @db.VarChar(120)
+  proximaFecha DateTime?        @map("proxima_fecha") @db.Date // vacía: permanente o por evento
   responsable  String?          @db.VarChar(120)
   cumplida     Boolean          @default(false)
   permiso      PermisoAmbiental @relation(fields: [permisoId], references: [id], onDelete: Cascade)
@@ -683,28 +694,35 @@ model Declaracion {
   // Trazabilidad del registro
   /// Convertida de la fase 1: puede inactivarse o rechazarse sin completar las secciones nuevas;
   /// para activarla o autorizarla debe completarse (reglas chk_decl_* de la migración).
+  // Hidrocarburos y caracterización (respuestas de la gerencia, 19-11-2026): BIO solo con CRETIB negativa; RCD no los admite
+  contieneHidrocarburos Boolean @default(false) @map("contiene_hidrocarburos")
+  caracterizacionUrl    String? @map("caracterizacion_url")
+  // Cambio crítico: quien lo hizo no puede autorizarla (cuatro ojos)
+  revisionPedidaPorId   String? @map("revision_pedida_por") @db.Uuid
+
   origenFase1 Boolean  @default(false) @map("origen_fase1")
   cargueId    String?  @map("cargue_id") @db.Uuid // lote de cargue masivo que la creó
   creadoPorId String?  @map("creado_por") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  empresa         Empresa              @relation(fields: [empresaId], references: [id])
-  cliente         Cliente              @relation(fields: [clienteId], references: [id])
-  catalogo        CatalogoResiduo?     @relation(fields: [catalogoId], references: [id])
-  categoria       CategoriaDeclarado   @relation(fields: [categoriaId], references: [id])
-  tipoResiduo     TipoResiduo?         @relation(fields: [tipoResiduoId], references: [id])
-  lineaServicio   LineaServicio        @relation(fields: [lineaServicioId], references: [id])
-  codigoA         CodigoClasificacion? @relation("CodigoA", fields: [codigoAId], references: [id])
-  codigoY         CodigoClasificacion? @relation("CodigoY", fields: [codigoYId], references: [id])
-  tipoEmbalaje    TipoEmbalaje?        @relation(fields: [tipoEmbalajeId], references: [id])
-  material        MaterialEmbalaje?    @relation(fields: [materialEmbalajeId], references: [id])
-  metricaDensidad Metrica?             @relation(fields: [metricaDensidadId], references: [id])
-  causal          CatalogoItem?        @relation("CausalDeclaracion", fields: [causalId], references: [id])
-  aprobadaPor     Usuario?             @relation("DeclAprobadaPor", fields: [aprobadaPorId], references: [id])
-  aceptadaPor     Usuario?             @relation("DeclAceptadaPor", fields: [aceptadaPorId], references: [id])
-  creadoPor       Usuario?             @relation("DeclCreadaPor", fields: [creadoPorId], references: [id])
-  cargue          CargueMasivo?        @relation(fields: [cargueId], references: [id])
+  empresa           Empresa              @relation(fields: [empresaId], references: [id])
+  cliente           Cliente              @relation(fields: [clienteId], references: [id])
+  catalogo          CatalogoResiduo?     @relation(fields: [catalogoId], references: [id])
+  categoria         CategoriaDeclarado   @relation(fields: [categoriaId], references: [id])
+  tipoResiduo       TipoResiduo?         @relation(fields: [tipoResiduoId], references: [id])
+  lineaServicio     LineaServicio        @relation(fields: [lineaServicioId], references: [id])
+  codigoA           CodigoClasificacion? @relation("CodigoA", fields: [codigoAId], references: [id])
+  codigoY           CodigoClasificacion? @relation("CodigoY", fields: [codigoYId], references: [id])
+  tipoEmbalaje      TipoEmbalaje?        @relation(fields: [tipoEmbalajeId], references: [id])
+  material          MaterialEmbalaje?    @relation(fields: [materialEmbalajeId], references: [id])
+  metricaDensidad   Metrica?             @relation(fields: [metricaDensidadId], references: [id])
+  causal            CatalogoItem?        @relation("CausalDeclaracion", fields: [causalId], references: [id])
+  aprobadaPor       Usuario?             @relation("DeclAprobadaPor", fields: [aprobadaPorId], references: [id])
+  aceptadaPor       Usuario?             @relation("DeclAceptadaPor", fields: [aceptadaPorId], references: [id])
+  revisionPedidaPor Usuario?             @relation("DeclRevisionPedidaPor", fields: [revisionPedidaPorId], references: [id])
+  creadoPor         Usuario?             @relation("DeclCreadaPor", fields: [creadoPorId], references: [id])
+  cargue            CargueMasivo?        @relation(fields: [cargueId], references: [id])
 
   sucursales      DeclaracionSucursal[]
   disposiciones   DeclaracionDisposicion[]
@@ -1272,6 +1290,7 @@ model ConciliacionItem {
   facturaVencimiento DateTime?        @map("factura_vencimiento") @db.Date
   estadoPago         EstadoPago       @default(PENDIENTE) @map("estado_pago")
   justificacion      String?
+  certificadoAliado  String?          @map("certificado_aliado") @db.VarChar(60) // N.° del certificado del gestor aliado
 
   conciliacion   Conciliacion   @relation(fields: [conciliacionId], references: [id], onDelete: Cascade)
   manifiestoItem ManifiestoItem @relation(fields: [manifiestoItemId], references: [id])
@@ -1545,19 +1564,20 @@ model Metrica {
 ///  · propia = true            → la hace Terra Viva: debe estar en permiso_disposiciones de un permiso vigente.
 ///  · proveedorId              → la hace un gestor aliado: su licencia debe estar vigente.
 model Disposicion {
-  id              String  @id @default(uuid()) @db.Uuid
-  empresaId       String  @map("empresa_id") @db.Uuid
-  codigo          String  @db.VarChar(20)
-  nombre          String  @db.VarChar(150)
-  descripcion     String?
-  soporteLegal    String? @map("soporte_legal") // texto que sale en el certificado
-  requierePermiso Boolean @default(true) @map("requiere_permiso")
-  propia          Boolean @default(true)
-  proveedorId     String? @map("proveedor_id") @db.Uuid
-  activo          Boolean @default(true)
+  id               String  @id @default(uuid()) @db.Uuid
+  empresaId        String  @map("empresa_id") @db.Uuid
+  codigo           String  @db.VarChar(20)
+  nombre           String  @db.VarChar(150)
+  descripcion      String?
+  soporteLegal     String? @map("soporte_legal") // texto que sale en el certificado
+  requierePermiso  Boolean @default(true) @map("requiere_permiso")
+  propia           Boolean @default(true)
+  admitePeligrosos Boolean @default(true) @map("admite_peligrosos") // false: tratamientos de Los Pinos (Res. 000632, art. 6)
+  hidrocarburos    String  @default("ADMITE") @db.VarChar(20) // ADMITE · CON_CARACTERIZACION · NO_ADMITE
+  activo           Boolean @default(true)
 
   empresa           Empresa                  @relation(fields: [empresaId], references: [id])
-  proveedor         Proveedor?               @relation(fields: [proveedorId], references: [id])
+  gestores          DisposicionGestor[] // gestores aliados que la hacen (basta uno con licencia vigente)
   permisos          PermisoDisposicion[]
   declaraciones     DeclaracionDisposicion[]
   manifiestoItems   ManifiestoItem[]
@@ -1658,23 +1678,37 @@ model Municipio {
 /// Párrafos de respaldo legal del certificado. Cada código tiene versiones (una activa); el certificado guarda la que usó.
 /// Un párrafo solo sale si el certificado tiene residuos con alguna de sus disposiciones (vacío = siempre).
 model TextoLegal {
-  id            String   @id @default(uuid()) @db.Uuid
-  empresaId     String   @map("empresa_id") @db.Uuid
-  codigo        String   @db.VarChar(30)
-  version       Int
-  titulo        String   @db.VarChar(150)
-  texto         String
-  disposiciones String[] @db.VarChar(20)
-  orden         Int      @default(0) @db.SmallInt
-  vigenteDesde  DateTime @default(dbgenerated("CURRENT_DATE")) @map("vigente_desde") @db.Date
-  activo        Boolean  @default(true)
-  revisado      Boolean  @default(false) // texto inicial pendiente de revisión jurídica
-  creadoPorId   String?  @map("creado_por") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  empresaId      String   @map("empresa_id") @db.Uuid
+  codigo         String   @db.VarChar(30)
+  version        Int
+  titulo         String   @db.VarChar(150)
+  texto          String
+  disposiciones  String[] @db.VarChar(20)
+  orden          Int      @default(0) @db.SmallInt
+  vigenteDesde   DateTime @default(dbgenerated("CURRENT_DATE")) @map("vigente_desde") @db.Date
+  activo         Boolean  @default(true)
+  revisado       Boolean  @default(false) // texto inicial pendiente de revisión jurídica
+  soloPeligrosos Boolean  @default(false) @map("solo_peligrosos") // sale solo si el certificado tiene residuos peligrosos
+  creadoPorId    String?  @map("creado_por") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   empresa   Empresa  @relation(fields: [empresaId], references: [id])
   creadoPor Usuario? @relation("TextoLegalCreadoPor", fields: [creadoPorId], references: [id])
 
   @@unique([empresaId, codigo, version])
   @@map("textos_legales")
+}
+
+/// Gestores aliados de cada disposición (una disposición puede tener varios: celda de seguridad → Veolia SI y CGS).
+model DisposicionGestor {
+  disposicionId String @map("disposicion_id") @db.Uuid
+  proveedorId   String @map("proveedor_id") @db.Uuid
+
+  disposicion Disposicion @relation(fields: [disposicionId], references: [id], onDelete: Cascade)
+  proveedor   Proveedor   @relation(fields: [proveedorId], references: [id], onDelete: Cascade)
+
+  @@id([disposicionId, proveedorId])
+  @@index([proveedorId], map: "ix_disposicion_gestor_proveedor")
+  @@map("disposicion_gestores")
 }

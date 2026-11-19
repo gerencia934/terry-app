@@ -35,9 +35,9 @@ async function declaracion(nombre, extra = {}) {
     categoriaId: await id('categoriaDeclarado', { empresaId: E, codigo: 'NOPEL' }), tipoResiduoId: await id('tipoResiduo', { empresaId: E, codigo: 'IND' }),
     lineaServicioId: await id('lineaServicio', { empresaId: E, codigo: '01' }), tipoEmbalajeId: await id('tipoEmbalaje', { empresaId: E, codigo: 'CANECA' }),
     materialEmbalajeId: await id('materialEmbalaje', { empresaId: E, codigo: 'MET' }), estadoFisico: 'SOLIDO', inflamable: false, controladaEstupefacientes: false,
-    descripcionProceso: 'Prueba', responsabilidadAceptada: true, aceptadaEn: new Date(), ...extra,
+    descripcionProceso: 'Prueba', responsabilidadAceptada: true, aceptadaEn: new Date(), ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== 'disposicion')),
     sucursales: { create: [{ sucursalId: sedeA.id }] },
-    disposiciones: { create: [{ disposicionId: await id('disposicion', { empresaId: E, codigo: 'APR' }), principal: true }] },
+    disposiciones: { create: [{ disposicionId: await id('disposicion', { empresaId: E, codigo: extra.disposicion ?? 'BIO' }), principal: true }] },
     tarifas: { create: [{ precioUnitario: 500, tipoNegociacion: 'COBRO', formaPago: 'CONTADO', vigenteDesde: new Date('2026-01-01'), metricaId: await id('metrica', { empresaId: E, codigo: 'kg' }) }] },
   } });
   return db.declaracion.update({ where: { id: d.id }, data: { estado: 'AUTORIZADA', activa: true } });
@@ -169,6 +169,22 @@ prueba('anular: la conciliación queda ANULADA (no se borra) y la línea vuelve 
 await rechaza('una conciliación anulada no se modifica', () => db.conciliacionItem.update({ where: { id: concAnulada.items[0].id }, data: { cantidadConciliada: 1 } }), /está anulada/);
 await rechaza('ni se aprueba', () => db.conciliacion.update({ where: { id: concAnulada.id }, data: { estado: 'APROBADA' } }), /está anulada/);
 await rechaza('un manifiesto anulado no se modifica', () => db.manifiesto.update({ where: { id: mf2.id }, data: { observaciones: 'x' } }), /está anulado/);
+
+
+console.log('\n7. Respuestas de la gerencia (19-11-2026): peligrosos, Los Pinos y cuatro ojos');
+const peligroso = { esPeligroso: true, composicion: 'Hidrocarburo', fichaSeguridadUrl: 'https://lab/fds.pdf', codigoYId: await id('codigoClasificacion', { codigo: 'Y9' }), categoriaId: await id('categoriaDeclarado', { empresaId: E, codigo: 'RESPEL' }) };
+await rechaza('un peligroso con biorremediación en Los Pinos no queda autorizado (Res. 000632, art. 6)', () => declaracion('PELIGROSO-BIO', peligroso), /sin características de peligrosidad/);
+const dRespel = await declaracion('PELIGROSO-DF', { ...peligroso, disposicion: 'DF' });
+prueba('un peligroso a celda de seguridad con un gestor aliado vigente sí queda autorizado', dRespel.estado === 'AUTORIZADA');
+await rechaza('Los Pinos no recibe ni almacena un peligroso: manifiesto con destino a la planta → rechazado', () => db.manifiesto.create({ data: { empresaId: E, tipo: 'DESCARGUE', clienteId: cliente.id, destinoId: planta.id, fechaServicio: new Date('2026-12-04'), transporteId: tercero.id,
+  items: { create: [{ declaracionId: dRespel.id, sucursalId: sedeA.id, cantidad: 5 }] } } }), /no puede recibir ni almacenar/);
+const gestorDf = await db.proveedor.findFirstOrThrow({ where: { empresaId: E, nit: '901483038-1' } });
+const mfAliado = await db.manifiesto.create({ data: { empresaId: E, tipo: 'DESCARGUE', clienteId: cliente.id, destinoId: gestorDf.id, fechaServicio: new Date('2026-12-04'), transporteId: tercero.id,
+  items: { create: [{ declaracionId: dRespel.id, sucursalId: sedeA.id, cantidad: 5 }] } } });
+prueba('…con destino al gestor aliado sí se registra', !!mfAliado.id);
+await rechaza('BIO con hidrocarburos sin caracterización CRETIB → no queda autorizada', () => declaracion('HC-BIO', { contieneHidrocarburos: true }), /caracterización de peligrosidad/);
+prueba('…con la caracterización cargada sí', (await declaracion('HC-BIO-OK', { contieneHidrocarburos: true, caracterizacionUrl: 'https://lab/cretib.pdf' })).estado === 'AUTORIZADA');
+await rechaza('cuatro ojos: quien pidió la revisión no puede figurar como quien la autoriza', () => db.declaracion.update({ where: { id: dRespel.id }, data: { revisionPedidaPorId: admin.id, aprobadaPorId: admin.id } }), /chk_decl_cuatro_ojos/);
 
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);

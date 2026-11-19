@@ -65,7 +65,8 @@ export default function DeclaracionesServidor() {
   if (formulario) return (
     <FormularioDeclaracion id={formulario.id} volver={() => setFormulario(null)}
       onGuardada={(g) => {
-        toast(g.estado === 'BORRADOR' ? `Declaración ${g.numero} guardada como borrador.` : g.estado === 'AUTORIZADA' ? `Declaración ${g.numero}: cambios guardados; sigue autorizada.` : `Declaración ${g.numero} enviada a revisión.`);
+        toast(g.cambiosCriticos?.length ? `Declaración ${g.numero}: cambió ${g.cambiosCriticos.join(', ')}. Volvió a revisión y la debe autorizar otra persona.`
+          : g.estado === 'BORRADOR' ? `Declaración ${g.numero} guardada como borrador.` : g.estado === 'AUTORIZADA' ? `Declaración ${g.numero}: cambios guardados; sigue autorizada.` : `Declaración ${g.numero} enviada a revisión.`);
         setFormulario(null); setSel(null); cargar();
       }} />
   );

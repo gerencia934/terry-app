@@ -17,6 +17,6 @@ export function contextoActual(extra?: { nits?: string[]; sucursales?: [string, 
     numerosDeclaracion: new Set(DECLARACIONES.map((d) => String(d.numero))),
     codigosInternos: new Set(DECLARACIONES.filter((d) => d.estado === 'AUTORIZADA').map((d) => item(d.itemId).codigo.toUpperCase())),
     catalogos: catalogosBase(),
-    disposicionesCubiertas: new Set(DISPOSICIONES.filter((d) => !d.requierePermiso || amparadas.has(d.codigo)).map((d) => d.codigo)),
+    disposicionesCubiertas: new Set(DISPOSICIONES.filter((d) => d.activo !== false && (!d.requierePermiso || amparadas.has(d.codigo))).map((d) => d.codigo)),
   };
 }

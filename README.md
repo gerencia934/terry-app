@@ -73,7 +73,7 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-157 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
+178 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
 límites de peticiones, roles, aislamiento entre empresas, importación de Excel, declaraciones (crear, completar y editar
 desde el formulario de 8 secciones) y permisos ambientales,
 residuos no autorizados, inspección vehicular, tarifas, auditoría (con IP e inmutable) y la cadena operativa completa:
@@ -86,7 +86,7 @@ Reglas de la cadena operativa escritas directamente en la base (sin API), sobre 
 DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:reglas -w @terraviva/db
 ```
 
-46 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
+53 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
 conciliación, actas y descargue en planta.
 
 **En GitHub** (`.github/`), cada cambio en `main` o en una rama `fase-*`, y cada pull request, corre solo:

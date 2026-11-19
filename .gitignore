@@ -8,3 +8,4 @@ dist/
 node_modules/
 apps/api/almacenamiento/
 *.tsbuildinfo
+docs/privado/

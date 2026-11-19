@@ -7,12 +7,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, fechaColombia, type Actor } from '../common/http';
 
+const fechaOVacia = z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD.')]);
 const Configuracion = z.object({
   ciudadFirma: z.string().trim().max(80).optional(),
   representanteLegal: z.string().trim().max(150).optional(),
   cargoFirmante: z.string().trim().max(80).optional(),
-  certificaciones: z.array(z.object({ norma: z.string().trim().min(2).max(60), numero: z.string().trim().max(60) })).max(10).optional(),
-  notaBascula: z.string().trim().max(300).optional(),
+  // Solo se imprimen las que tienen número y no han vencido (respuesta C2: el sello NORSOK no sale sin certificado vigente)
+  certificaciones: z.array(z.object({
+    norma: z.string().trim().min(2).max(60), numero: z.string().trim().max(60),
+    entidad: z.string().trim().max(80).optional(), vence: fechaOVacia.optional(),
+  })).max(10).optional(),
+  notaBascula: z.string().trim().max(300).optional(), // nota libre del recibo, si no hay datos de calibración
+  // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
+  bascula: z.object({
+    identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,
+    laboratorio: z.string().trim().max(120), vigenteHasta: fechaOVacia,
+  }).partial().optional(),
 });
 const DOCUMENTOS = ['MANIFIESTO', 'ACTA', 'INSPECCION'] as const;
 const Consecutivo = z.object({

@@ -32,7 +32,7 @@ export interface ContenidoActa {
   /** v2: párrafos de respaldo legal que aplican a las disposiciones del certificado (con su versión). */
   textosLegales?: { codigo: string; version: number; titulo: string; texto: string }[];
   firma?: { ciudad: string | null; representante: string | null; cargo: string | null };
-  certificaciones?: { norma: string; numero: string }[];
+  certificaciones?: { norma: string; numero: string; entidad?: string; vence?: string }[];
 }
 
 const TITULOS = {
@@ -155,7 +155,7 @@ export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
   if (c.firma?.representante) doc.text(c.emisor.razonSocial);
   // Certificaciones del sistema de gestión (solo las que tienen número)
   const sellos = (c.certificaciones ?? []).filter((x) => x.numero?.trim());
-  if (sellos.length) doc.moveDown(0.8).fontSize(7.5).fillColor(GRIS).text(`Sistema de gestión certificado: ${sellos.map((x) => `${x.norma} (certificado ${x.numero})`).join(' · ')}`, x0, doc.y, { width: ancho }).fillColor('black');
+  if (sellos.length) doc.moveDown(0.8).fontSize(7.5).fillColor(GRIS).text(`Sistema de gestión certificado: ${sellos.map((x) => `${x.norma} (certificado ${x.numero}${x.entidad ? `, ${x.entidad}` : ""})`).join(' · ')}`, x0, doc.y, { width: ancho }).fillColor('black');
 
   // ---------- Pie de página en todas las hojas ----------
   const rango = doc.bufferedPageRange();
