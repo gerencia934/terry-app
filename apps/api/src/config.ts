@@ -13,7 +13,7 @@ const Esquema = z.object({
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
-  MAIL_FROM: z.string().default('Terra Viva <no-responder@terravivasas.com>'),
+  MAIL_FROM: z.string().default('TERRY-GO · Terra Viva <no-responder@terravivasas.com>'),
 });
 export type Config = z.infer<typeof Esquema>;
 

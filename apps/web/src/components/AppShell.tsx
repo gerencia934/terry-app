@@ -104,7 +104,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const Lateral = (
     <div className="flex h-full flex-col">
-      <button onClick={() => go('inicio')} className="mb-5 px-2 text-left" aria-label="Ir al inicio"><Logo className="h-10" /></button>
+      <button onClick={() => go('inicio')} className="mb-5 px-2 text-left" aria-label="TERRY-GO: ir al inicio">
+        <Logo className="h-10" />
+        <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.14em] text-subtle">TERRY-GO</span>
+      </button>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1"><Navegacion route={route} go={go} /></div>
       <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
         <div className={cx('flex items-center gap-2 rounded-lg px-3 py-2 text-[12px]', MODO_REAL ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn')}>

@@ -12,7 +12,7 @@ function AuthLayout({ children }: { children: ReactNode }) {
     <div className="grid min-h-full lg:grid-cols-[1.05fr_1fr]">
       <aside className="relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-between lg:p-12" style={{ background: 'linear-gradient(160deg, #0C481E 0%, #17652E 55%, #3E9A3F 100%)' }}>
         <div className="relative z-10 max-w-md text-white">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#B9E59B]">Terra Viva · Plataforma de trazabilidad</p>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#B9E59B]">TERRY-GO · Trazabilidad de residuos de Terra Viva</p>
           <h1 className="mt-3 font-display text-[38px] font-bold leading-[1.1]">Cada residuo, de la sede del cliente al certificado.</h1>
           <p className="mt-4 text-[15px] leading-relaxed text-white/80">Declaraciones, recorridos, inspecciones, manifiestos, pesaje en planta y permisos ambientales, conectados en una sola cadena.</p>
         </div>
@@ -32,7 +32,7 @@ function AuthLayout({ children }: { children: ReactNode }) {
 
 const Modo = () => (
   <p className={`mt-8 flex items-center gap-2 text-[12px] ${MODO_REAL ? 'text-ok' : 'text-subtle'}`}>
-    {MODO_REAL ? <><Server size={14} /> Conectado al servidor de Terra Viva.</> : <><FlaskConical size={14} /> Modo demostración: cualquier correo y contraseña funcionan.</>}
+    {MODO_REAL ? <><Server size={14} /> Conectado al servidor de TERRY-GO.</> : <><FlaskConical size={14} /> Modo demostración: cualquier correo y contraseña funcionan.</>}
   </p>
 );
 

@@ -1,4 +1,4 @@
-# Terra Viva — Plataforma de Gestión Integral de Residuos
+# TERRY-GO — Plataforma de Gestión Integral de Residuos de Terra Viva
 
 Trazabilidad de residuos para **Terra Viva S.A.S. E.S.P.**: declaraciones, logística, inspecciones,
 manifiestos, recepción en planta, certificados, permisos ambientales e indicadores.

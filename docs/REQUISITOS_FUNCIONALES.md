@@ -1,4 +1,4 @@
-# Requisitos funcionales — Plataforma Terra Viva
+# Requisitos funcionales — TERRY-GO (plataforma de Terra Viva)
 
 Documento de requisitos redactado por Terra Viva S.A.S. E.S.P. a partir de su propia operación
 (planta PSA Los Pinos, flota, permisos de la CAS y obligaciones del Decreto 1076 de 2015).

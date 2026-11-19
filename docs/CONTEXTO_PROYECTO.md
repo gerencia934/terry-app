@@ -4,6 +4,9 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 
 ## Quién y cómo trabajar
 
+- Producto: **TERRY-GO**, nombre de la plataforma web y de la app de campo desde el 19-11-2026. «Terry» es la mascota de
+  Terra Viva. La empresa sigue figurando como Terra Viva S.A.S. E.S.P. en logos, documentos legales y certificados. El
+  prefijo interno de los paquetes (`@terraviva/...`) y el repositorio `terry-app` no cambian.
 - Cliente: **Terra Viva S.A.S. E.S.P.** (NIT 901.089.780-8), Sabana de Torres, Santander.
   Gestión integral de residuos con planta propia, el Parque de Saneamiento Ambiental Los Pinos, y autoridad ambiental CAS.
 - Usuario: Diego, director general, representante legal y dueño.

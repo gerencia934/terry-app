@@ -1,4 +1,4 @@
-# Arquitectura — Plataforma Terra Viva
+# Arquitectura — TERRY-GO (plataforma de Terra Viva)
 
 ## 1. Cadena de trazabilidad (núcleo del sistema)
 

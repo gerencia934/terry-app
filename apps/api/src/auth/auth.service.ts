@@ -90,7 +90,7 @@ export class AuthService {
     const token = randomBytes(32).toString('base64url');
     await this.db.passwordReset.create({ data: { usuarioId: u.id, tokenHash: sha256(token), expiraEn: new Date(Date.now() + 30 * 60_000) } });
     const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
-    await this.correo.enviar(u.email, 'Restablecer su contraseña · Terra Viva',
+    await this.correo.enviar(u.email, 'Restablecer su contraseña · TERRY-GO',
       `Hola ${u.nombre}:\n\nPara crear una nueva contraseña abra este enlace (vence en 30 minutos y sirve una sola vez):\n${url}\n\nSi usted no lo pidió, ignore este mensaje.`);
   }
 
