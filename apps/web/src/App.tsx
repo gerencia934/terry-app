@@ -1,4 +1,5 @@
 import { AppShell } from './components/AppShell';
+import { Proteccion } from './components/Proteccion';
 import { ToastProvider } from './components/ui';
 import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
@@ -75,7 +76,7 @@ function Screen() {
       case 'etapas': return <Etapas />;
     }
   })();
-  return <AppShell>{page}</AppShell>;
+  return <AppShell><Proteccion key={route}>{page}</Proteccion></AppShell>;
 }
 
 export default function App() {

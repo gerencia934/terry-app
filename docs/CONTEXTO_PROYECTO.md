@@ -34,6 +34,7 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 | DR | **Ajustes por documentos reales, hechos** (19-11-2026): recepción en planta con transportador externo, dos firmas, recibo térmico y manifiesto en PDF (TV####); certificado por generador, textos legales por disposición, firma, sellos y hash (PSAP); subcorrientes IDEAM, cargue por nombre, asignación masiva, solicitudes automáticas agrupadas y permisos reales. 46 pruebas de reglas y 132 e2e OK | rama `fase-3-operacion` (`docs/referencia/ANALISIS_DOCUMENTOS_REALES.md`, `docs/REVISION_REQUISITOS_PRODUCCION.md`) |
 | PR | **Ajustes por requisitos de producción, hechos** (19-11-2026): buscador de clientes y listados de 50 en 50 (probado con 2.000 clientes), consolidado en la base, auditoría con IP e inmutable, permiso y registro de exportaciones, aceptación de la política de datos (Ley 1581), cerrar sesión en todos los dispositivos, aviso de ingreso nuevo, límite de peticiones por usuario, librerías actualizadas, pruebas en GitHub, CodeQL, Dependabot y guion de carga k6. 46 pruebas de reglas y 145 e2e OK | rama `fase-3-operacion` (`docs/REVISION_REQUISITOS_PRODUCCION.md` §9, `apps/api/test/carga/LEAME.md`) |
 | 3-D | **Torre de control (oficina), hecha** (18-11-2026): calendario de rutas y programación por línea; seguimiento del día; manifiestos con fotos, firma y anulación; bandeja y grilla de conciliación con totales en vivo; actas con PDF, ZIP y cargue de aliados; página pública del QR. 43 pruebas de reglas y 109 e2e OK | rama `fase-3-operacion` (`apps/web/src/pages/torre/`) |
+| 2-B | **Formulario de declaraciones (8 secciones), hecho** (19-11-2026): crear, completar y editar; cobertura legal en vivo; editar una autorizada la deja autorizada si la edita HSEQ y la devuelve a revisión si la edita otro rol; el precio nunca se sobrescribe. 46 pruebas de reglas y 157 e2e OK. Preguntas abiertas para la gerencia: `docs/PREGUNTAS_GERENCIA.md` | rama `fase-3-operacion` (`apps/web/src/pages/declaraciones/`) |
 | 2-A | **Modelo de datos de Declaraciones: aprobado y adoptado** (18-11-2026). 50 tablas, 3 migraciones, reglas en la base, catálogos reales en `packages/shared`, API e importación ajustadas; 52 pruebas e2e OK | rama `fase-2-declaraciones` (leer `docs/declaraciones/MODELO_DATOS.md`) |
 
 Stack:
@@ -55,10 +56,9 @@ Es la parametrización de residuos y servicios por cliente. Tiene un formulario 
 para clientes directos. Se trabaja por fases y **se espera el visto bueno del usuario entre fases**:
 
 - **A. Esquema de base de datos.** ✅ Aprobado el 18-11-2026 y adoptado.
-- **B. Siguiente.** Árbol de componentes del formulario de 8 secciones, más el estado y la validación con react-hook-form + zod.
-  - El esquema zod ya existe: `packages/shared/src/declaraciones/esquema.ts` (`EsquemaDeclaracion`).
-  - La API ya existe: `POST /declaraciones` y `GET /declaraciones/catalogos`.
-  - Falta la interfaz. Se presenta el árbol y se espera el visto bueno antes de construirla.
+- **B. Formulario de 8 secciones.** ✅ Hecho el 19-11-2026 con el visto bueno del usuario («sí, sigue»): crear, completar
+  borradores y editar, con la cobertura legal de cada disposición en vivo. Valida con el mismo `EsquemaDeclaracion` del API
+  (sin react-hook-form). Árbol de componentes y reglas de edición: `docs/declaraciones/MODELO_DATOS.md` §8.
 - **C.** Cargue masivo de clientes directos:
   - Ya hecho para Excel: valida los códigos paramétricos, guarda el lote en una transacción y deja el historial en
     `cargues_masivos` con el hash del archivo.

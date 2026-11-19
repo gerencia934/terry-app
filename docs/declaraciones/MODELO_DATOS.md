@@ -184,3 +184,44 @@ números internos. Son más fáciles de diligenciar y no dependen de los ID de n
 | `PATCH declaraciones/:id/estado` | AUTORIZADA (exige sede, disposición, precio, FDS si es peligroso y cobertura) o RECHAZADA |
 | `PATCH declaraciones/:id/activa` | Activa o inactiva (con causal) una declaración autorizada |
 | `POST importacion/decl-residuos · decl-servicios` | Cargue por códigos; el lote queda en `cargues_masivos` con hash del archivo |
+| `PUT declaraciones/:id` | Edita desde el formulario (fase B; reglas en §8) |
+| `GET declaraciones/cobertura?disposiciones=…` | Cobertura legal de una lista de disposiciones, para mostrarla en vivo antes de guardar |
+
+## 8. Fase B: formulario de 8 secciones (hecha, 19-11-2026)
+
+Pantalla: Comercial › Declaraciones › «Nueva declaración», o «Editar» / «Completar» en el detalle.
+No usa librerías nuevas: valida con el mismo `EsquemaDeclaracion` del API (`packages/shared`) y la base de datos vuelve a
+revisar todo al guardar.
+
+```
+DeclaracionesServidor (lista con filtros y «Cargar más»)
+└─ FormularioDeclaracion (apps/web/src/pages/declaraciones/FormularioDeclaracion.tsx)
+   ├─ índice de secciones: columna fija en pantalla grande, fila de botones 1–8 en el celular;
+   │  cada sección muestra ✓ completa, • pendiente o ! con errores
+   ├─ 1 Generador: tipo (solo al crear), cliente con buscador, sedes (todas · principal · elegir)
+   ├─ 2 Datos específicos: precarga del catálogo de servicios, nombre, código, categoría, línea → unidad,
+   │  frecuencia y solicitud automática; residuo: tipo, peligrosidad (Y/A con subcorrientes, UN, CRETIB,
+   │  composición), etiquetado y proceso; servicio: descripción
+   ├─ 3 Embalaje y 4 Fisicoquímicas (solo residuos; «Otro» exige el texto)
+   ├─ 5 Disposición: varias, la de la estrella es la principal, y la cobertura legal de cada una en vivo
+   ├─ 6 Adicional: FDS (obligatoria para autorizar un peligroso), serial, datos extras
+   ├─ 7 Precio: valor, métrica (vacía = global), negociación y forma de pago (vacías = las del cliente), historial
+   ├─ 8 Estado: vigencia, observaciones, aceptación de responsabilidad y «qué faltará para autorizarla»
+   └─ barra fija: qué falta (en orden de secciones) · Guardar borrador · Enviar a revisión / Guardar cambios
+      (formulario.ts convierte pantalla ↔ API y ubica cada error en su campo y su sección)
+```
+
+**Reglas al editar (`PUT`):**
+- No cambian el cliente ni el tipo: para eso se crea otra declaración.
+- Borrador, pendiente o rechazada: se guarda como borrador o vuelve a revisión (pendiente).
+- Autorizada:
+  - si la edita quien puede autorizar, sigue autorizada; antes se vuelve a revisar que esté completa y con
+    cobertura legal (y la base lo revisa otra vez al confirmar);
+  - si la edita otro rol, vuelve a «pendiente» e inactiva hasta que HSEQ la autorice.
+- Precio: si cambia, nueva vigencia desde hoy y la anterior queda cerrada; el mismo día se corrige la de hoy. Nunca se
+  sobrescribe un precio de días anteriores.
+- Al completar una declaración convertida de la fase 1, deja de estar marcada como tal.
+- La auditoría guarda qué columnas cambiaron (antes y después), cuántas sedes y disposiciones quedaron y el precio.
+
+Falta la fase C (CSV, cargue desde el portal del cliente y reversión de lotes) y adjuntar la FDS como archivo; hoy es un
+enlace.

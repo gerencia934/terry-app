@@ -183,6 +183,48 @@ prueba('tarifa masiva +5 % crea nueva vigencia', r.status === 201 && r.json.actu
 const tarifas = await db.tarifa.findMany({ where: { declaracionId: lodo.id }, orderBy: { vigenteDesde: 'asc' } });
 prueba('el precio anterior se conserva con fecha de cierre', tarifas.length === 2 && tarifas[0].vigenteHasta && Number(tarifas[1].precioUnitario) === 820);
 
+// Fase B: editar desde el formulario de 8 secciones (PUT /declaraciones/:id) y cobertura en vivo
+r = await llamar('GET', `/declaraciones/cobertura?disposiciones=${idDe(cat.disposiciones, 'ASP')},${idDe(cat.disposiciones, 'INCH')}`, { token: T });
+const cobAsp = r.json.detalle?.find((x) => x.codigo === 'ASP'), cobInch = r.json.detalle?.find((x) => x.codigo === 'INCH');
+prueba('cobertura en vivo: vertimiento a suelo cubierto por la Res. 000632; incineración sin licencia del aliado no', r.status === 200 && cobAsp?.cubierta && /000632/.test(cobAsp.soporte) && cobInch && !cobInch.cubierta && !r.json.cubierto, JSON.stringify(r.json).slice(0, 300));
+const aMedias = await db.declaracion.findFirst({ where: { nombre: 'Borrador a medias', clienteId: cliente.id } });
+const conFds = { ...formulario, fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf' };
+r = await llamar('PUT', `/declaraciones/${aMedias.id}`, { token: T, cuerpo: { ...conFds, nombre: 'Borrador completado', codigoInterno: 'BC-01', borrador: true, responsabilidadAceptada: false } });
+prueba('editar un borrador y guardarlo de nuevo como borrador', r.status === 200 && r.json.estado === 'BORRADOR' && r.json.nombre === 'Borrador completado', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PUT', `/declaraciones/${aMedias.id}`, { token: T, cuerpo: { ...conFds, nombre: 'Borrador completado', codigoInterno: 'BC-01' } });
+prueba('completar el borrador lo envía a revisión con la responsabilidad registrada', r.status === 200 && r.json.estado === 'PENDIENTE' && r.json.responsabilidadAceptada && r.json.aceptadaEn, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PUT', `/declaraciones/${aMedias.id}`, { token: T, cuerpo: { ...conFds, clienteId: crypto.randomUUID(), codigoInterno: 'BC-01' } });
+prueba('no se cambia el cliente de una declaración → 400', r.status === 400 && /cliente/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PUT', `/declaraciones/${aMedias.id}`, { token: T, cuerpo: { ...conFds, tipo: 'SERVICIO', descripcionServicio: 'x', codigoInterno: 'BC-01' } });
+prueba('…ni el tipo (residuo o servicio) → 400', r.status === 400 && /tipo/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15 } });
+prueba('quien autoriza edita una autorizada y sigue autorizada y activa', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa && r.json.frecuenciaDias === 15, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, borrador: true } });
+prueba('una autorizada no vuelve a borrador → 400', r.status === 400 && /borrador/.test(r.json.mensaje));
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, disposiciones: [] } });
+prueba('una autorizada no puede quedar sin disposición → 400, y no cambia nada', r.status === 400 && /disposición/.test(r.json.mensaje) && (await db.declaracionDisposicion.count({ where: { declaracionId: aceite.id } })) === 1, JSON.stringify(r.json));
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, precio: { precioUnitario: 550, metricaId: idDe(cat.metricasPrecio, 'gal') } } });
+let tarifasAceite = await db.tarifa.findMany({ where: { declaracionId: aceite.id } });
+prueba('el mismo día, cambiar el precio corrige la vigencia de hoy (no la duplica)', r.status === 200 && tarifasAceite.length === 1 && Number(tarifasAceite[0].precioUnitario) === 550, JSON.stringify(tarifasAceite));
+await db.tarifa.update({ where: { id: tarifasAceite[0].id }, data: { vigenteDesde: new Date('2026-11-01') } }); // como si viniera de antes
+r = await llamar('PUT', `/declaraciones/${aceite.id}`, { token: T, cuerpo: { ...conFds, frecuenciaDias: 15, precio: { precioUnitario: 600, metricaId: idDe(cat.metricasPrecio, 'gal') } } });
+tarifasAceite = await db.tarifa.findMany({ where: { declaracionId: aceite.id }, orderBy: { vigenteDesde: 'asc' } });
+prueba('cambiar un precio de días anteriores crea una vigencia nueva y cierra la anterior (nunca la sobrescribe)',
+  r.status === 200 && tarifasAceite.length === 2 && tarifasAceite[0].vigenteHasta && Number(tarifasAceite[0].precioUnitario) === 550 && !tarifasAceite[1].vigenteHasta && Number(tarifasAceite[1].precioUnitario) === 600,
+  JSON.stringify(tarifasAceite.map((t) => [t.vigenteDesde, t.vigenteHasta, t.precioUnitario])));
+r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...conFds, codigoInterno: 'AU-03' } });
+const paraComercial = r.json;
+await llamar('PATCH', `/declaraciones/${paraComercial.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+const rolComercial = await db.rol.findFirst({ where: { nombre: 'Comercial', empresaId: cliente.empresaId } });
+const comercial = await db.usuario.upsert({ where: { email: 'comercial.e2e@terravivasas.com' }, update: {},
+  create: { empresaId: cliente.empresaId, rolId: rolComercial.id, nombre: 'Comercial E2E', documento: '3', email: 'comercial.e2e@terravivasas.com',
+    passwordHash: await (await import('@node-rs/argon2')).hash('Comercial2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+const tcom = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: comercial.email, clave: 'Comercial2026!' } })).json)).accessToken;
+r = await llamar('PUT', `/declaraciones/${paraComercial.id}`, { token: tcom, cuerpo: { ...conFds, codigoInterno: 'AU-03', cantidadFrecuencia: 30 } });
+prueba('si la edita un rol que no autoriza (Comercial), vuelve a revisión e inactiva', r.status === 200 && r.json.estado === 'PENDIENTE' && !r.json.activa, JSON.stringify(r.json).slice(0, 200));
+const audEditar = await db.auditoria.findFirst({ where: { entidad: 'declaracion', entidadId: paraComercial.id, accion: 'EDITAR' }, orderBy: { fecha: 'desc' } });
+prueba('…y la auditoría guarda qué cambió y que volvió a revisión', audEditar?.antes?.estado === 'AUTORIZADA' && Number(audEditar?.despues?.cantidadFrecuencia) === 30 && /revisión/.test(audEditar?.despues?.nota ?? ''), JSON.stringify({ antes: audEditar?.antes, despues: audEditar?.despues }));
+
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });
 r = await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-20', items: [{ declaracionId: agua.id, cantidadEstimada: 10 }] } });

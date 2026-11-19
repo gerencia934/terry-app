@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { EstadoDeclaracion, FormaPago, Prisma, TipoDeclaracion, TipoNegociacion } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -17,6 +17,7 @@ const Filtros = z.object({
 });
 const CambioEstado = z.object({ estado: z.enum(['AUTORIZADA', 'RECHAZADA']), causalId: z.string().uuid().optional(), observacion: z.string().max(300).optional() });
 const CambioActiva = z.object({ activa: z.boolean(), causalId: z.string().uuid().optional() });
+const ConsultaCobertura = z.object({ disposiciones: z.string().transform((s) => s.split(',').filter(Boolean)).pipe(z.array(z.string().uuid()).max(20)) });
 const Tarifas = z.object({
   declaraciones: z.array(z.string().uuid()).min(1).max(2000),
   modo: z.enum(['porcentaje', 'fijo']), valor: z.number(), vigenteDesde: z.coerce.date(),
@@ -62,13 +63,19 @@ export class DeclaracionesService {
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
 
   async cobertura(empresaId: string, declaracionId: string, db: Tx | PrismaService = this.db): Promise<Cobertura> {
-    const disp = await db.declaracionDisposicion.findMany({
-      where: { declaracionId },
-      include: { disposicion: { include: { proveedor: true, permisos: { include: { permiso: true } } } } },
-    });
-    if (!disp.length) return { cubierto: false, mensaje: 'La declaración no tiene disposición o manejo.', detalle: [] };
+    const disp = await db.declaracionDisposicion.findMany({ where: { declaracionId }, select: { disposicionId: true } });
+    return this.coberturaDisposiciones(empresaId, disp.map((x) => x.disposicionId), db);
+  }
+
+  /** Cobertura legal de una lista de disposiciones (el formulario la muestra en vivo, antes de guardar). */
+  async coberturaDisposiciones(empresaId: string, ids: string[], db: Tx | PrismaService = this.db): Promise<Cobertura> {
+    const disps = ids.length ? await db.disposicion.findMany({
+      where: { id: { in: ids }, empresaId },
+      include: { proveedor: true, permisos: { include: { permiso: true } } },
+    }) : [];
+    if (!disps.length) return { cubierto: false, mensaje: 'La declaración no tiene disposición o manejo.', detalle: [] };
     const h = hoy();
-    const detalle = disp.map(({ disposicion: d }) => {
+    const detalle = disps.map((d) => {
       if (!d.activo) return { codigo: d.codigo, nombre: d.nombre, cubierta: false, soporte: 'Disposición inactiva' };
       if (!d.requierePermiso) return { codigo: d.codigo, nombre: d.nombre, cubierta: true, soporte: d.soporteLegal ?? 'Objeto social' };
       if (!d.propia) {
@@ -106,10 +113,13 @@ export class DeclaracionesService {
         ...resumen, tipoResiduo: true, catalogo: true, tipoEmbalaje: true, material: true, metricaDensidad: true,
         etiquetados: { include: { sistema: true } }, riesgos: { include: { riesgo: true } },
         codigoY: true, codigoA: true, tarifas: { orderBy: { vigenteDesde: 'desc' }, include: { metrica: true } },
+        aceptadaPor: { select: { nombre: true } }, aprobadaPor: { select: { nombre: true } }, creadoPor: { select: { nombre: true } },
       },
     });
     if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
-    return { ...d, cobertura: await this.cobertura(a.empresaId, id) };
+    const h = hoy();
+    const tarifaVigente = d.tarifas.find((t) => t.vigenteDesde <= h && (!t.vigenteHasta || t.vigenteHasta >= h)) ?? null;
+    return { ...d, tarifaVigente, cobertura: await this.cobertura(a.empresaId, id) };
   }
 
   /** Sedes según el alcance elegido. Verifica que sean del cliente. */
@@ -151,6 +161,112 @@ export class DeclaracionesService {
       return d;
     };
     return tx ? ejecutar(tx) : this.db.$transaction(ejecutar);
+  }
+
+  /**
+   * Edita una declaración desde el formulario de 8 secciones. No cambia el cliente ni el tipo.
+   * - Borrador, pendiente o rechazada: queda en borrador o vuelve a revisión (pendiente).
+   * - Autorizada: si la edita quien puede autorizar, sigue autorizada y se revisa de nuevo su cobertura legal;
+   *   si no, vuelve a «pendiente» (inactiva) hasta que HSEQ la revise.
+   * - El precio nunca se sobrescribe: un cambio crea una vigencia nueva desde hoy (el mismo día, corrige la de hoy).
+   */
+  async editar(a: Actor, id: string, b: Datos) {
+    const puedeAutorizar = a.permisos.includes('*') || a.permisos.includes('declaraciones.autorizar');
+    return this.db.$transaction(async (t) => {
+      const d = await t.declaracion.findFirst({ where: { id, empresaId: a.empresaId }, include: {
+        cliente: true, sucursales: true, disposiciones: true,
+        tarifas: { where: vigente(), orderBy: { vigenteDesde: 'desc' }, take: 1 },
+      } });
+      if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
+      if (b.clienteId !== d.clienteId) throw new BadRequestException({ mensaje: 'No se puede cambiar el cliente de una declaración: cree una nueva para el otro cliente.' });
+      if (b.tipo !== d.tipo) throw new BadRequestException({ mensaje: 'No se puede cambiar el tipo (residuo o servicio) de una declaración.' });
+      const autorizada = d.estado === 'AUTORIZADA';
+      if (autorizada && b.borrador) throw new BadRequestException({ mensaje: 'Una declaración autorizada no vuelve a borrador.' });
+      const sigueAutorizada = autorizada && puedeAutorizar;
+      const estado = sigueAutorizada ? 'AUTORIZADA' : b.borrador ? 'BORRADOR' : 'PENDIENTE';
+      const sedes = await this.sedes(t, d.clienteId, b);
+
+      // Qué columnas cambian (para la auditoría)
+      const cols = this.columnas(b) as Record<string, unknown>;
+      const norm = (v: unknown) => (v == null ? null : v instanceof Date ? v.toISOString().slice(0, 10) : Prisma.Decimal.isDecimal(v) ? Number(v) : v);
+      const previo = d as unknown as Record<string, unknown>;
+      const cambiados = Object.keys(cols).filter((k) => JSON.stringify(norm(previo[k])) !== JSON.stringify(norm(cols[k])));
+
+      // Responsabilidad: se conserva quién la aceptó primero; desmarcarla solo es posible en borrador
+      const responsabilidad = b.responsabilidadAceptada
+        ? (d.responsabilidadAceptada ? {} : { responsabilidadAceptada: true, aceptadaPorId: a.id, aceptadaEn: new Date() })
+        : { responsabilidadAceptada: false, aceptadaPorId: null, aceptadaEn: null };
+      await t.declaracion.update({ where: { id }, data: {
+        ...this.columnas(b), ...responsabilidad, estado,
+        ...(b.borrador ? {} : { origenFase1: false }), // completa: deja de ser «convertida de la fase 1»
+        ...(sigueAutorizada ? {} : { activa: false, aprobadaPorId: null, aprobadaEn: null, causalId: null }),
+      } });
+
+      // Sedes: quita las que ya no van y agrega las nuevas (las que siguen conservan si están suspendidas)
+      const sedesAntes = new Set(d.sucursales.map((s) => s.sucursalId)), sedesDespues = new Set(sedes);
+      const sedesQuitar = [...sedesAntes].filter((s) => !sedesDespues.has(s)), sedesAgregar = [...sedesDespues].filter((s) => !sedesAntes.has(s));
+      if (sedesQuitar.length) await t.declaracionSucursal.deleteMany({ where: { declaracionId: id, sucursalId: { in: sedesQuitar } } });
+      if (sedesAgregar.length) await t.declaracionSucursal.createMany({ data: sedesAgregar.map((sucursalId) => ({ declaracionId: id, sucursalId })) });
+
+      // Disposiciones: la marcada (o la primera) es la principal
+      const hayPrincipal = b.disposiciones.some((x) => x.principal);
+      const disp = b.disposiciones.map((x, i) => ({ disposicionId: x.disposicionId, principal: hayPrincipal ? x.principal : i === 0 }));
+      const dispAntes = new Map(d.disposiciones.map((x) => [x.disposicionId, x.principal]));
+      const dispQuitar = [...dispAntes.keys()].filter((k) => !disp.some((x) => x.disposicionId === k));
+      if (dispQuitar.length) await t.declaracionDisposicion.deleteMany({ where: { declaracionId: id, disposicionId: { in: dispQuitar } } });
+      for (const x of disp) {
+        if (!dispAntes.has(x.disposicionId)) await t.declaracionDisposicion.create({ data: { declaracionId: id, ...x } });
+        else if (dispAntes.get(x.disposicionId) !== x.principal) await t.declaracionDisposicion.update({ where: { declaracionId_disposicionId: { declaracionId: id, disposicionId: x.disposicionId } }, data: { principal: x.principal } });
+      }
+      // Riesgos y sistemas de etiquetado: se reemplazan
+      await t.declaracionRiesgo.deleteMany({ where: { declaracionId: id } });
+      if (b.riesgoIds.length) await t.declaracionRiesgo.createMany({ data: [...new Set(b.riesgoIds)].map((riesgoId) => ({ declaracionId: id, riesgoId })) });
+      await t.declaracionEtiquetado.deleteMany({ where: { declaracionId: id } });
+      if (b.etiquetadoIds.length) await t.declaracionEtiquetado.createMany({ data: [...new Set(b.etiquetadoIds)].map((sistemaId) => ({ declaracionId: id, sistemaId })) });
+
+      // Precio: solo si cambió. Nueva vigencia desde hoy; si la vigente empezó hoy, se corrige esa misma
+      let precioCambio = false;
+      const actual = d.tarifas[0];
+      if (b.precio) {
+        const p = {
+          precioUnitario: b.precio.precioUnitario, metricaId: b.precio.metricaId ?? null,
+          tipoNegociacion: b.precio.tipoNegociacion ?? actual?.tipoNegociacion ?? d.cliente.tipoNegociacion,
+          formaPago: b.precio.formaPago ?? actual?.formaPago ?? d.cliente.formaPago,
+        };
+        precioCambio = !actual || Number(actual.precioUnitario) !== p.precioUnitario || actual.metricaId !== p.metricaId
+          || actual.tipoNegociacion !== p.tipoNegociacion || actual.formaPago !== p.formaPago;
+        if (precioCambio) {
+          const h = hoy();
+          if (actual && actual.vigenteDesde >= h) await t.tarifa.update({ where: { id: actual.id }, data: { ...p, asignadoPorId: a.id } });
+          else {
+            const ayer = new Date(h.getTime() - 86_400_000);
+            if (actual) await t.tarifa.update({ where: { id: actual.id }, data: { vigenteHasta: ayer } });
+            // Si ya hay un cambio programado a futuro (asignación masiva), la nueva vigencia termina el día antes
+            const futura = await t.tarifa.findFirst({ where: { declaracionId: id, vigenteDesde: { gt: h } }, orderBy: { vigenteDesde: 'asc' } });
+            await t.tarifa.create({ data: { declaracionId: id, ...p, vigenteDesde: h, vigenteHasta: futura ? new Date(futura.vigenteDesde.getTime() - 86_400_000) : null, asignadoPorId: a.id } });
+          }
+        }
+      }
+
+      // Autorizada que sigue autorizada: debe quedar completa y con cobertura legal (la base lo vuelve a revisar al confirmar)
+      if (sigueAutorizada) {
+        const conPrecio = await t.tarifa.count({ where: { declaracionId: id, ...vigente() } });
+        const faltan = faltantesParaAutorizar({ tipo: d.tipo, esPeligroso: b.esPeligroso, fichaSeguridadUrl: b.fichaSeguridadUrl ?? null, sedes: sedes.length, disposiciones: disp.length, tarifaVigente: conPrecio > 0 });
+        if (faltan.length) throw new BadRequestException({ mensaje: `La declaración está autorizada y quedaría incompleta: ${faltan.join('; ')}.` });
+        if (d.tipo === 'RESIDUO') {
+          const c = await this.cobertura(a.empresaId, id, t);
+          if (!c.cubierto) throw new ForbiddenException({ mensaje: `No se puede guardar: ${c.mensaje} Revise el permiso ambiental o la licencia del gestor.`, cobertura: c });
+        }
+      }
+
+      await this.audit.registrar(a, 'declaracion', id, 'EDITAR',
+        { estado: d.estado, activa: d.activa, ...Object.fromEntries(cambiados.map((k) => [k, norm(previo[k])])),
+          sedes: d.sucursales.length, disposiciones: d.disposiciones.length, ...(precioCambio ? { precio: actual ? Number(actual.precioUnitario) : null } : {}) },
+        { estado, ...Object.fromEntries(cambiados.map((k) => [k, norm(cols[k])])), sedes: sedes.length, disposiciones: disp.length,
+          ...(precioCambio ? { precio: b.precio?.precioUnitario ?? null } : {}),
+          ...(autorizada && !sigueAutorizada ? { nota: 'Editada por un rol que no autoriza: vuelve a revisión' } : {}) }, t);
+      return t.declaracion.findUniqueOrThrow({ where: { id } });
+    });
   }
 
   private async hijos(tx: Tx, declaracionId: string, sedes: string[], b: Datos) {
@@ -314,8 +430,10 @@ class DeclaracionesController {
   @Get('catalogo-servicios') catalogoServicios(@ActorActual() a: Actor) { return this.s.catalogoServicios(a); }
   @Permiso('declaraciones.crear') @Post('catalogo-servicios') crearServicio(@ActorActual() a: Actor, @Body(new Zod(ServicioCatalogo)) b: z.infer<typeof ServicioCatalogo>) { return this.s.crearServicioCatalogo(a, b); }
   @Permiso('declaraciones.crear') @Post('asignacion-masiva') asignacion(@ActorActual() a: Actor, @Body(new Zod(Asignacion)) b: z.infer<typeof Asignacion>) { return this.s.asignacionMasiva(a, b); }
+  @Get('cobertura') coberturaDe(@ActorActual() a: Actor, @Query(new Zod(ConsultaCobertura)) q: z.infer<typeof ConsultaCobertura>) { return this.s.coberturaDisposiciones(a.empresaId, q.disposiciones); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
   @Permiso('declaraciones.crear') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(EsquemaDeclaracion)) b: Datos) { return this.s.crear(a, b); }
+  @Permiso('declaraciones.crear') @Put(':id') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EsquemaDeclaracion)) b: Datos) { return this.s.editar(a, id, b); }
   @Permiso('declaraciones.autorizar') @Patch(':id/estado') estado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(CambioEstado)) b: z.infer<typeof CambioEstado>) { return this.s.cambiarEstado(a, id, b); }
   @Permiso('declaraciones.autorizar') @Patch(':id/activa') activa(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(CambioActiva)) b: z.infer<typeof CambioActiva>) { return this.s.cambiarActiva(a, id, b); }
   @Permiso('tarifas.asignar') @Post('tarifas/masivas') tarifas(@ActorActual() a: Actor, @Body(new Zod(Tarifas)) b: z.infer<typeof Tarifas>) { return this.s.tarifasMasivas(a, b); }

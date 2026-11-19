@@ -135,7 +135,7 @@ si Siigo o Wialon fallan, la operación sigue.
    - flujos de GitHub (pruebas, Dependabot, CodeQL);
    - guion de carga k6.
 3. **Declaraciones, fases B y C:**
-   - formulario de 8 secciones;
+   - formulario de 8 secciones (hecho el 19-11-2026);
    - CSV;
    - cargue desde el portal;
    - reversión de lotes.

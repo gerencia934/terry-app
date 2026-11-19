@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X, RefreshCw, Upload, ShieldAlert, Layers } from 'lucide-react';
+import { Check, X, RefreshCw, Upload, ShieldAlert, Layers, Plus, FilePen } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, Tabs, useToast } from '../components/ui';
 import { BuscarCliente } from '../components/BuscarCliente';
@@ -8,6 +8,7 @@ import { useRouter } from '../lib/router';
 import { fmtCOP, fmtNum } from '../lib/format';
 import { usePaginado, PieLista } from '../lib/servidor';
 import { AsignacionMasiva } from './declaraciones/AsignacionMasiva';
+import { FormularioDeclaracion } from './declaraciones/FormularioDeclaracion';
 
 interface DeclApi {
   id: string; numero: number; tipo: 'RESIDUO' | 'SERVICIO'; estado: string; activa: boolean; nombre: string; codigoInterno: string | null;
@@ -36,6 +37,8 @@ export default function DeclaracionesServidor() {
   const [texto, setTexto] = useState({ q: '', codigo: '' });
   const [sel, setSel] = useState<DeclApi | null>(null);
   const [asignar, setAsignar] = useState(false);
+  // Formulario de 8 secciones: null = lista; {} = nueva; { id } = editar
+  const [formulario, setFormulario] = useState<null | { id?: string }>(null);
   const qs = new URLSearchParams({ tipo, ...(f.estado && { estado: f.estado }), ...(f.clienteId && { clienteId: f.clienteId }), ...(f.q && { q: f.q }), ...(f.codigo && { codigo: f.codigo }) });
   const lista = usePaginado<DeclApi>(`/declaraciones?${qs}`);
   const cargar = lista.recargar;
@@ -59,10 +62,18 @@ export default function DeclaracionesServidor() {
     { key: 'precio', header: 'Tarifa vigente', align: 'right', render: tarifa, priority: 2 },
     { key: 'est', header: 'Estado', render: (d) => <EstadoBadge estado={d.estado === 'AUTORIZADA' && !d.activa ? 'INACTIVA' : d.estado} />, priority: 3 },
   ];
+  if (formulario) return (
+    <FormularioDeclaracion id={formulario.id} volver={() => setFormulario(null)}
+      onGuardada={(g) => {
+        toast(g.estado === 'BORRADOR' ? `Declaración ${g.numero} guardada como borrador.` : g.estado === 'AUTORIZADA' ? `Declaración ${g.numero}: cambios guardados; sigue autorizada.` : `Declaración ${g.numero} enviada a revisión.`);
+        setFormulario(null); setSel(null); cargar();
+      }} />
+  );
+
   return (
     <>
       <PageHeader eyebrow="Comercial" title="Declaraciones" subtitle="Datos del servidor. Al autorizar, el API verifica que el tratamiento esté cubierto por un permiso ambiental vigente."
-        actions={<>{tienePermiso('declaraciones.crear') && <Button onClick={() => setAsignar(true)}><Layers size={16} /> Asignar servicios</Button>}<Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
+        actions={<>{tienePermiso('declaraciones.crear') && <><Button variant="primary" onClick={() => setFormulario({})}><Plus size={16} /> Nueva declaración</Button><Button onClick={() => setAsignar(true)}><Layers size={16} /> Asignar servicios</Button></>}<Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
       <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => { setF(vacio); setTexto({ q: '', codigo: '' }); }}>
         <Field label="Cliente" id="ds-cli"><BuscarCliente id="ds-cli" valor={f.clienteId} vacio="Todos" onChange={(c) => setF((s) => ({ ...s, clienteId: c?.id ?? '' }))} /></Field>
         <Field label="Estado" id="ds-e"><Select id="ds-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['BORRADOR', 'PENDIENTE', 'AUTORIZADA', 'RECHAZADA'].map((x) => <option key={x} value={x}>{x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
@@ -77,7 +88,10 @@ export default function DeclaracionesServidor() {
             cardMeta={(d) => `N.º ${d.numero} · ${d.cliente.razonSocial} · ${sedes(d)}`} empty="No hay declaraciones con estos filtros. Impórtelas desde Excel en Ajustes › Importar datos." />}
       <AsignacionMasiva abierta={asignar} onClose={() => setAsignar(false)} onListo={cargar} />
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? `Declaración ${sel.numero}` : ''}
-        footer={sel?.estado === 'PENDIENTE' && tienePermiso('declaraciones.autorizar') && <><Button onClick={() => cambiar(sel, 'RECHAZADA')}><X size={16} /> Rechazar</Button><Button variant="primary" onClick={() => cambiar(sel, 'AUTORIZADA')}><Check size={16} /> Autorizar</Button></>}>
+        footer={sel && (<>
+          {tienePermiso('declaraciones.crear') && <Button onClick={() => setFormulario({ id: sel.id })}><FilePen size={16} /> {sel.estado === 'BORRADOR' ? 'Completar' : 'Editar'}</Button>}
+          {sel.estado === 'PENDIENTE' && tienePermiso('declaraciones.autorizar') && <><Button onClick={() => cambiar(sel, 'RECHAZADA')}><X size={16} /> Rechazar</Button><Button variant="primary" onClick={() => cambiar(sel, 'AUTORIZADA')}><Check size={16} /> Autorizar</Button></>}
+        </>)}>
         {sel && <DefList items={[['Residuo / servicio', sel.nombre], ['Código interno', sel.codigoInterno ?? '—'], ['Cliente', `${sel.cliente.razonSocial} (NIT ${sel.cliente.nit})`],
           ['Sedes', sel.sucursales.map((s) => `${s.sucursal.codigo ? `${s.sucursal.codigo} · ` : ''}${s.sucursal.nombre}`).join('; ') || '—'],
           ['Categoría', sel.categoria.nombre], ['Línea de servicio', `${sel.lineaServicio.nombre} (${sel.lineaServicio.unidadNegocio.sigla ?? sel.lineaServicio.unidadNegocio.nombre})`],

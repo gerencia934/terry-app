@@ -8,6 +8,16 @@ const opcional = <T extends z.ZodTypeAny>(s: T) => s.nullish();
 const texto = (max: number) => opcional(z.string().trim().max(max, `Máximo ${max} caracteres.`));
 const lleno = (s?: string | null) => !!s && s.trim().length > 0;
 
+/**
+ * Texto que acepta el generador (sección 8) al enviar su declaración. Propuesto; pendiente de revisión jurídica
+ * (docs/PREGUNTAS_GERENCIA.md, pregunta A3). Se guarda quién lo aceptó y cuándo.
+ */
+export const TEXTO_RESPONSABILIDAD_GENERADOR =
+  'Declaro, en nombre del generador, que la información de esta declaración es veraz y completa y que corresponde a los residuos ' +
+  'que efectivamente se entregarán; que informaré cualquier cambio en su composición o peligrosidad; y que conozco que, conforme ' +
+  'a la Ley 1252 de 2008 y el Decreto 1076 de 2015, la responsabilidad del generador subsiste hasta el aprovechamiento o la ' +
+  'disposición final de sus residuos.';
+
 export const ESTADOS_FISICOS_DB = ['SOLIDO', 'SEMISOLIDO', 'LIQUIDO', 'GASEOSO'] as const;
 export const ALCANCES_SEDES = ['TODAS', 'PRINCIPAL', 'SELECCION'] as const;
 export const NEGOCIACIONES = ['COBRO', 'COMPRA', 'SIN_COSTO', 'CONTRATO'] as const;
