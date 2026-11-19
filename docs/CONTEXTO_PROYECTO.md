@@ -58,10 +58,13 @@ para clientes directos. Se trabaja por fases y **se espera el visto bueno del us
     - permitir el cargue por cliente desde su portal;
     - revertir un lote.
 
-Respuestas a las 7 preguntas de la fase A: ver la tabla en `docs/declaraciones/MODELO_DATOS.md`.
-Las preguntas 1 (acto del ACU) y 2 (categorías reales) siguen pendientes. Son datos, no código:
-- se corrigen en `packages/shared/src/declaraciones/catalogos.ts`;
-- luego se vuelve a correr el seed.
+Las 7 preguntas de la fase A están respondidas. Ver la tabla en `docs/declaraciones/MODELO_DATOS.md`:
+- **ACU:** lo amparan los dos actos, el OF-311-21 y la Res. 316 de 2018.
+- **Categorías:** las 5 actuales quedan confirmadas.
+- **Migración «abierta»:** convierte datos de la fase 1 si los hay.
+
+Falta registrar la fecha de vencimiento real de cada permiso de la CAS. Hoy no tienen fecha, y la regla de cobertura los
+toma como vigentes mientras su estado sea VIGENTE.
 
 ## Fuentes del usuario
 

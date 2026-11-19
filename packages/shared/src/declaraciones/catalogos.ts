@@ -4,7 +4,7 @@
 
 export interface ItemCatalogo { codigo: string; nombre: string; descripcion?: string }
 
-/** Categorías del declarado. VERIFICAR: lista provisional (pregunta abierta n.º 2 de la fase A). */
+/** Categorías del declarado (confirmadas por Terra Viva el 19-11-2026). */
 export const CATEGORIAS: ItemCatalogo[] = [
   { codigo: 'RESPEL', nombre: 'Residuos peligrosos' },
   { codigo: 'NOPEL', nombre: 'Residuos no peligrosos' },
@@ -81,7 +81,7 @@ export const DISPOSICIONES: (ItemCatalogo & { requierePermiso: boolean; propia: 
   { codigo: 'BIO', nombre: 'Biorremediación (landfarming)', requierePermiso: true, propia: true, soporteLegal: 'Res. CAS 0632-2023' },
   { codigo: 'ASP', nombre: 'Tratamiento y vertimiento a suelo de aguas residuales, lodos, cortes y salmueras', requierePermiso: true, propia: true, soporteLegal: 'Res. CAS 0632-2023' },
   { codigo: 'RCD', nombre: 'Gestión integral de RCD (aprovechamiento y disposición final)', requierePermiso: true, propia: true, soporteLegal: 'Res. CAS 0235-2024' },
-  { codigo: 'ACU', nombre: 'Aprovechamiento de ACU (biodiésel)', requierePermiso: true, propia: true, soporteLegal: 'VERIFICAR: OF-311-21 o Res. 316 de 2018 CAS' },
+  { codigo: 'ACU', nombre: 'Aprovechamiento de ACU (biodiésel)', requierePermiso: true, propia: true, soporteLegal: 'OF-311-21 y Res. CAS 316 de 2018' },
   { codigo: 'TRA', nombre: 'Transporte de RESPEL, hidrocarburos y sustancias nocivas', requierePermiso: true, propia: true, soporteLegal: 'Auto SAA 0244-21 (Plan de contingencia)' },
   { codigo: 'LAV', nombre: 'Lavado y reúso', requierePermiso: true, propia: true, soporteLegal: 'VERIFICAR' },
   { codigo: 'INCH', nombre: 'Incineración (hospitalarios y similares)', requierePermiso: true, propia: false, soporteLegal: 'Res. 0144 de 2000 CDMB (gestor aliado)' },
@@ -98,8 +98,10 @@ export const PERMISOS_CAS: { acto: string; alcance: string; disposiciones: strin
   { acto: 'Resolución 0235-2024', alcance: 'Disposición final de residuos de construcción y demolición (RCD)', disposiciones: ['RCD'], obligacion: ['Informe semestral de volúmenes recibidos en escombrera', 'semestral', '2026-12-15'] },
   { acto: 'Resolución 0632-2023', alcance: 'Vertimientos a suelo y manejo de aguas residuales industriales, domésticas y lodos', disposiciones: ['BIO', 'ASP'], obligacion: ['Caracterización del vertimiento a suelo (laboratorio acreditado IDEAM)', 'semestral', '2026-11-30'] },
   { acto: 'Auto SAA No. 0244-21', alcance: 'Plan de contingencia para transporte de hidrocarburos, derivados y residuos peligrosos', disposiciones: ['TRA'], obligacion: ['Simulacro anual del plan de contingencia', 'anual', '2026-12-05'] },
-  // VERIFICAR: ¿el ACU lo ampara el OF-311-21 o la Res. 316 de 2018 CAS? (pregunta abierta n.º 1)
+  // ACU: lo amparan los dos actos (respuesta de Terra Viva, 19-11-2026). Basta con que uno esté vigente.
+  // Registre en cada uno su fecha de vencimiento real para que la regla de cobertura lo controle.
   { acto: 'OF-311-21', alcance: 'Gestión de aceite de cocina usado', disposiciones: ['ACU'], obligacion: ['Reporte trimestral de volúmenes de ACU gestionados', 'trimestral', '2027-01-10'] },
+  { acto: 'Resolución 316 de 2018', alcance: 'Aprovechamiento de aceite de cocina usado (biodiésel)', disposiciones: ['ACU'], obligacion: ['Revisar obligaciones y vigencia de la Res. 316 de 2018', 'anual', '2027-01-10'] },
 ];
 
 // ---------- Globales (normativos) ----------

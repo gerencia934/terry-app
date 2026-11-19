@@ -578,6 +578,9 @@ model Declaracion {
   aceptadaEn              DateTime?         @map("aceptada_en") @db.Timestamptz
 
   // Trazabilidad del registro
+  /// Convertida de la fase 1: puede inactivarse o rechazarse sin completar las secciones nuevas;
+  /// para activarla o autorizarla debe completarse (reglas chk_decl_* de la migración).
+  origenFase1 Boolean  @default(false) @map("origen_fase1")
   cargueId    String?  @map("cargue_id") @db.Uuid // lote de cargue masivo que la creó
   creadoPorId String?  @map("creado_por") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz

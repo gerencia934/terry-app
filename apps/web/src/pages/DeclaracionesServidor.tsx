@@ -8,7 +8,7 @@ import { fmtCOP, fmtNum } from '../lib/format';
 
 interface DeclApi {
   id: string; numero: number; tipo: 'RESIDUO' | 'SERVICIO'; estado: string; activa: boolean; nombre: string; codigoInterno: string | null;
-  esPeligroso: boolean; frecuenciaDias: number | null; cantidadFrecuencia: string | null; aprobadaEn: string | null;
+  esPeligroso: boolean; frecuenciaDias: number | null; cantidadFrecuencia: string | null; aprobadaEn: string | null; origenFase1: boolean;
   cliente: { razonSocial: string; nit: string };
   sucursales: { activa: boolean; sucursal: { codigo: string | null; nombre: string } }[];
   categoria: { nombre: string }; lineaServicio: { nombre: string; unidadNegocio: { nombre: string; sigla: string | null } };
@@ -79,6 +79,7 @@ export default function DeclaracionesServidor() {
           ['Disposición', sel.disposiciones.map((x) => x.disposicion.nombre + (x.principal ? ' (principal)' : '')).join('; ') || '—'],
           ['Frecuencia', sel.frecuenciaDias ? `Cada ${sel.frecuenciaDias} días` : '—'], ['Tarifa vigente', tarifa(sel)],
           ['Estado', <EstadoBadge estado={sel.estado} />], ['Activa', sel.activa ? 'Sí' : 'No'], ...(sel.causal ? [['Causal', sel.causal.nombre]] as [string, React.ReactNode][] : []),
+          ...(sel.origenFase1 ? [['Origen', <Badge>Convertida de la fase 1: complétela antes de activarla o autorizarla</Badge>]] as [string, React.ReactNode][] : []),
           ...(!tienePermiso('declaraciones.autorizar') ? [['Permiso', <Badge>Su rol no autoriza declaraciones</Badge>]] as [string, React.ReactNode][] : [])]} />}
       </Sheet>
     </>

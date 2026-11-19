@@ -7,30 +7,36 @@
 
 -- ---------------------------------------------------------------------
 -- 1) Campos obligatorios según tipo (no aplican al BORRADOR)
+--    Migración abierta: una declaración convertida de la fase 1 (origen_fase1)
+--    que NO esté activa queda exenta, para poder rechazarla o inactivarla sin
+--    completarla. Para activarla o autorizarla debe estar completa.
+--    Son NOT VALID para no rechazar las convertidas que siguen activas; rigen
+--    para toda fila nueva o modificada. Cuando no quede ninguna incompleta:
+--      ALTER TABLE declaraciones VALIDATE CONSTRAINT chk_decl_residuo_completo; (y las otras)
 -- ---------------------------------------------------------------------
 ALTER TABLE declaraciones
   -- Residuo: secciones 2, 3 y 4 completas
   ADD CONSTRAINT chk_decl_residuo_completo CHECK (
-        tipo <> 'RESIDUO' OR estado = 'BORRADOR' OR (
+        tipo <> 'RESIDUO' OR estado = 'BORRADOR' OR (origen_fase1 AND NOT activa) OR (
               tipo_residuo_id IS NOT NULL
           AND tipo_embalaje_id IS NOT NULL
           AND material_embalaje_id IS NOT NULL
           AND estado_fisico IS NOT NULL
           AND inflamable IS NOT NULL
           AND controlada_estupefacientes IS NOT NULL
-          AND COALESCE(LENGTH(TRIM(descripcion_proceso)), 0) > 0)),
+          AND COALESCE(LENGTH(TRIM(descripcion_proceso)), 0) > 0)) NOT VALID,
   -- Servicio: descripción obligatoria
   ADD CONSTRAINT chk_decl_servicio_completo CHECK (
-        tipo <> 'SERVICIO' OR estado = 'BORRADOR'
-        OR COALESCE(LENGTH(TRIM(descripcion_servicio)), 0) > 0),
+        tipo <> 'SERVICIO' OR estado = 'BORRADOR' OR (origen_fase1 AND NOT activa)
+        OR COALESCE(LENGTH(TRIM(descripcion_servicio)), 0) > 0) NOT VALID,
   -- Peligroso: composición + al menos una corriente (Y o A) — Dec. 1076/2015 art. 2.2.6.1.2.1
   ADD CONSTRAINT chk_decl_peligroso CHECK (
-        NOT es_peligroso OR estado = 'BORRADOR' OR (
+        NOT es_peligroso OR estado = 'BORRADOR' OR (origen_fase1 AND NOT activa) OR (
               COALESCE(LENGTH(TRIM(composicion)), 0) > 0
-          AND (codigo_a_id IS NOT NULL OR codigo_y_id IS NOT NULL))),
+          AND (codigo_a_id IS NOT NULL OR codigo_y_id IS NOT NULL))) NOT VALID,
   -- Responsabilidad del generador aceptada para enviar
   ADD CONSTRAINT chk_decl_responsabilidad CHECK (
-        estado = 'BORRADOR' OR (responsabilidad_aceptada AND aceptada_en IS NOT NULL)),
+        estado = 'BORRADOR' OR (origen_fase1 AND NOT activa) OR (responsabilidad_aceptada AND aceptada_en IS NOT NULL)) NOT VALID,
   -- Solo una declaración AUTORIZADA puede estar activa
   ADD CONSTRAINT chk_decl_activa_autorizada CHECK (NOT activa OR estado = 'AUTORIZADA'),
   -- Formatos

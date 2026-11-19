@@ -15,13 +15,36 @@ Estado: **aprobado y adoptado** (19-11-2026). La API, la importación de Excel y
 
 | # | Pregunta | Decisión |
 |---|---|---|
-| 1 | ¿El ACU lo ampara el OF-311-21 o la Res. 316 de 2018 CAS? | **Pendiente.** Se dejó OF-311-21, marcado VERIFICAR. Se corrige en datos, sin tocar código |
-| 2 | Lista real de categorías del declarado | **Pendiente.** Siguen las 5 provisionales (catálogo editable) |
+| 1 | ¿El ACU lo ampara el OF-311-21 o la Res. 316 de 2018 CAS? | **Los dos.** Ambos actos amparan la disposición ACU; basta con que uno esté vigente. Registre la fecha de vencimiento real de cada uno |
+| 2 | Lista real de categorías del declarado | **Confirmada:** Peligrosos, No peligrosos, Aprovechables, Especiales y Servicios |
 | 3 | ¿FDS obligatoria para peligrosos? | **Sí, para autorizar** (Dec. 1079/2015). Se puede enviar sin ella; no se autoriza sin ella |
 | 4 | ¿Etiquetado de selección múltiple? | **Sí** (`declaracion_etiquetados`) |
 | 5 | ¿Recurrencia = solicitud automática? | **Sí** (`solicitud_automatica` + `frecuencia_dias`) |
 | 6 | ¿Residuos de inventario? | **Se aplaza** al módulo de inventario |
-| 7 | ¿Datos reales cargados? | **No.** La migración no convierte datos |
+| 7 | ¿Datos reales cargados? | **Migración abierta:** funciona con la base vacía o con datos de la fase 1, que convierte sin perder información (ver §7) |
+
+## 7. Migración abierta: conversión de datos de la fase 1
+
+Con la base vacía, la conversión no hace nada. Si encuentra datos de la fase 1, convierte así (probado con datos de ejemplo):
+
+| Fase 1 | Modelo nuevo |
+|---|---|
+| Declaración por sede y residuo | Una declaración por cada anterior (conserva id, número, tarifas y solicitudes), con su sede en `declaracion_sucursales` |
+| Mismo código de residuo en varias sedes del cliente | La primera conserva el código; las siguientes llevan sufijo `-2`, `-3`… (se pueden unir después) |
+| Estado `INACTIVA` | `AUTORIZADA` con `activa = false` |
+| Tipo de manejo | Disposición: `ESC→RCD`, `INC→INCH`, `CEL→DF`, `TRANS→TRA`; los demás (p. ej. `FQ`, `REG`) se conservan con su código, marcados VERIFICAR |
+| `manejos_cubiertos` del permiso | `permiso_disposiciones` |
+| Peligrosidad / corriente / N.º ONU / estado físico | Riesgos CRETIB / código Y o A / código UN / estado físico |
+| Frecuencia en texto · cantidad | Días (`Mensual` = 30…) · cantidad por frecuencia |
+| Unidad del residuo | Métrica de la tarifa |
+| Línea de servicio (nombre) | Código de línea (las sin equivalente van a la 01, para revisar) |
+| Autorización, embalaje, destino | Nota en `datos_extras` |
+| Columnas eliminadas del catálogo de residuos | `catalogo_residuos.valores.faseAnterior` |
+| Horario de la sede · municipio | `observaciones` · se conserva (se crea en `municipios` si no estaba) |
+
+Las convertidas quedan con `origen_fase1 = true`. Se pueden **inactivar o rechazar** sin completarlas, pero para
+**activarlas o autorizarlas** deben tener las secciones nuevas completas. Por eso las reglas de completitud son
+`NOT VALID`: no rechazan las filas viejas, pero sí cualquier fila nueva o modificada.
 
 ## 1. Mapa de tablas
 
