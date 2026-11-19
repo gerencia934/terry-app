@@ -15,18 +15,22 @@ const PERMISOS = [
   ['*', 'Acceso total'], ['declaraciones.crear', 'Crear declaraciones'], ['declaraciones.autorizar', 'Autorizar o rechazar declaraciones'],
   ['tarifas.asignar', 'Asignar tarifas'], ['clientes.editar', 'Crear y editar clientes y sucursales'], ['solicitudes.crear', 'Crear y gestionar solicitudes'],
   ['solicitudes.aprobar', 'Aprobar o no aprobar solicitudes'],
+  ['manifiestos.operar', 'Diligenciar, firmar y grabar manifiestos'], ['manifiestos.anular', 'Anular manifiestos'],
+  ['conciliaciones.gestionar', 'Conciliar cantidades y registrar facturas y pagos'], ['conciliaciones.aprobar', 'Aprobar y reabrir conciliaciones'],
+  ['actas.emitir', 'Emitir, cargar y anular actas y certificados'], ['informes.ver', 'Ver informes de operación'],
   ['rutas.programar', 'Programar rutas'], ['rutas.operar', 'Operar rutas en campo (preoperacional, paradas, estados)'],
   ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel'],
   ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
 ];
 const ROLES = {
   Administrador: ['*'],
-  Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar'],
-  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'permisos.gestionar', 'rutas.operar'],
-  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar'],
-  Facturación: ['tarifas.asignar', 'reportes.facturacion'],
-  Conductor: ['rutas.operar'],
-  Auxiliar: ['rutas.operar'],
+  Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar',
+    'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver'],
+  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver'],
+  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver'],
+  Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver'],
+  Conductor: ['rutas.operar', 'manifiestos.operar'],
+  Auxiliar: ['rutas.operar', 'manifiestos.operar'],
 };
 /** Upsert por (empresa, código) de un catálogo paramétrico del módulo Declaraciones. */
 async function porEmpresa(modelo, empresaId, items, datos = (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null })) {

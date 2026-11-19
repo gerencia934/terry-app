@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AprobacionSolicitud, ClaseSolicitud, EstadoSolicitud, Jornada, Operacion, Prisma, ResultadoChequeo } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,8 +10,17 @@ const FiltroSol = Rango.extend({
   clienteId: z.string().uuid().optional(), estado: z.nativeEnum(EstadoSolicitud).optional(), aprobacion: z.nativeEnum(AprobacionSolicitud).optional(),
   clase: z.nativeEnum(ClaseSolicitud).optional(), operacion: z.nativeEnum(Operacion).optional(), numero: z.coerce.number().int().optional(),
 });
+const TransporteSol = z.object({
+  empresaTransportadora: z.string().trim().min(2).max(200), tipoVehiculo: z.string().max(40).optional(),
+  placa: z.string().trim().toUpperCase().regex(/^([A-Z]{3}\d{3}|[A-Z]{3}\d{2}[A-Z]|[RS]\d{5})$/, 'Placa inválida (ABC123).').optional(),
+  conductorNombre: z.string().max(150).optional(), conductorDocumento: z.string().max(20).optional(), conductorArlId: z.string().uuid().optional(), conductorEpsId: z.string().uuid().optional(),
+  auxiliarNombre: z.string().max(150).optional(), auxiliarDocumento: z.string().max(20).optional(), auxiliarArlId: z.string().uuid().optional(), auxiliarEpsId: z.string().uuid().optional(),
+  telefono: z.string().max(20).optional(),
+});
 const CrearSol = z.object({
   clase: z.nativeEnum(ClaseSolicitud).default('FORMAL'), operacion: z.nativeEnum(Operacion).default('CARGA'), clienteId: z.string().uuid(),
+  // Descarga en planta: destino y vehículo / tripulación del tercero
+  destinoId: z.string().uuid().optional(), transporte: TransporteSol.optional(), telefonoContacto: z.string().max(20).optional(),
   sucursalId: z.string().uuid().optional(), // sede por defecto de las líneas que no traen la suya
   fechaSolicitada: z.coerce.date(), franjaHoraria: z.string().max(20).optional(),
   aprobacion: z.enum(['PENDIENTE', 'APROBADA']).default('PENDIENTE'), // aprobar al crear exige el permiso solicitudes.aprobar
@@ -32,6 +41,19 @@ const CrearRuta = z.object({
   solicitudes: z.array(z.string().uuid()).default([]), items: z.array(z.string().uuid()).default([]),
 }).refine((b) => b.solicitudes.length + b.items.length > 0, { message: 'Elija al menos una solicitud o una línea.' });
 const puedeAprobar = (a: Actor) => a.permisos.includes('*') || a.permisos.includes('solicitudes.aprobar');
+const EditarRuta = z.object({
+  fechaProgramada: z.coerce.date().optional(), horaProgramada: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora HH:MM').nullish(), zonaId: z.string().uuid().nullish(),
+  vehiculoId: z.string().uuid().nullish(), conductorId: z.string().uuid().nullish(), auxiliarId: z.string().uuid().nullish(),
+  interna: z.boolean().optional(), valorFlete: z.number().nonnegative().nullish(), observaciones: z.string().max(2000).nullish(),
+  frecuenciaDias: z.number().int().min(1).max(366).nullish(), recurrenteActiva: z.boolean().optional(),
+});
+const LineasRuta = z.object({ items: z.array(z.string().uuid()).min(1).max(500) });
+const Rastreo = z.object({ puntos: z.array(z.object({
+  latitud: z.number().min(-5).max(14), longitud: z.number().min(-82).max(-66), precisionM: z.number().nonnegative().max(100000).optional(),
+  velocidadKmh: z.number().nonnegative().max(300).optional(), registradoEn: z.coerce.date(),
+})).min(1).max(1000) });
+const Pendientes = z.object({ clienteId: z.string().uuid().optional(), zonaId: z.string().uuid().optional(), q: z.string().max(100).optional(), limite: z.coerce.number().int().min(1).max(200).default(50) });
+const Descartar = z.object({ causalId: z.string().uuid() });
 const EstadoRuta = z.object({ estadoRecorridoId: z.string().uuid(), kmInicial: z.number().int().optional(), kmFinal: z.number().int().optional() });
 const Preop = z.object({
   vehiculoId: z.string().uuid(), rutaId: z.string().uuid().optional(), fechaProgramada: z.coerce.date(), km: z.number().int().nonnegative(), auxiliarId: z.string().uuid().optional(), observaciones: z.string().max(500).optional(),
@@ -67,12 +89,15 @@ class LogisticaService {
     if (b.aprobacion === 'APROBADA' && !puedeAprobar(a)) throw new BadRequestException({ mensaje: 'Su rol no aprueba solicitudes: créela pendiente.' });
     const lineas = b.items.map((i) => ({ ...i, sucursalId: i.sucursalId ?? b.sucursalId }));
     if (lineas.some((i) => !i.sucursalId)) throw new BadRequestException({ mensaje: 'Indique la sede de cada línea.' });
-    const decls = await this.db.declaracion.findMany({ where: { id: { in: lineas.map((i) => i.declaracionId) }, empresaId: a.empresaId, clienteId: b.clienteId }, include: { tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
+    const decls = await this.db.declaracion.findMany({ where: { id: { in: lineas.map((i) => i.declaracionId) }, empresaId: a.empresaId, clienteId: b.clienteId }, include: { tarifas: { where: { vigenteDesde: { lte: b.fechaSolicitada }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: b.fechaSolicitada } }] }, take: 1, orderBy: { vigenteDesde: "desc" } } } }); // tarifa vigente en la fecha del servicio
     const precio = (id: string) => decls.find((d) => d.id === id)?.tarifas[0]?.precioUnitario;
+    if (b.destinoId && !(await this.db.proveedor.findFirst({ where: { id: b.destinoId, empresaId: a.empresaId, esDestino: true } }))) throw new BadRequestException({ mensaje: 'Destino de descarga no encontrado.' });
     return this.db.$transaction(async (tx) => {
+      const transporteId = b.transporte ? (await tx.transporteTercero.create({ data: { ...b.transporte, empresaId: a.empresaId } })).id : undefined;
       const s = await tx.solicitud.create({ data: {
         empresaId: a.empresaId, clase: b.clase, operacion: b.operacion, clienteId: b.clienteId, fechaSolicitada: b.fechaSolicitada, franjaHoraria: b.franjaHoraria, creadoPorId: a.id,
         ordenCompra: b.ordenCompra, observaciones: b.observaciones, notificarCliente: b.notificarCliente,
+        destinoId: b.destinoId, transporteId, telefonoContacto: b.telefonoContacto,
         aprobacion: b.aprobacion, aprobadaPorId: b.aprobacion === 'APROBADA' ? a.id : null, aprobadaEn: b.aprobacion === 'APROBADA' ? new Date() : null,
         totalEstimado: lineas.reduce((acc, i) => acc + i.cantidadEstimada * Number(precio(i.declaracionId) ?? 0), 0),
       } });
@@ -141,6 +166,99 @@ class LogisticaService {
     });
   }
 
+  private async rutaPropia(a: Actor, id: string) {
+    const r = await this.db.ruta.findFirst({ where: { id, empresaId: a.empresaId }, include: { estadoRecorrido: true } });
+    if (!r) throw new NotFoundException({ mensaje: 'Ruta no encontrada.' });
+    return r;
+  }
+
+  /** Asignar recursos (vehículo, conductor, auxiliar), flete, fecha u hora. */
+  async editarRuta(a: Actor, id: string, b: z.infer<typeof EditarRuta>) {
+    const r = await this.rutaPropia(a, id);
+    if (r.estadoRecorrido?.esFinal) throw new BadRequestException({ mensaje: `La ruta ${r.codigo} ya terminó o fue cancelada.` });
+    const ids = { vehiculo: b.vehiculoId, conductor: b.conductorId, auxiliar: b.auxiliarId, zona: b.zonaId };
+    if (ids.vehiculo && !(await this.db.vehiculo.findFirst({ where: { id: ids.vehiculo, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Vehículo no encontrado o inactivo.' });
+    for (const u of [ids.conductor, ids.auxiliar]) if (u && !(await this.db.usuario.findFirst({ where: { id: u, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Conductor o auxiliar no encontrado.' });
+    if (ids.zona && !(await this.db.zona.findFirst({ where: { id: ids.zona, empresaId: a.empresaId } }))) throw new BadRequestException({ mensaje: 'Zona no encontrada.' });
+    const { horaProgramada, ...resto } = b;
+    const act = await this.db.ruta.update({ where: { id }, data: { ...resto, horaProgramada: horaProgramada === undefined ? undefined : horaProgramada === null ? null : new Date(`1970-01-01T${horaProgramada}:00Z`) } });
+    await this.audit.registrar(a, 'ruta', id, 'EDITAR', undefined, b);
+    return act;
+  }
+
+  /** Agrega líneas a una ruta existente: usa la parada de la sede o crea una al final. */
+  async agregarLineas(a: Actor, id: string, b: z.infer<typeof LineasRuta>) {
+    const r = await this.rutaPropia(a, id);
+    const lineas = await this.db.solicitudItem.findMany({ where: { id: { in: b.items }, solicitud: { empresaId: a.empresaId } } });
+    if (lineas.length !== new Set(b.items).size) throw new BadRequestException({ mensaje: 'Alguna línea no existe o no es de su empresa.' });
+    await this.db.$transaction(async (tx) => {
+      const paradas = await tx.rutaParada.findMany({ where: { rutaId: r.id }, orderBy: { orden: 'asc' } });
+      let orden = paradas.at(-1)?.orden ?? 0;
+      for (const l of lineas) {
+        let p = paradas.find((x) => x.sucursalId === l.sucursalId);
+        if (!p) { p = await tx.rutaParada.create({ data: { rutaId: r.id, sucursalId: l.sucursalId, orden: ++orden } }); paradas.push(p); }
+        await tx.rutaItem.create({ data: { rutaId: r.id, paradaId: p.id, solicitudItemId: l.id } }); // la base valida aprobación, estado y sede
+      }
+      await this.audit.registrar(a, 'ruta', id, 'AGREGAR_LINEAS', undefined, { lineas: lineas.length }, tx);
+    });
+    return { agregadas: lineas.length };
+  }
+
+  /** Quita una línea de la ruta (vuelve a pendiente). Si ya está en un manifiesto, primero se anula el manifiesto. */
+  async quitarLinea(a: Actor, id: string, rutaItemId: string) {
+    await this.rutaPropia(a, id);
+    const ri = await this.db.rutaItem.findFirst({ where: { id: rutaItemId, rutaId: id, liberado: false }, include: { solicitudItem: { include: { manifiestoItems: { where: { manifiesto: { estado: { not: 'ANULADO' } } } } } } } });
+    if (!ri) throw new NotFoundException({ mensaje: 'La línea no está programada en esta ruta.' });
+    if (ri.solicitudItem.manifiestoItems.length) throw new BadRequestException({ mensaje: 'La línea ya está en un manifiesto: anúlelo o quítela del manifiesto primero.' });
+    await this.db.rutaItem.update({ where: { id: rutaItemId }, data: { liberado: true } });
+    await this.audit.registrar(a, 'ruta', id, 'QUITAR_LINEA', { rutaItemId });
+    return { ok: true };
+  }
+
+  /** Puntos GPS en lote (la app los acumula sin señal). La base acepta solo los tomados en etapas con rastreo. */
+  async rastreo(a: Actor, id: string, b: z.infer<typeof Rastreo>) {
+    const r = await this.rutaPropia(a, id);
+    if (!a.permisos.includes('*') && r.conductorId !== a.id && r.auxiliarId !== a.id) throw new BadRequestException({ mensaje: 'Solo el conductor o el auxiliar de la ruta envían su ubicación.' });
+    let guardados = 0; const rechazados: { registradoEn: Date; motivo: string }[] = [];
+    for (const p of b.puntos.sort((x, y) => x.registradoEn.getTime() - y.registradoEn.getTime())) {
+      try { await this.db.rutaRastreo.create({ data: { ...p, rutaId: id, vehiculoId: r.vehiculoId } }); guardados++; }
+      catch (e) { rechazados.push({ registradoEn: p.registradoEn, motivo: String((e as Error).message).match(/(La ruta[^"\n]+|La hora[^"\n]+)/)?.[1] ?? 'Rechazado' }); }
+    }
+    return { guardados, rechazados };
+  }
+
+  async verRastreo(a: Actor, id: string) {
+    await this.rutaPropia(a, id);
+    return this.db.rutaRastreo.findMany({ where: { rutaId: id }, orderBy: { registradoEn: 'asc' }, take: 20000,
+      select: { latitud: true, longitud: true, precisionM: true, velocidadKmh: true, registradoEn: true } });
+  }
+
+  /** Líneas pendientes por programar: solicitudes aprobadas de carga, con su contador de pendientes. */
+  async pendientes(a: Actor, f: z.infer<typeof Pendientes>) {
+    const sols = await this.db.solicitud.findMany({
+      where: { empresaId: a.empresaId, clase: 'FORMAL', operacion: 'CARGA', aprobacion: 'APROBADA', estado: { not: 'CANCELADA' }, clienteId: f.clienteId,
+        cliente: f.q ? { razonSocial: { contains: f.q, mode: 'insensitive' } } : undefined,
+        items: { some: { estado: 'PENDIENTE', sucursal: f.zonaId ? { zonaId: f.zonaId } : undefined } } },
+      orderBy: [{ fechaSolicitada: 'asc' }, { numero: 'asc' }], take: f.limite,
+      include: { cliente: { select: { id: true, razonSocial: true } }, items: { where: { estado: 'PENDIENTE' }, include: {
+        sucursal: { select: { id: true, codigo: true, nombre: true, direccion: true, municipio: { select: { nombre: true } }, zona: { select: { nombre: true, color: true } } } },
+        declaracion: { select: { nombre: true, codigoInterno: true, disposiciones: { where: { principal: true }, select: { disposicion: { select: { nombre: true } } } } } },
+        especificaciones: { select: { especificacion: { select: { abreviatura: true, nombre: true } } } },
+      } } },
+    });
+    return sols.map((s) => ({ ...s, pendientes: s.items.length }));
+  }
+
+  async descartarLinea(a: Actor, itemId: string, b: z.infer<typeof Descartar>) {
+    const i = await this.db.solicitudItem.findFirst({ where: { id: itemId, solicitud: { empresaId: a.empresaId } } });
+    if (!i) throw new NotFoundException({ mensaje: 'Línea no encontrada.' });
+    if (i.estado !== 'PENDIENTE') throw new BadRequestException({ mensaje: 'Solo se descartan líneas pendientes (quítela de la ruta primero).' });
+    if (!(await this.db.catalogoItem.findFirst({ where: { id: b.causalId, empresaId: a.empresaId, tipo: 'CAUSAL' } }))) throw new BadRequestException({ mensaje: 'Causal no encontrada.' });
+    const r = await this.db.solicitudItem.update({ where: { id: itemId }, data: { estado: 'DESCARTADO', causalDescarteId: b.causalId } });
+    await this.audit.registrar(a, 'solicitud_item', itemId, 'DESCARTAR', { estado: i.estado }, { causal: b.causalId });
+    return r;
+  }
+
   /** El trigger trg_bloqueo_preoperacional impide avanzar la ruta sin preoperacional aprobado. */
   async estadoRuta(a: Actor, id: string, b: z.infer<typeof EstadoRuta>) {
     const r = await this.db.ruta.findFirst({ where: { id, empresaId: a.empresaId } });
@@ -186,6 +304,13 @@ class LogisticaController {
   @Permiso('solicitudes.aprobar') @Patch('solicitudes/:id/aprobacion') aprobarSol(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(AprobacionSol)) b: z.infer<typeof AprobacionSol>) { return this.s.aprobarSolicitud(a, id, b); }
   @Permiso('solicitudes.crear') @Patch('solicitudes/:id/estado') estadoSol(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EstadoSol)) b: z.infer<typeof EstadoSol>) { return this.s.estadoSolicitud(a, id, b); }
   @Get('rutas') rutas(@ActorActual() a: Actor, @Query(new Zod(FiltroRuta)) f: z.infer<typeof FiltroRuta>) { return this.s.rutas(a, f); }
+  @Get('programacion/pendientes') pendientes(@ActorActual() a: Actor, @Query(new Zod(Pendientes)) f: z.infer<typeof Pendientes>) { return this.s.pendientes(a, f); }
+  @Permiso('solicitudes.crear') @Patch('solicitudes/items/:id/descartar') descartar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Descartar)) b: z.infer<typeof Descartar>) { return this.s.descartarLinea(a, id, b); }
+  @Permiso('rutas.programar') @Patch('rutas/:id') editarRuta(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarRuta)) b: z.infer<typeof EditarRuta>) { return this.s.editarRuta(a, id, b); }
+  @Permiso('rutas.programar') @Post('rutas/:id/items') agregarLineas(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(LineasRuta)) b: z.infer<typeof LineasRuta>) { return this.s.agregarLineas(a, id, b); }
+  @Permiso('rutas.programar') @Delete('rutas/:id/items/:rutaItemId') quitarLinea(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Param('rutaItemId', ParseUUIDPipe) ri: string) { return this.s.quitarLinea(a, id, ri); }
+  @Permiso('rutas.operar') @Post('rutas/:id/rastreo') rastreo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Rastreo)) b: z.infer<typeof Rastreo>) { return this.s.rastreo(a, id, b); }
+  @Get('rutas/:id/rastreo') verRastreo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.verRastreo(a, id); }
   @Permiso('rutas.programar') @Post('rutas') crearRuta(@ActorActual() a: Actor, @Body(new Zod(CrearRuta)) b: z.infer<typeof CrearRuta>) { return this.s.crearRuta(a, b); }
   @Permiso('rutas.operar') @Patch('rutas/:id/estado') estadoRuta(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EstadoRuta)) b: z.infer<typeof EstadoRuta>) { return this.s.estadoRuta(a, id, b); }
   @Permiso('rutas.operar') @Post('preoperacionales') preop(@ActorActual() a: Actor, @Body(new Zod(Preop)) b: z.infer<typeof Preop>) { return this.s.preoperacional(a, b); }

@@ -2,4 +2,5 @@
 export * from './importacion/definiciones';
 export * from './declaraciones/catalogos';
 export * from './declaraciones/esquema';
+export * from './operacion/totales';
 export { construirPlantilla, leerArchivo, exportarErrores } from './importacion/excel';

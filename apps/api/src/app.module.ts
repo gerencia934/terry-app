@@ -12,13 +12,19 @@ import { DeclaracionesModule } from './declaraciones/declaraciones.module';
 import { LogisticaModule } from './rutas/logistica.module';
 import { CumplimientoModule } from './permisos/cumplimiento.module';
 import { ImportacionModule } from './importacion/importacion.module';
+import { ArchivosModule } from './common/archivos';
+import { ManifiestosModule } from './manifiestos/manifiestos.module';
+import { ConciliacionesModule } from './conciliaciones/conciliaciones.module';
+import { ActasModule } from './actas/actas.module';
+import { InformesModule } from './informes/informes.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validarConfig, envFilePath: ['.env', '../../.env'] }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
-    PrismaModule, ComunModule, AuthModule,
+    PrismaModule, ComunModule, ArchivosModule, AuthModule,
     ClientesModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
+    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

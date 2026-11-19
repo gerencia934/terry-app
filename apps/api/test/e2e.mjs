@@ -208,6 +208,128 @@ prueba('5 intentos fallidos bloquean la cuenta 15 minutos → 403', r.status ===
 r = await llamar('POST', '/auth/recuperar', { cuerpo: { email: 'no-existe@x.com' } });
 prueba('recuperar responde igual aunque el correo no exista (202)', r.status === 202);
 
+console.log('\n8. Núcleo operativo: de la solicitud al certificado');
+// La sección 7 cerró las sesiones del administrador: se entra de nuevo. El ingreso tiene límite de
+// 10 intentos por minuto (protección real del API): si ya se gastó, se espera a que se libere.
+let T8;
+for (let intento = 0; intento < 20 && !T8; intento++) {
+  const x = await llamar('POST', '/auth/login', { cuerpo: { email: ADMIN.email, clave: ADMIN.clave } });
+  if (x.status === 200) T8 = x.json.accessToken; else await new Promise((ok) => setTimeout(ok, 5000));
+}
+prueba('el límite de intentos de ingreso se libera después de un minuto', !!T8);
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const archivoForm = (bytes, nombre, campos = {}) => { const f = new FormData(); f.append('archivo', new Blob([bytes]), nombre); Object.entries(campos).forEach(([k, v]) => f.append(k, v)); return f; };
+const descargar = async (ruta, token) => { const x = await fetch(API + ruta, { headers: { authorization: `Bearer ${token}` } }); return { status: x.status, tipo: x.headers.get('content-type'), buf: Buffer.from(await x.arrayBuffer()) }; };
+const ops = (await llamar('GET', '/catalogos/operacion', { token: T8 })).json;
+prueba('catálogo operativo: ARL, EPS, especificaciones, causales y destinos', ops.arl?.length >= 5 && ops.eps?.length >= 5 && ops.especificaciones?.length >= 1 && ops.destinos?.some((d) => d.esPropio));
+
+r = await llamar('POST', '/solicitudes', { token: T8, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-25', items: [{ declaracionId: lodo.id, cantidadEstimada: 500, jornada: 'AM' }] } });
+const solB = r.json;
+r = await llamar('GET', '/programacion/pendientes', { token: T8 });
+prueba('la solicitud aprobada aparece en «pendientes por programar» con su contador', r.status === 200 && r.json.some((s) => s.id === solB.id && s.pendientes === 1), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/rutas', { token: T8, cuerpo: { codigo: `R-E2E-B${Date.now() % 100000}`, fechaProgramada: '2026-11-25', solicitudes: [solB.id] } });
+prueba('programar una ruta sin vehículo ni conductor («sin recursos»)', r.status === 201, JSON.stringify(r.json));
+const rutaB = r.json;
+r = await llamar('PATCH', `/rutas/${rutaB.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: enCamino.id } });
+prueba('…no sale sin vehículo y conductor → 409', r.status === 409 && /vehículo y conductor/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/rutas/${rutaB.id}`, { token: T8, cuerpo: { vehiculoId: veh.id, conductorId: yo.id, valorFlete: 350000, horaProgramada: '07:30' } });
+prueba('asignar vehículo, conductor y flete', r.status === 200, JSON.stringify(r.json));
+await llamar('POST', '/preoperacionales', { token: T8, cuerpo: { vehiculoId: veh.id, rutaId: rutaB.id, fechaProgramada: '2026-11-25', km: 184600, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
+r = await llamar('PATCH', `/rutas/${rutaB.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 184600 } });
+prueba('con recursos e inspección aprobada la ruta sale', r.status === 200, JSON.stringify(r.json));
+r = await llamar('POST', `/rutas/${rutaB.id}/rastreo`, { token: T8, cuerpo: { puntos: [
+  { latitud: 7.3466, longitud: -73.8986, registradoEn: new Date().toISOString() },
+  { latitud: 7.3, longitud: -73.9, registradoEn: new Date(Date.now() - 3600e3).toISOString() },
+] } });
+prueba('GPS en lote: guarda el punto de la etapa con rastreo y rechaza el de antes de salir', r.status === 201 && r.json.guardados === 1 && r.json.rechazados.length === 1, JSON.stringify(r.json));
+
+r = await llamar('POST', '/manifiestos/desde-ruta', { token: T8, cuerpo: { rutaId: rutaB.id } });
+prueba('manifiesto de cargue desde la ruta, con consecutivo', r.status === 201 && r.json.length === 1 && /^MF-\d{4}-\d{5}$/.test(r.json[0].numero), JSON.stringify(r.json).slice(0, 200));
+const mfB = r.json[0];
+r = await llamar('GET', `/manifiestos/${mfB.id}`, { token: T8 });
+prueba('la línea trae precio de la tarifa, disposición principal y métrica', r.status === 200 && r.json.items.length === 1 && Number(r.json.items[0].precioUnitario) === 780 && r.json.items[0].disposicion?.codigo === 'BIO' && r.json.items[0].metrica?.abreviacion === 'kg', JSON.stringify(r.json.items?.[0]).slice(0, 300));
+for (const n of [1, 2]) r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from(PNG, 'base64'), `foto${n}.png`, { tipo: 'FOTO' }) });
+prueba('dos fotos de evidencia', r.status === 201);
+r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from(PNG, 'base64'), 'foto3.png', { tipo: 'FOTO' }) });
+prueba('una tercera foto → 400', r.status === 400);
+r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from('MZ ejecutable disfrazado'), 'virus.pdf', { tipo: 'PDF' }) });
+prueba('un archivo que no es PDF aunque se llame .pdf → 400', r.status === 400);
+const firma = { firma: `data:image/png;base64,${PNG}`, firmaNombre: 'Conductor E2E', firmaDocumento: '1098765432' };
+r = await llamar('POST', `/manifiestos/${mfB.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-25T10:00:00-05:00', horaSalida: '2026-11-25T09:00:00-05:00' } });
+prueba('grabar con la salida antes que la llegada → 409 con mensaje claro', r.status === 409 && /hora de salida/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', `/manifiestos/${mfB.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-25T09:00:00-05:00', horaSalida: '2026-11-25T09:40:00-05:00', pesoEntrada: 9000, pesoSalida: 8500 } });
+prueba('grabar: queda REALIZADO, con peso neto calculado y conciliación en borrador', r.status === 201 && r.json.estado === 'REALIZADO' && Number(r.json.pesoNeto) === 500 && r.json.conciliacion?.estado === 'BORRADOR', JSON.stringify(r.json).slice(0, 300));
+const fFirma = await descargar(`/archivos?clave=${encodeURIComponent(r.json.firmaUrl)}`, T8);
+prueba('la firma queda guardada y se descarga', fFirma.status === 200 && fFirma.tipo === 'image/png');
+prueba('otra empresa no puede descargar la firma → 403', (await descargar(`/archivos?clave=${encodeURIComponent(r.json.firmaUrl)}`, to)).status === 403);
+r = await llamar('GET', `/solicitudes?numero=${solB.numero}`, { token: T8 });
+prueba('la solicitud queda RECOLECTADA', r.json.filas?.[0]?.estado === 'RECOLECTADA');
+
+r = await llamar('GET', `/conciliaciones?manifiesto=${mfB.numero}`, { token: T8 });
+const concB = r.json.filas?.[0];
+prueba('la conciliación aparece en la bandeja con sus totales', concB && concB.totales.porUnidad[0]?.cargado === 500 && concB.totales.bascula.neto === 500, JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/conciliaciones/${concB.id}/aprobar`, { token: T8 });
+prueba('aprobar sin cantidades conciliadas → 409', r.status === 409 && /sin cantidad conciliada/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', `/conciliaciones/${concB.id}/igualar`, { token: T8, cuerpo: {} });
+prueba('«igualar cantidades» copia lo cargado', r.status === 201 && Number(r.json.items[0].cantidadConciliada) === 500);
+const lineaB = r.json.items[0].id;
+r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 450 }] } });
+prueba('bajar a 450 (−10 %) sin justificar → 409', r.status === 409 && /justificación/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 450, justificacion: 'Báscula de planta' }] } });
+prueba('con justificación: totales recalculados (450 kg × 780 = 351.000)', r.status === 200 && r.json.totales.cobro === 351000 && r.json.totales.contado + r.json.totales.credito === 351000 && r.json.items[0].diferenciaPct === -10, JSON.stringify(r.json.totales));
+r = await llamar('POST', `/conciliaciones/${concB.id}/aprobar`, { token: T8 });
+prueba('aprobar la conciliación', r.status === 201 && r.json.estado === 'APROBADA');
+r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 460 }] } });
+prueba('aprobada: ya no cambian las cantidades → 409', r.status === 409);
+r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, facturaNumero: 'FE-2026-88', facturaEmision: '2026-11-30', facturaVencimiento: '2026-12-30', estadoPago: 'PENDIENTE' }] } });
+prueba('…pero sí la factura (cartera)', r.status === 200 && r.json.items[0].facturaNumero === 'FE-2026-88');
+const xls = await descargar(`/conciliaciones/${concB.id}/excel`, T8);
+prueba('exportar la conciliación a Excel', xls.status === 200 && xls.buf.subarray(0, 2).toString() === 'PK');
+r = await llamar('POST', `/manifiestos/${mfB.id}/anular`, { token: T8, cuerpo: { motivo: 'Prueba' } });
+prueba('no se anula un manifiesto con conciliación aprobada → 409', r.status === 409 && /conciliación aprobada/.test(r.json.mensaje), JSON.stringify(r.json));
+
+r = await llamar('GET', `/actas/pendientes?clienteId=${suc.clienteId}`, { token: T8 });
+prueba('la línea aprobada queda pendiente de certificar', r.status === 200 && r.json.some((x) => x.id === lineaB));
+r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.clienteId, periodoDesde: '2026-11-01', periodoHasta: '2026-11-30' } });
+prueba('crear el acta del periodo con las líneas aprobadas', r.status === 201 && /^ACT-\d{4}-\d{5}$/.test(r.json.numero), JSON.stringify(r.json));
+const actaB = r.json;
+r = await llamar('POST', `/actas/${actaB.id}/emitir`, { token: T8 });
+prueba('emitir: copia fija con soporte legal (Res. 0632-2023) y PDF', r.status === 201 && r.json.estado === 'EMITIDA' && r.json.pdfUrl && JSON.stringify(r.json.contenido).includes('0632-2023'), JSON.stringify(r.json).slice(0, 300));
+const codigo = r.json.codigoVerificacion;
+const pdf = await descargar(`/actas/${actaB.id}/pdf`, T8);
+prueba('el certificado se descarga en PDF', pdf.status === 200 && pdf.buf.subarray(0, 4).toString() === '%PDF' && pdf.buf.length > 3000);
+r = await llamar('GET', `/verificar/${codigo}`);
+prueba('verificación pública del QR (sin sesión): auténtico y vigente, sin datos del cliente', r.status === 200 && r.json.valido === true && !JSON.stringify(r.json).includes('Agroindustrial'), JSON.stringify(r.json));
+r = await llamar('GET', '/verificar/0123456789abcdef01234567');
+prueba('un código que no existe → 404', r.status === 404);
+const zip = await descargar(`/actas/zip?ids=${actaB.id}`, T8);
+prueba('descarga masiva de actas en ZIP', zip.status === 200 && zip.buf.subarray(0, 2).toString() === 'PK');
+r = await llamar('POST', `/actas/${actaB.id}/anular`, { token: T8, cuerpo: { motivo: 'Prueba de anulación' } });
+prueba('anular el acta', r.status === 201 && r.json.estado === 'ANULADA');
+r = await llamar('GET', `/verificar/${codigo}`);
+prueba('…y la verificación pública ahora dice ANULADO', r.status === 200 && r.json.valido === false && /ANULADO/.test(r.json.mensaje));
+
+r = await llamar('POST', '/solicitudes', { token: T8, cuerpo: { operacion: 'DESCARGA', aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-26',
+  transporte: { empresaTransportadora: 'Transportes del Magdalena', placa: 'XYZ123', conductorNombre: 'Conductor tercero', conductorDocumento: '91234567' }, items: [{ declaracionId: lodo.id, cantidadEstimada: 100 }] } });
+const solD = r.json;
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE', clienteId: suc.clienteId, fechaServicio: '2026-11-26', solicitudId: solD.id } });
+prueba('manifiesto de descargue desde la solicitud, con el transportador de la solicitud', r.status === 201, JSON.stringify(r.json));
+const mfD = r.json;
+r = await llamar('POST', `/manifiestos/${mfD.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-26T08:00:00-05:00', horaSalida: '2026-11-26T08:30:00-05:00', pesoEntrada: 12000, pesoSalida: 11900 } });
+prueba('descargue sin ARL ni EPS del conductor → 409', r.status === 409 && /ARL y EPS del conductor/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/manifiestos/${mfD.id}`, { token: T8, cuerpo: { transporte: { empresaTransportadora: 'Transportes del Magdalena', placa: 'XYZ123', conductorNombre: 'Conductor tercero', conductorDocumento: '91234567', conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id } } });
+r = await llamar('POST', `/manifiestos/${mfD.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-26T08:00:00-05:00', horaSalida: '2026-11-26T08:30:00-05:00', pesoEntrada: 12000, pesoSalida: 11900 } });
+prueba('con ARL y EPS el descargue se graba', r.status === 201 && r.json.estado === 'REALIZADO', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/manifiestos/${mfD.id}/anular`, { token: T8, cuerpo: { causalId: (await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL' } })).id } });
+const lineaD = await db.solicitudItem.findFirst({ where: { solicitudId: solD.id } });
+prueba('anular el descargue: sin conciliación y la línea vuelve a pendiente', r.status === 201 && !(await db.conciliacion.findUnique({ where: { manifiestoId: mfD.id } })) && lineaD.estado === 'PENDIENTE');
+
+r = await llamar('GET', '/informes/rutas/rendimiento?desde=2026-11-25&hasta=2026-11-25', { token: T8 });
+const rend = r.json.rutas?.find((x) => x.rutaId === rutaB.id);
+prueba('informe de rendimiento: 1 de 1 servicios ejecutados (100 %)', r.status === 200 && rend?.habilitados === 1 && rend.ejecutados === 1 && rend.cumplimientoRuta === 100, JSON.stringify(r.json).slice(0, 300));
+const costos = await descargar('/informes/rutas/costos?desde=2026-11-25&hasta=2026-11-25&formato=xlsx', T8);
+prueba('informe de costos de flete en Excel', costos.status === 200 && costos.buf.subarray(0, 2).toString() === 'PK');
+
 const aud = await db.auditoria.count();
 prueba(`la auditoría registró los cambios (${aud} eventos)`, aud > 10);
 

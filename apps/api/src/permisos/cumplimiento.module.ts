@@ -62,6 +62,18 @@ class CumplimientoService {
     return this.db.catalogoResiduo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { codigo: 'asc' }, include: { lineaServicio: { select: { codigo: true, nombre: true } } } });
   }
   vehiculos(a: Actor) { return this.db.vehiculo.findMany({ where: { empresaId: a.empresaId }, orderBy: { placa: 'asc' } }); }
+  /** Listas de la operación para la app de campo y la torre de control. */
+  async operacion(a: Actor) {
+    const [arl, eps, especificaciones, causales, destinos, etapas] = await Promise.all([
+      this.db.entidadSeguridadSocial.findMany({ where: { tipo: 'ARL', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
+      this.db.entidadSeguridadSocial.findMany({ where: { tipo: 'EPS', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
+      this.db.especificacionAdicional.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { nombre: 'asc' } }),
+      this.db.catalogoItem.findMany({ where: { empresaId: a.empresaId, tipo: 'CAUSAL', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
+      this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esDestino: true }, orderBy: [{ esPropio: 'desc' }, { razonSocial: 'asc' }], select: { id: true, razonSocial: true, esPropio: true } }),
+      this.db.estadoRecorrido.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { orden: 'asc' } }),
+    ]);
+    return { arl, eps, especificaciones, causales, destinos, etapas };
+  }
   estadosRecorrido(a: Actor) { return this.db.estadoRecorrido.findMany({ where: { empresaId: a.empresaId }, orderBy: { orden: 'asc' } }); }
   elementosChequeo(a: Actor) { return this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ grupo: 'asc' }, { nombre: 'asc' }] }); }
 }
@@ -74,6 +86,7 @@ class CumplimientoController {
   @Get('alertas') alertas(@ActorActual() a: Actor) { return this.s.alertas(a); }
   @Get('catalogos') catalogo(@ActorActual() a: Actor, @Query(new Zod(z.object({ tipo: z.string().optional() }))) q: { tipo?: string }) { return this.s.catalogo(a, q.tipo); }
   @Get('catalogos/residuos') residuos(@ActorActual() a: Actor) { return this.s.residuos(a); }
+  @Get('catalogos/operacion') operacion(@ActorActual() a: Actor) { return this.s.operacion(a); }
   @Get('vehiculos') vehiculos(@ActorActual() a: Actor) { return this.s.vehiculos(a); }
   @Get('estados-recorrido') estados(@ActorActual() a: Actor) { return this.s.estadosRecorrido(a); }
   @Get('elementos-chequeo') elementos(@ActorActual() a: Actor) { return this.s.elementosChequeo(a); }

@@ -11,6 +11,7 @@ async function arrancar() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
   const cfg = app.get(ConfigService<Config, true>);
   app.set('trust proxy', 1);
+  app.useBodyParser('json', { limit: '1mb' }); // la firma táctil viaja como imagen PNG en el cuerpo
   app.use(helmet());
   app.enableCors({ origin: cfg.get('CORS_ORIGINS', { infer: true }).split(',').map((s) => s.trim()), credentials: false, maxAge: 600 });
   app.setGlobalPrefix('api/v1');

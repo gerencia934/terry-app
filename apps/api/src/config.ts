@@ -14,6 +14,9 @@ const Esquema = z.object({
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
   MAIL_FROM: z.string().default('TERRY-GO · Terra Viva <no-responder@terravivasas.com>'),
+  // Archivos (firmas, fotos, PDF). En desarrollo, carpeta local; en producción se cambia a S3 / R2.
+  ALMACENAMIENTO_DIR: z.string().default('almacenamiento'),
+  ARCHIVO_MAX_MB: z.coerce.number().default(10),
 });
 export type Config = z.infer<typeof Esquema>;
 

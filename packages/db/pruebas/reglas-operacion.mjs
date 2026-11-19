@@ -70,16 +70,28 @@ await rechaza('la misma línea en otra ruta → rechazada', () =>
 console.log('\n2. Rutas y rastreo');
 await rechaza('ruta sin vehículo ni conductor no sale', () => db.ruta.update({ where: { id: ruta1.id }, data: { estadoRecorridoId: etapa['En camino'] } }), /asigne vehículo y conductor/);
 await rechaza('GPS con la ruta en una etapa sin rastreo → no se guarda', () =>
-  db.rutaRastreo.create({ data: { rutaId: ruta1.id, latitud: 7.39, longitud: -73.5, registradoEn: new Date() } }), /no está en una etapa con rastreo/);
+  db.rutaRastreo.create({ data: { rutaId: ruta1.id, latitud: 7.39, longitud: -73.5, registradoEn: new Date() } }), /etapa con rastreo/);
 await db.ruta.update({ where: { id: ruta1.id }, data: { estadoRecorridoId: etapa['Cancelada'] } });
 s = await db.solicitud.findUniqueOrThrow({ where: { id: sol.id }, include: { items: true } });
 prueba('al cancelar la ruta sus líneas vuelven a PENDIENTE', s.estado === 'PENDIENTE' && s.items.every((i) => i.estado === 'PENDIENTE'));
 for (const l of [linea1, linea2]) await db.rutaItem.create({ data: { rutaId: ruta2.id, paradaId: parada2.id, solicitudItemId: l.id } });
 prueba('y se pueden programar en otra ruta', (await db.solicitud.findUniqueOrThrow({ where: { id: sol.id } })).estado === 'PROGRAMADA');
 await db.preoperacional.create({ data: { vehiculoId: vehiculo.id, rutaId: ruta2.id, conductorId: admin.id, fechaProgramada: new Date('2026-12-02'), aprobado: true } });
+const antesDeSalir = new Date(Date.now() - 1000);
+await new Promise((r) => setTimeout(r, 20));
 await db.ruta.update({ where: { id: ruta2.id }, data: { estadoRecorridoId: etapa['En camino'] } });
-await db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.39, longitud: -73.5, registradoEn: new Date() } });
+await new Promise((r) => setTimeout(r, 20));
+const enCamino = new Date();
+await db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.39, longitud: -73.5, registradoEn: enCamino } });
 prueba('GPS en una etapa con rastreo sí se guarda', (await db.rutaRastreo.count({ where: { rutaId: ruta2.id } })) === 1);
+await new Promise((r) => setTimeout(r, 20));
+await db.ruta.update({ where: { id: ruta2.id }, data: { estadoRecorridoId: etapa['Donde el generador'] } });
+await db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.40, longitud: -73.51, registradoEn: new Date(enCamino.getTime() + 5) } });
+prueba('sin señal: el punto tomado «en camino» que llega después igual se guarda', (await db.rutaRastreo.count({ where: { rutaId: ruta2.id } })) === 2);
+await rechaza('…pero uno tomado antes de salir de planta no', () =>
+  db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.40, longitud: -73.51, registradoEn: antesDeSalir } }), /etapa con rastreo a esa hora/);
+await rechaza('ni uno con hora en el futuro', () =>
+  db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.40, longitud: -73.51, registradoEn: new Date(Date.now() + 3600e3) } }), /futuro/);
 
 console.log('\n3. Manifiesto de cargue');
 const mf = await db.manifiesto.create({ data: { empresaId: E, tipo: 'CARGUE', rutaId: ruta2.id, clienteId: cliente.id, destinoId: planta.id, fechaServicio: new Date('2026-12-02'), vehiculoId: vehiculo.id, conductorId: admin.id } });

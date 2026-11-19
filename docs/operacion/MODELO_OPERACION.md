@@ -1,6 +1,6 @@
 # TERRY-GO · Fase 3-A — Modelo de datos y reglas del núcleo operativo
 
-Estado: **entregado para revisión** (20-11-2026), en la rama `fase-3-operacion`.
+Estado: **aprobado** (20-11-2026) y con su API hecha (fase 3-B, sección 6), en la rama `fase-3-operacion`.
 
 **Verificación:**
 - **Pruebas:** pasan las 40 de reglas en la base y las 52 de punta a punta.
@@ -136,10 +136,66 @@ Ninguna pantalla, API, app sin señal ni cargue puede saltárselas. Entre parén
 6. **Cargue de solicitudes por Excel:** crea solicitudes **pendientes de aprobación**. El cargue no reemplaza la decisión
    comercial.
 
-## 6. Lo que sigue (fase 3-B, con su visto bueno)
+## 6. Fase 3-B: API (hecha, 20-11-2026)
 
-- **API de manifiestos:** crear desde la ruta o la solicitud, líneas en campo, evidencias, grabar y anular.
-- **API de conciliación:** «igualar cantidades», totales agrupados por unidad, aprobación y cartera.
-- **API de actas:** armar desde conciliaciones aprobadas, copia fija con los permisos vigentes, PDF con QR y la ruta
-  pública `/verificar/<código>`.
-- **Almacenamiento de archivos:** firma, fotos y PDF. En el equipo de desarrollo, carpeta local; en producción, S3 o R2.
+Pasan 43 pruebas de reglas y 95 de punta a punta. La sección 8 de las e2e recorre toda la cadena por la API.
+
+| Ruta | Qué hace |
+|---|---|
+| `GET programacion/pendientes` | Solicitudes aprobadas con líneas sin programar y su contador |
+| `POST rutas` · `PATCH rutas/:id` · `POST rutas/:id/items` · `DELETE rutas/:id/items/:id` | Programar por línea, también sin recursos; asignar vehículo, conductor y flete; agregar o quitar líneas |
+| `POST rutas/:id/rastreo` · `GET rutas/:id/rastreo` | GPS en lote desde la app (sirve sin señal) y recorrido para el mapa |
+| `PATCH solicitudes/:id/aprobacion` · `PATCH solicitudes/items/:id/descartar` | Aprobar o no aprobar; descartar una línea con causal |
+| `POST manifiestos/desde-ruta` · `POST manifiestos` | Un cargue por parada de la ruta; descargue (o cargue manual) desde una solicitud |
+| `PATCH manifiestos/:id` · `POST/DELETE manifiestos/:id/items` | Báscula, horas, transportador con ARL y EPS; líneas agregadas en campo |
+| `POST manifiestos/:id/evidencias` | Fotos (JPG, PNG o WebP) y PDF. El tipo se reconoce por el contenido, no por el nombre |
+| `POST manifiestos/:id/grabar` · `POST manifiestos/:id/anular` | Firma táctil (PNG) y paso a REALIZADO, con el peso neto calculado; anulación con causal o motivo |
+| `GET conciliaciones` · `GET conciliaciones/consolidado` · `GET conciliaciones/:id` · `GET conciliaciones/:id/excel` | Bandeja con totales; consolidado por cliente; detalle; Excel |
+| `PATCH conciliaciones/:id/items` · `POST conciliaciones/:id/igualar · aprobar · reabrir` | Grilla editable (cantidades, precio, negociación, factura y pago); igualar cantidades; aprobar o reabrir |
+| `GET actas/pendientes` · `POST actas` · `POST actas/:id/items` | Líneas aprobadas sin certificar; crear acta del periodo; ajustar líneas |
+| `POST actas/:id/emitir` · `POST actas/cargar` · `POST actas/:id/anular` | Copia fija y PDF con QR; acta de un gestor aliado (PDF subido); anular |
+| `GET actas/:id/pdf` · `GET actas/zip?ids=` | PDF individual y descarga masiva en ZIP |
+| `GET verificar/:código` (pública) | Lo mínimo para validar el QR: número, tipo, estado, fecha y emisor. Nunca datos del cliente |
+| `GET informes/rutas/rendimiento` · `GET informes/rutas/costos?formato=xlsx` | Cumplimiento por ruta, día y rango, más kilómetros; costos de flete |
+| `GET catalogos/operacion` · `GET archivos?clave=` | Listas para la app (ARL, EPS, especificaciones, causales, destinos, etapas); descarga de firmas, fotos y PDF, solo de la propia empresa |
+
+**Decisiones de esta fase:**
+- **PDF con `pdfkit`, en el mismo servidor.** No usa Gotenberg, así que no hace falta Docker ni otro servicio. El PDF se
+  genera solo desde la copia fija, de modo que se puede volver a generar idéntico.
+- **Diseño del certificado: provisional y propio.** Lleva encabezado con QR, generador con coordenadas, tabla de residuos
+  con tratamiento y soporte legal, transporte, marco legal y firma del representante legal. **No lleva sellos ISO**
+  hasta que se confirme la autorización del ente certificador.
+- **Soporte legal de cada línea:** se exige al emitir, revisado **a la fecha del servicio**:
+  - permiso de la CAS que no haya vencido antes del servicio;
+  - licencia del aliado vigente en esa fecha;
+  - o el objeto social.
+
+  Si alguna línea no lo tiene, el acta no se emite.
+- **GPS sin señal:** la base guarda el historial de etapas (`ruta_eventos`, migración `20261121000000`). Un punto vale si
+  la ruta estaba en una etapa con rastreo **a la hora del punto**. Los puntos con hora futura se rechazan.
+- **Archivos:**
+  - se guardan en una carpeta local separada por empresa (`ALMACENAMIENTO_DIR`, por defecto `apps/api/almacenamiento`);
+  - en producción se cambia a S3 o R2 con la misma interfaz;
+  - se valida el tipo real de cada archivo;
+  - cada empresa solo ve los suyos.
+- **Error corregido de la fase 1:** el precio de la solicitud tomaba la tarifa más reciente aunque rigiera en el futuro.
+  Ahora toma la tarifa vigente **en la fecha del servicio**.
+- **Informe de rendimiento:**
+  - *planeados* = líneas que alguna vez se asignaron a la ruta;
+  - *habilitados* = las que siguen asignadas;
+  - *ejecutados* = las habilitadas que quedaron en un manifiesto grabado.
+
+  Pendiente confirmar con Terra Viva (pregunta 6 del análisis).
+
+## 7. Lo que sigue
+
+- **3-C · App del conductor (celular, sin señal):**
+  - ruta del día con cambio de etapa;
+  - inspección del vehículo;
+  - manifiesto con cámara, báscula y firma táctil;
+  - cola de envío cuando vuelve la señal.
+- **3-D · Torre de control (escritorio):**
+  - calendario de rutas y programación por línea;
+  - bandeja y grilla de conciliación;
+  - actas con descarga masiva;
+  - página pública de verificación del QR.

@@ -6,3 +6,4 @@ dist-demo/
 dist-real/
 dist/
 node_modules/
+apps/api/almacenamiento/

@@ -233,10 +233,11 @@ class ImportacionService {
       }
       case 'solicitudes': {
         const suc = await this.sucursal(tx, emp, d.nit, d.sucursal);
-        const decl = await tx.declaracion.findFirst({ where: { empresaId: emp, clienteId: suc.clienteId, estado: 'AUTORIZADA', activa: true, codigoInterno: { equals: d.codigo.trim(), mode: 'insensitive' }, sucursales: { some: { sucursalId: suc.id, activa: true } } },
-          include: { tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
-        if (!decl) throw new BadRequestException({ mensaje: `La declaración ${d.codigo} no está autorizada y activa para la sede «${d.sucursal}».` });
         const fechaS = fecha(d.fecha)!;
+        // Precio: la tarifa vigente en la fecha del servicio (no la más reciente, que puede regir en el futuro)
+        const decl = await tx.declaracion.findFirst({ where: { empresaId: emp, clienteId: suc.clienteId, estado: 'AUTORIZADA', activa: true, codigoInterno: { equals: d.codigo.trim(), mode: 'insensitive' }, sucursales: { some: { sucursalId: suc.id, activa: true } } },
+          include: { tarifas: { where: { vigenteDesde: { lte: fechaS }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fechaS } }] }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });
+        if (!decl) throw new BadRequestException({ mensaje: `La declaración ${d.codigo} no está autorizada y activa para la sede «${d.sucursal}».` });
         // Agrupa en una sola solicitud las filas del mismo cliente, tipo y fecha (la sede y la jornada van por línea).
         // Queda PENDIENTE de aprobación: el cargue no reemplaza la decisión comercial.
         const operacion = d.tipo === 'Entrega en planta' ? 'DESCARGA' as const : 'CARGA' as const;

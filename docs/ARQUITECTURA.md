@@ -33,6 +33,13 @@ certificado ante la CAS o el cliente.
 | Logística | `solicitudes`, `rutas`, `PATCH rutas/:id/estado`, `preoperacionales`, `PATCH paradas/:id` | Solo residuos autorizados (trigger); la ruta no inicia sin inspección aprobada (trigger); cancelar siempre se permite |
 | Cumplimiento | `permisos-ambientales`, `PATCH obligaciones/:id/cumplida`, `alertas`, `catalogos`, `vehiculos`, `estados-recorrido`, `elementos-chequeo`, `salud` | Alertas de obligaciones, SOAT/RTM/póliza, licencias y curso MP, rutas sin inspección |
 | Importación | `GET importacion/plantillas[/:id/archivo]`, `POST importacion/:id/vista-previa · confirmar`, `GET historial` | Revalida todo en servidor; guarda en una transacción; registra el cargue |
+| Manifiestos | `manifiestos`, `desde-ruta`, `:id/items`, `:id/evidencias`, `:id/grabar`, `:id/anular` | Firma táctil, báscula, ARL/EPS de terceros; al grabar abre la conciliación (regla en la base) |
+| Conciliaciones | `conciliaciones`, `consolidado`, `:id/items`, `:id/igualar · aprobar · reabrir`, `:id/excel` | Totales por unidad (shared); ±2 % con justificación; aprobada solo cambia factura/pago |
+| Actas | `actas`, `pendientes`, `:id/emitir`, `cargar`, `:id/pdf`, `zip`, `verificar/:código` (pública) | Solo líneas aprobadas; soporte legal a la fecha del servicio; PDF con QR (pdfkit) |
+| Informes | `informes/rutas/rendimiento`, `informes/rutas/costos` | Cumplimiento por ruta/día/rango; fletes en Excel |
+| Archivos | `archivos?clave=` | Carpeta local por empresa (S3/R2 en producción); tipo real validado |
+
+Detalle de la cadena operativa: `docs/operacion/MODELO_OPERACION.md`.
 
 Transversal: guard global (toda ruta exige token salvo `@Publico()`), permisos por rol con `@Permiso()`,
 **aislamiento por empresa** en cada consulta (`empresa_id` del token), auditoría de cada cambio,

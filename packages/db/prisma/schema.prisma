@@ -902,18 +902,19 @@ model Consecutivo {
 }
 
 model EstadoRecorrido {
-  id          String  @id @default(uuid()) @db.Uuid
-  empresaId   String  @map("empresa_id") @db.Uuid
-  nombre      String  @db.VarChar(40) // En camino, En sitio, Finalizada, Cancelada (configurables)
-  descripcion String? @db.VarChar(200)
-  color       String  @db.VarChar(7)
+  id          String       @id @default(uuid()) @db.Uuid
+  empresaId   String       @map("empresa_id") @db.Uuid
+  nombre      String       @db.VarChar(40) // En camino, En sitio, Finalizada, Cancelada (configurables)
+  descripcion String?      @db.VarChar(200)
+  color       String       @db.VarChar(7)
   orden       Int
-  esFinal     Boolean @default(false) @map("es_final")
-  cancela     Boolean @default(false) // al entrar, la ruta se cancela y sus líneas sin realizar vuelven a pendientes
-  rastreo     Boolean @default(false) // GPS continuo mientras la ruta esté en esta etapa (Ley 1581: solo en jornada)
-  activo      Boolean @default(true)
-  empresa     Empresa @relation(fields: [empresaId], references: [id])
+  esFinal     Boolean      @default(false) @map("es_final")
+  cancela     Boolean      @default(false) // al entrar, la ruta se cancela y sus líneas sin realizar vuelven a pendientes
+  rastreo     Boolean      @default(false) // GPS continuo mientras la ruta esté en esta etapa (Ley 1581: solo en jornada)
+  activo      Boolean      @default(true)
+  empresa     Empresa      @relation(fields: [empresaId], references: [id])
   rutas       Ruta[]
+  eventos     RutaEvento[]
 
   @@map("estados_recorrido")
 }
@@ -953,6 +954,7 @@ model Ruta {
   paradas          RutaParada[]
   items            RutaItem[]
   rastreo          RutaRastreo[]
+  eventos          RutaEvento[]
   preoperacionales Preoperacional[]
   manifiestos      Manifiesto[]
 
@@ -999,7 +1001,22 @@ model RutaItem {
   @@map("ruta_items")
 }
 
-/// Puntos GPS. Solo se aceptan mientras la etapa de la ruta tenga rastreo (regla en la base).
+/// Historial de etapas de cada ruta (lo llena la base al cambiar la etapa). Sirve para aceptar puntos
+/// GPS que llegan tarde (celular sin señal) y para los tiempos de los informes.
+model RutaEvento {
+  id                BigInt   @id @default(autoincrement())
+  rutaId            String   @map("ruta_id") @db.Uuid
+  estadoRecorridoId String?  @map("estado_recorrido_id") @db.Uuid
+  desde             DateTime @default(now()) @db.Timestamptz
+
+  ruta            Ruta             @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  estadoRecorrido EstadoRecorrido? @relation(fields: [estadoRecorridoId], references: [id])
+
+  @@index([rutaId, desde])
+  @@map("ruta_eventos")
+}
+
+/// Puntos GPS. Solo se aceptan si a la hora del punto la ruta estaba en una etapa con rastreo (regla en la base).
 model RutaRastreo {
   id           BigInt   @id @default(autoincrement())
   rutaId       String   @map("ruta_id") @db.Uuid
