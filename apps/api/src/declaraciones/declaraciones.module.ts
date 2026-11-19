@@ -23,6 +23,22 @@ const Tarifas = z.object({
   tipoNegociacion: z.nativeEnum(TipoNegociacion).optional(), formaPago: z.nativeEnum(FormaPago).optional(),
 });
 
+const ServicioCatalogo = z.object({
+  codigo: z.string().trim().toUpperCase().min(2).max(20), nombre: z.string().trim().min(3).max(200), lineaServicioId: z.string().uuid(),
+  descripcion: z.string().trim().max(1000).optional(),
+});
+/** Asignación masiva (documentos reales, planilla DMR): los mismos servicios estándar para muchos clientes de una vez. */
+const Asignacion = z.object({
+  catalogoIds: z.array(z.string().uuid()).min(1).max(20),
+  clienteIds: z.array(z.string().uuid()).min(1).max(500),
+  alcanceSedes: z.enum(['TODAS', 'PRINCIPAL']).default('TODAS'),
+  frecuenciaDias: z.number().int().min(1).max(366).optional(),
+  solicitudAutomatica: z.boolean().default(false), // crea la solicitud cada «frecuenciaDias» (agrupada por sede y fecha)
+  precio: z.object({ precioUnitario: z.number().nonnegative(), metricaId: z.string().uuid().nullish() }).optional(), // métrica vacía = GLOBAL
+  autorizar: z.boolean().default(false),
+}).refine((b) => b.catalogoIds.length * b.clienteIds.length <= 2000, { message: 'Máximo 2.000 declaraciones por asignación: divida los clientes en grupos.' })
+  .refine((b) => !b.solicitudAutomatica || b.frecuenciaDias, { message: 'La solicitud automática necesita la frecuencia en días.', path: ['frecuenciaDias'] });
+
 /** Cómo queda cubierta legalmente cada disposición de la declaración (misma regla que fn_disposicion_cubierta). */
 export interface Cobertura { cubierto: boolean; mensaje: string; detalle: { codigo: string; nombre: string; cubierta: boolean; soporte: string }[] }
 
@@ -201,6 +217,70 @@ export class DeclaracionesService {
     return { lote, actualizadas: decls.length };
   }
 
+  /** Servicios estándar del catálogo propio (alquiler de vacuum, trampas de grasa, fumigación…). */
+  catalogoServicios(a: Actor) {
+    return this.db.catalogoResiduo.findMany({ where: { empresaId: a.empresaId, tipo: 'SERVICIO', activo: true }, orderBy: { nombre: 'asc' },
+      include: { lineaServicio: { select: { codigo: true, nombre: true } } } });
+  }
+
+  async crearServicioCatalogo(a: Actor, b: z.infer<typeof ServicioCatalogo>) {
+    if (!(await this.db.lineaServicio.findFirst({ where: { id: b.lineaServicioId, empresaId: a.empresaId, activo: true } }))) throw new BadRequestException({ mensaje: 'Línea de servicio no encontrada.' });
+    if (await this.db.catalogoResiduo.findFirst({ where: { empresaId: a.empresaId, codigo: b.codigo } })) throw new BadRequestException({ mensaje: `Ya existe un servicio con el código ${b.codigo}.` });
+    const s = await this.db.catalogoResiduo.create({ data: {
+      empresaId: a.empresaId, tipo: 'SERVICIO', codigo: b.codigo, nombre: b.nombre, lineaServicioId: b.lineaServicioId, valores: { descripcion: b.descripcion || b.nombre },
+    }, include: { lineaServicio: { select: { codigo: true, nombre: true } } } });
+    await this.audit.registrar(a, 'catalogo_residuo', s.id, 'CREAR', undefined, { codigo: s.codigo, nombre: s.nombre });
+    return s;
+  }
+
+  /**
+   * Asignación masiva: cada servicio elegido queda declarado para cada cliente, con los valores por defecto.
+   * Omite (y explica) los clientes que ya lo tienen o que no tienen la sede pedida. Todo en una transacción.
+   */
+  async asignacionMasiva(a: Actor, b: z.infer<typeof Asignacion>) {
+    if (b.autorizar && !a.permisos.includes('*') && !a.permisos.includes('declaraciones.autorizar')) throw new ForbiddenException({ mensaje: 'Su rol no autoriza declaraciones: asígnelas sin autorizar.' });
+    if (b.autorizar && !b.precio) throw new BadRequestException({ mensaje: 'Para autorizar de una vez indique el precio (0 si se factura por contrato).' });
+    const [servicios, clientes, categoria] = await Promise.all([
+      this.db.catalogoResiduo.findMany({ where: { id: { in: b.catalogoIds }, empresaId: a.empresaId, tipo: 'SERVICIO', activo: true }, orderBy: { nombre: 'asc' } }),
+      this.db.cliente.findMany({ where: { id: { in: b.clienteIds }, empresaId: a.empresaId }, orderBy: { razonSocial: 'asc' }, include: {
+        sucursales: { where: { activa: true }, select: { id: true, esPrincipal: true } },
+        declaraciones: { where: { catalogoId: { in: b.catalogoIds }, estado: { not: 'RECHAZADA' } }, select: { catalogoId: true } } } }),
+      this.db.categoriaDeclarado.findFirst({ where: { empresaId: a.empresaId, codigo: 'SERV', activo: true } }),
+    ]);
+    if (servicios.length !== new Set(b.catalogoIds).size) throw new BadRequestException({ mensaje: 'Algún servicio no existe en el catálogo o está inactivo.' });
+    if (clientes.length !== new Set(b.clienteIds).size) throw new BadRequestException({ mensaje: 'Algún cliente no existe o no es de su empresa.' });
+    if (!categoria) throw new BadRequestException({ mensaje: 'Falta la categoría «SERV» (Servicios) en los catálogos.' });
+    if (b.precio?.metricaId && !(await this.db.metrica.findFirst({ where: { id: b.precio.metricaId, empresaId: a.empresaId, uso: 'PRECIO', activo: true } })))
+      throw new BadRequestException({ mensaje: 'Métrica de precio no encontrada.' });
+    const omitidas: { cliente: string; servicio: string; motivo: string }[] = [];
+    let creadas = 0, autorizadas = 0;
+    await this.db.$transaction(async (tx) => {
+      for (const c of clientes) {
+        const sinSede = b.alcanceSedes === 'PRINCIPAL' ? !c.sucursales.some((s) => s.esPrincipal) : !c.sucursales.length;
+        for (const s of servicios) {
+          const omitir = (motivo: string) => omitidas.push({ cliente: c.razonSocial, servicio: s.nombre, motivo });
+          if (sinSede) { omitir(b.alcanceSedes === 'PRINCIPAL' ? 'el cliente no tiene sede principal' : 'el cliente no tiene sedes activas'); continue; }
+          if (c.declaraciones.some((d) => d.catalogoId === s.id)) { omitir('ya lo tiene declarado'); continue; }
+          if (!s.lineaServicioId) { omitir('el servicio del catálogo no tiene línea de servicio'); continue; }
+          const v = (s.valores ?? {}) as { descripcion?: string };
+          const d = await this.crear(a, EsquemaDeclaracion.parse({
+            tipo: 'SERVICIO', clienteId: c.id, alcanceSedes: b.alcanceSedes, nombre: s.nombre, catalogoId: s.id, categoriaId: categoria.id,
+            lineaServicioId: s.lineaServicioId, frecuenciaDias: b.frecuenciaDias ?? null, solicitudAutomatica: b.solicitudAutomatica, descripcionServicio: v.descripcion || s.nombre,
+            precio: b.precio ? { precioUnitario: b.precio.precioUnitario, metricaId: b.precio.metricaId ?? null } : null,
+            responsabilidadAceptada: true, // la registra quien asigna, en nombre del cliente (queda en la auditoría)
+          }), tx);
+          creadas++;
+          if (b.autorizar) {
+            await tx.declaracion.update({ where: { id: d.id }, data: { estado: 'AUTORIZADA', activa: true, aprobadaPorId: a.id, aprobadaEn: new Date() } });
+            autorizadas++;
+          }
+        }
+      }
+      await this.audit.registrar(a, 'declaracion', randomUUID(), 'ASIGNACION_MASIVA', undefined, { servicios: servicios.map((s) => s.codigo), clientes: clientes.length, creadas, autorizadas, omitidas: omitidas.length }, tx);
+    }, { timeout: 180_000, maxWait: 10_000 });
+    return { creadas, autorizadas, omitidas };
+  }
+
   /** Listas del formulario de 8 secciones (solo activas). */
   async catalogos(a: Actor) {
     const e = { empresaId: a.empresaId, activo: true };
@@ -231,6 +311,9 @@ class DeclaracionesController {
   constructor(private readonly s: DeclaracionesService) {}
   @Get() listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
   @Get('catalogos') catalogos(@ActorActual() a: Actor) { return this.s.catalogos(a); }
+  @Get('catalogo-servicios') catalogoServicios(@ActorActual() a: Actor) { return this.s.catalogoServicios(a); }
+  @Permiso('declaraciones.crear') @Post('catalogo-servicios') crearServicio(@ActorActual() a: Actor, @Body(new Zod(ServicioCatalogo)) b: z.infer<typeof ServicioCatalogo>) { return this.s.crearServicioCatalogo(a, b); }
+  @Permiso('declaraciones.crear') @Post('asignacion-masiva') asignacion(@ActorActual() a: Actor, @Body(new Zod(Asignacion)) b: z.infer<typeof Asignacion>) { return this.s.asignacionMasiva(a, b); }
   @Get(':id') obtener(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.obtener(a, id); }
   @Permiso('declaraciones.crear') @Post() crear(@ActorActual() a: Actor, @Body(new Zod(EsquemaDeclaracion)) b: Datos) { return this.s.crear(a, b); }
   @Permiso('declaraciones.autorizar') @Patch(':id/estado') estado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(CambioEstado)) b: z.infer<typeof CambioEstado>) { return this.s.cambiarEstado(a, id, b); }

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Check, X, RefreshCw, Upload, ShieldAlert } from 'lucide-react';
+import { Check, X, RefreshCw, Upload, ShieldAlert, Layers } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, Tabs, useToast } from '../components/ui';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { useRouter } from '../lib/router';
 import { fmtCOP, fmtNum } from '../lib/format';
+import { AsignacionMasiva } from './declaraciones/AsignacionMasiva';
 
 interface DeclApi {
   id: string; numero: number; tipo: 'RESIDUO' | 'SERVICIO'; estado: string; activa: boolean; nombre: string; codigoInterno: string | null;
@@ -31,6 +32,7 @@ export default function DeclaracionesServidor() {
   const [datos, setDatos] = useState<{ total: number; filas: DeclApi[] } | null>(null);
   const [error, setError] = useState('');
   const [sel, setSel] = useState<DeclApi | null>(null);
+  const [asignar, setAsignar] = useState(false);
   const cargar = async () => {
     setError('');
     const qs = new URLSearchParams({ tipo, porPagina: '200', ...(f.estado && { estado: f.estado }), ...(f.q && { q: f.q }), ...(f.codigo && { codigo: f.codigo }) });
@@ -59,7 +61,7 @@ export default function DeclaracionesServidor() {
   return (
     <>
       <PageHeader eyebrow="Comercial" title="Declaraciones" subtitle="Datos del servidor. Al autorizar, el API verifica que el tratamiento esté cubierto por un permiso ambiental vigente."
-        actions={<><Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
+        actions={<>{tienePermiso('declaraciones.crear') && <Button onClick={() => setAsignar(true)}><Layers size={16} /> Asignar servicios</Button>}<Button onClick={() => go('importar')}><Upload size={16} /> Importar</Button><Button onClick={cargar}><RefreshCw size={16} /> Actualizar</Button></>} />
       <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => setF({ estado: '', q: '', codigo: '' })}>
         <Field label="Estado" id="ds-e"><Select id="ds-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}><option value="">Todos</option>{['BORRADOR', 'PENDIENTE', 'AUTORIZADA', 'RECHAZADA'].map((x) => <option key={x} value={x}>{x.charAt(0) + x.slice(1).toLowerCase()}</option>)}</Select></Field>
         <Field label="Nombre" id="ds-q"><Input id="ds-q" value={f.q} onChange={(e) => setF((s) => ({ ...s, q: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && cargar()} placeholder="Enter para buscar" /></Field>
@@ -70,6 +72,7 @@ export default function DeclaracionesServidor() {
         : !datos ? <p className="p-6 text-center text-muted">Cargando…</p>
         : <ResponsiveTable rows={datos.filas} columns={cols} rowKey={(d) => d.id} onRowClick={setSel} cardTitle={(d) => d.nombre} cardBadge={(d) => <EstadoBadge estado={d.estado} />}
             cardMeta={(d) => `N.º ${d.numero} · ${d.cliente.razonSocial} · ${sedes(d)}`} empty="No hay declaraciones. Impórtelas desde Excel en Ajustes › Importar datos." />}
+      <AsignacionMasiva abierta={asignar} onClose={() => setAsignar(false)} onListo={cargar} />
       <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? `Declaración ${sel.numero}` : ''}
         footer={sel?.estado === 'PENDIENTE' && tienePermiso('declaraciones.autorizar') && <><Button onClick={() => cambiar(sel, 'RECHAZADA')}><X size={16} /> Rechazar</Button><Button variant="primary" onClick={() => cambiar(sel, 'AUTORIZADA')}><Check size={16} /> Autorizar</Button></>}>
         {sel && <DefList items={[['Residuo / servicio', sel.nombre], ['Código interno', sel.codigoInterno ?? '—'], ['Cliente', `${sel.cliente.razonSocial} (NIT ${sel.cliente.nit})`],

@@ -4,7 +4,7 @@ import { FormaPago, Prisma, TipoNegociacion, UnidadMedida } from '@prisma/client
 import type { Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  ESTADOS_FISICOS, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, dvNit, leerArchivo, lista, norm, validarFilas,
+  ESTADOS_FISICOS, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, corrienteDe, dvNit, leerArchivo, lista, norm, resolverCodigo, validarFilas,
   type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,6 +27,9 @@ const DECL = new Set(['decl-residuos', 'decl-servicios']);
 type Tx = Prisma.TransactionClient;
 /** Código (mayúsculas) → id, por catálogo. */
 type Ids = Record<ClaveCatalogo, Map<string, string>>;
+/** Nombre normalizado → códigos, por catálogo (la planilla puede traer el nombre exacto). */
+type Nombres = NonNullable<Contexto['nombres']>;
+const conjuntos = (ids: Ids) => Object.fromEntries(Object.entries(ids).map(([k, v]) => [k, new Set(v.keys())])) as Contexto['catalogos'];
 
 @Injectable()
 class ImportacionService {
@@ -38,27 +41,38 @@ class ImportacionService {
     return p;
   }
 
-  /** Códigos vigentes de cada catálogo de la empresa, con su id. */
-  async ids(empresaId: string): Promise<Ids> {
+  /** Códigos vigentes de cada catálogo de la empresa, con su id, y sus nombres para aceptar el nombre exacto. */
+  async ids(empresaId: string): Promise<{ ids: Ids; nombres: Nombres }> {
     const e = { empresaId, activo: true };
-    const sel = { id: true, codigo: true } as const;
+    const sel = { id: true, codigo: true, nombre: true } as const;
     const [categorias, tiposResiduo, lineas, metricas, embalajes, materiales, disposiciones, riesgos, etiquetado, codigos] = await Promise.all([
       this.db.categoriaDeclarado.findMany({ where: e, select: sel }), this.db.tipoResiduo.findMany({ where: e, select: sel }),
       this.db.lineaServicio.findMany({ where: e, select: sel }), this.db.metrica.findMany({ where: { ...e, uso: 'PRECIO' }, select: sel }),
       this.db.tipoEmbalaje.findMany({ where: e, select: sel }), this.db.materialEmbalaje.findMany({ where: e, select: sel }),
       this.db.disposicion.findMany({ where: e, select: sel }), this.db.riesgo.findMany({ select: sel }),
-      this.db.sistemaEtiquetado.findMany({ select: sel }), this.db.codigoClasificacion.findMany({ where: { activo: true }, select: { ...sel, tipo: true } }),
+      this.db.sistemaEtiquetado.findMany({ select: sel }), this.db.codigoClasificacion.findMany({ where: { activo: true }, select: { id: true, codigo: true, tipo: true } }),
     ]);
     const m = (xs: { id: string; codigo: string }[]) => new Map(xs.map((x) => [x.codigo.toUpperCase(), x.id]));
+    const n = (xs: { codigo: string; nombre: string }[]) => {
+      const r = new Map<string, string[]>();
+      for (const x of xs) r.set(norm(x.nombre), [...(r.get(norm(x.nombre)) ?? []), x.codigo.toUpperCase()]);
+      return r;
+    };
     return {
-      categorias: m(categorias), tiposResiduo: m(tiposResiduo), lineas: m(lineas), metricasPrecio: m(metricas), embalajes: m(embalajes),
-      materiales: m(materiales), disposiciones: m(disposiciones), riesgos: m(riesgos), etiquetado: m(etiquetado),
-      corrientesY: m(codigos.filter((c) => c.tipo === 'Y')), codigosA: m(codigos.filter((c) => c.tipo === 'A')),
+      ids: {
+        categorias: m(categorias), tiposResiduo: m(tiposResiduo), lineas: m(lineas), metricasPrecio: m(metricas), embalajes: m(embalajes),
+        materiales: m(materiales), disposiciones: m(disposiciones), riesgos: m(riesgos), etiquetado: m(etiquetado),
+        corrientesY: m(codigos.filter((c) => c.tipo === 'Y')), codigosA: m(codigos.filter((c) => c.tipo === 'A')),
+      },
+      nombres: {
+        categorias: n(categorias), tiposResiduo: n(tiposResiduo), lineas: n(lineas), metricasPrecio: n(metricas), embalajes: n(embalajes),
+        materiales: n(materiales), disposiciones: n(disposiciones), riesgos: n(riesgos), etiquetado: n(etiquetado),
+      },
     };
   }
 
   /** Datos existentes de la empresa contra los cuales se cruzan las filas. */
-  async contexto(empresaId: string, ids: Ids): Promise<Contexto> {
+  async contexto(empresaId: string, ids: Ids, nombres: Nombres): Promise<Contexto> {
     const [clientes, vehiculos, usuarios, decls, disposiciones] = await Promise.all([
       this.db.cliente.findMany({ where: { empresaId }, select: { nit: true, sucursales: { select: { nombre: true, codigo: true } } } }),
       this.db.vehiculo.findMany({ where: { empresaId }, select: { placa: true } }),
@@ -73,7 +87,7 @@ class ImportacionService {
       emails: new Set(usuarios.map((u) => u.email.toLowerCase())),
       numerosDeclaracion: new Set(decls.map((d) => String(d.numero))),
       codigosInternos: new Set(decls.filter((d) => d.estado === 'AUTORIZADA' && d.activa && d.codigoInterno).map((d) => d.codigoInterno!.toUpperCase())),
-      catalogos: Object.fromEntries(Object.entries(ids).map(([k, v]) => [k, new Set(v.keys())])) as Contexto['catalogos'],
+      catalogos: conjuntos(ids), nombres,
       disposicionesCubiertas: new Set(disposiciones.map((d) => d.codigo.toUpperCase())),
     };
   }
@@ -86,12 +100,12 @@ class ImportacionService {
     try { leido = await leerArchivo(p, file.buffer.buffer.slice(file.buffer.byteOffset, file.buffer.byteOffset + file.buffer.byteLength) as ArrayBuffer); }
     catch { throw new BadRequestException({ mensaje: 'No se pudo leer el archivo. Verifique que sea la plantilla en formato .xlsx.' }); }
     if (leido.filas.length > 5000) throw new BadRequestException({ mensaje: 'Máximo 5.000 filas por archivo. Divídalo en varios.' });
-    const ids = await this.ids(a.empresaId);
-    const filas = validarFilas(p, leido.filas, await this.contexto(a.empresaId, ids));
+    const { ids, nombres } = await this.ids(a.empresaId);
+    const filas = validarFilas(p, leido.filas, await this.contexto(a.empresaId, ids, nombres));
     if (DECL.has(id)) await this.codigosRepetidos(a.empresaId, filas);
     const hash = createHash('sha256').update(file.buffer).digest('hex');
     const previo = await this.db.cargueMasivo.findFirst({ where: { empresaId: a.empresaId, archivoHash: hash, estado: 'CONFIRMADO' }, orderBy: { creadoEn: 'desc' }, select: { creadoEn: true } });
-    return { plantilla: p, ids, hash, archivo: file.originalname, faltantes: leido.faltantes, filas,
+    return { plantilla: p, ids, nombres, hash, archivo: file.originalname, faltantes: leido.faltantes, filas,
       avisos: previo ? [`Este mismo archivo ya se cargó el ${previo.creadoEn.toISOString().slice(0, 16).replace('T', ' ')}.`] : [],
       resumen: { leidas: filas.length, validas: filas.filter((f) => !f.errores.length).length, conErrores: filas.filter((f) => f.errores.length).length, conAdvertencias: filas.filter((f) => f.advertencias.length).length } };
   }
@@ -105,7 +119,7 @@ class ImportacionService {
   }
 
   async vistaPrevia(a: Actor, id: string, file?: Express.Multer.File) {
-    const { plantilla: _p, ids: _i, hash: _h, ...r } = await this.validar(a, id, file);
+    const { plantilla: _p, ids: _i, nombres: _n, hash: _h, ...r } = await this.validar(a, id, file);
     return r;
   }
 
@@ -124,7 +138,7 @@ class ImportacionService {
         filasLeidas: v.filas.length, filasOk: validas.length, filasError: errores.length, errores, usuarioId: a.id,
       } });
       for (const f of validas) {
-        try { resultado[await this.guardar(tx, a, id, f, v.ids, c.id)]++; }
+        try { resultado[await this.guardar(tx, a, id, f, v.ids, v.nombres, c.id)]++; }
         catch (e) { if (e instanceof BadRequestException) throw new BadRequestException({ mensaje: `Fila ${f.n}: ${(e.getResponse() as { mensaje?: string }).mensaje ?? e.message}` }); throw e; }
       }
       return c;
@@ -149,10 +163,24 @@ class ImportacionService {
   }
 
   /** Fila de la plantilla → datos del formulario, validados con el mismo esquema que el formulario web. */
-  private async declaracion(tx: Tx, a: Actor, id: string, d: Record<string, string>, ids: Ids) {
+  private async declaracion(tx: Tx, a: Actor, id: string, d: Record<string, string>, ids: Ids, nombres: Nombres) {
     const servicio = id === 'decl-servicios';
     const cliente = await tx.cliente.findUniqueOrThrow({ where: { empresaId_nit: { empresaId: a.empresaId, nit: digitos(d.nit) } } });
-    const cod = (k: ClaveCatalogo, v?: string) => (v ? ids[k].get(v.trim().toUpperCase()) : undefined);
+    // Código o nombre exacto (ya validados en la vista previa)
+    const cod = (k: ClaveCatalogo, v?: string) => { const c = v ? resolverCodigo(k, v, { catalogos: conjuntos(ids), nombres }).codigo : undefined; return c ? ids[k].get(c) : undefined; };
+    // Corriente Y o código A; una subcorriente del IDEAM que aún no existe se registra colgada de su corriente
+    const corriente = async (k: 'corrientesY' | 'codigosA', v?: string) => {
+      const c = v ? resolverCodigo(k, v, { catalogos: conjuntos(ids), nombres }).codigo : undefined;
+      if (!c) return null;
+      if (ids[k].has(c)) return ids[k].get(c)!;
+      const padre = await tx.codigoClasificacion.findUniqueOrThrow({ where: { codigo: corrienteDe(c)! } });
+      const s = await tx.codigoClasificacion.upsert({ where: { codigo: c }, update: {},
+        create: { tipo: padre.tipo, codigo: c, padreId: padre.id, descripcion: `Subcorriente IDEAM de ${padre.codigo}: ${padre.descripcion}` } });
+      ids[k].set(c, s.id);
+      return s.id;
+    };
+    const codigoYId = servicio ? null : await corriente('corrientesY', d.corrienteY);
+    const codigoAId = servicio ? null : await corriente('codigosA', d.codigoA);
     const varios = (k: ClaveCatalogo, v?: string) => lista(v).map((x) => cod(k, x)!).filter(Boolean);
     const datos = {
       tipo: servicio ? 'SERVICIO' : 'RESIDUO',
@@ -164,7 +192,7 @@ class ImportacionService {
       responsabilidadAceptada: si(d.responsabilidad), observaciones: d.observacion || null,
       ...(servicio ? { descripcionServicio: d.descripcion } : {
         tipoResiduoId: cod('tiposResiduo', d.tipoResiduo), esPeligroso: si(d.peligroso),
-        codigoYId: cod('corrientesY', d.corrienteY) ?? null, codigoAId: cod('codigosA', d.codigoA) ?? null, codigoUn: d.codigoUn || null,
+        codigoYId, codigoAId, codigoUn: d.codigoUn || null,
         riesgoIds: varios('riesgos', d.riesgos), etiquetadoIds: varios('etiquetado', d.etiquetado),
         descripcionProceso: d.proceso, composicion: d.composicion || null,
         tipoEmbalajeId: cod('embalajes', d.embalaje), otroTipoEmbalaje: d.otroEmbalaje || null, presentacion: d.presentacion || null,
@@ -180,7 +208,7 @@ class ImportacionService {
   }
 
   /** Guarda una fila válida. Devuelve si creó o actualizó. */
-  private async guardar(tx: Tx, a: Actor, id: string, f: FilaValidada, ids: Ids, cargueId: string): Promise<'creadas' | 'actualizadas'> {
+  private async guardar(tx: Tx, a: Actor, id: string, f: FilaValidada, ids: Ids, nombres: Nombres, cargueId: string): Promise<'creadas' | 'actualizadas'> {
     const d = f.datos; const emp = a.empresaId;
     switch (id) {
       case 'clientes': {
@@ -205,7 +233,7 @@ class ImportacionService {
       }
       case 'decl-residuos':
       case 'decl-servicios':
-        await this.declaraciones.crear(a, await this.declaracion(tx, a, id, d, ids), tx, cargueId);
+        await this.declaraciones.crear(a, await this.declaracion(tx, a, id, d, ids, nombres), tx, cargueId);
         return 'creadas';
       case 'precios': {
         const decl = await tx.declaracion.findFirstOrThrow({ where: { empresaId: emp, numero: Number(d.numero) }, include: { cliente: true, tarifas: { where: { vigenteHasta: null }, take: 1, orderBy: { vigenteDesde: 'desc' } } } });

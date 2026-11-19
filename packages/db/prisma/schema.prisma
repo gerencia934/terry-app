@@ -1580,14 +1580,18 @@ model MaterialEmbalaje {
 model CodigoClasificacion {
   id          String                  @id @default(uuid()) @db.Uuid
   tipo        TipoCodigoClasificacion
-  codigo      String                  @unique @db.VarChar(10) // "Y8", "A3020"
+  codigo      String                  @unique @db.VarChar(10) // "Y8", "A3020"; subcorriente IDEAM: "Y9.1"
   descripcion String
   activo      Boolean                 @default(true)
+  padreId     String?                 @map("padre_id") @db.Uuid // subcorriente → su corriente (un nivel)
 
-  declaracionesA Declaracion[] @relation("CodigoA")
-  declaracionesY Declaracion[] @relation("CodigoY")
+  padre          CodigoClasificacion?  @relation("Subcorrientes", fields: [padreId], references: [id])
+  subcorrientes  CodigoClasificacion[] @relation("Subcorrientes")
+  declaracionesA Declaracion[]         @relation("CodigoA")
+  declaracionesY Declaracion[]         @relation("CodigoY")
 
   @@index([tipo])
+  @@index([padreId], map: "ix_codigo_padre")
   @@map("codigos_clasificacion")
 }
 

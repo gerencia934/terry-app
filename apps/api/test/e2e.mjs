@@ -79,6 +79,24 @@ r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, 
 prueba('subir otra vez el mismo archivo avisa y rechaza los códigos internos ya usados', r.status === 201 && r.json.avisos.length === 1 && r.json.resumen.validas === 0, JSON.stringify(r.json).slice(0, 300));
 r = await llamar('GET', '/importacion/historial', { token: T });
 prueba('el historial registra los cargues', r.status === 200 && r.json.length >= 3);
+// Documentos reales (planilla DMR): línea por nombre exacto, subcorriente del IDEAM y número UN en la columna equivocada
+const libroDmr = await excelBuf('decl-residuos', [
+  filaResiduo({ codigo: 'RP-020', residuo: 'Borras aceitosas', linea: 'operaciones propias de tratamiento y disposicion', corrienteY: 'Y9.1', disposiciones: 'BIO', precio: '900' }),
+  filaResiduo({ codigo: 'RP-021', residuo: 'Z', corrienteY: 'UN3082', disposiciones: 'BIO', precio: '100' }),
+]);
+r = await llamar('POST', '/importacion/decl-residuos/vista-previa', { token: T, form: formDe(libroDmr, 'dmr.xlsx') });
+const [fDmr, fUn] = r.json.filas ?? [];
+prueba('planilla DMR: acepta la línea por su nombre y la subcorriente Y9.1, avisando', r.status === 201 && !fDmr?.errores.length
+  && fDmr.advertencias.some((x) => /tomó como el código 01/.test(x)) && fDmr.advertencias.some((x) => /subcorriente de Y9/.test(x)), JSON.stringify(fDmr));
+prueba('…y explica que un número UN no va en la columna de corriente', fUn?.errores.some((x) => /número UN/.test(x)), JSON.stringify(fUn));
+r = await llamar('POST', '/importacion/decl-residuos/confirmar', { token: T, form: formDe(libroDmr, 'dmr.xlsx') });
+const sub = await db.codigoClasificacion.findUnique({ where: { codigo: 'Y9.1' }, include: { padre: true } });
+const borras = await db.declaracion.findFirst({ where: { codigoInterno: 'RP-020' }, include: { codigoY: true, lineaServicio: true } });
+prueba('la subcorriente queda registrada colgada de Y9 y la declaración la usa', r.status === 201 && r.json.creadas === 1 && sub?.padre?.codigo === 'Y9'
+  && borras?.codigoY?.codigo === 'Y9.1' && borras.lineaServicio.codigo === '01', JSON.stringify(r.json).slice(0, 200));
+let rechazoSub = false;
+try { await db.codigoClasificacion.create({ data: { tipo: 'A', codigo: 'Y9.2', descripcion: 'x', padreId: sub.padreId } }); } catch (e) { rechazoSub = /mismo tipo/.test(String(e)); }
+prueba('la base no deja colgar una subcorriente de otro tipo', rechazoSub);
 r = await llamar('POST', '/importacion/clientes/confirmar', { token: T, form: (() => { const f = new FormData(); f.append('archivo', new Blob(['hola']), 'malo.csv'); return f; })() });
 prueba('archivo que no es .xlsx → 400', r.status === 400);
 
@@ -89,14 +107,25 @@ const agua = r.json.filas.find((d) => d.codigoInterno === 'AR-IND');
 prueba('listado trae las declaraciones con sedes, disposición y tarifa vigente', lodo && agua && Number(lodo.tarifaVigente?.precioUnitario) === 780
   && agua.sucursales.length === 2 && lodo.disposiciones[0]?.disposicion.codigo === 'BIO' && lodo.lineaServicio.unidadNegocio.sigla === 'TTR', JSON.stringify(lodo ?? r.json).slice(0, 300));
 r = await llamar('PATCH', `/declaraciones/${lodo.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
-prueba('autorizar biorremediación (cubierta por Res. 0632-2023) la deja activa', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa === true, JSON.stringify(r.json));
-await db.permisoAmbiental.updateMany({ where: { acto: 'Resolución 0632-2023' }, data: { estado: 'VENCIDO' } });
+prueba('autorizar biorremediación (cubierta por la Res. DGL 000632 de 2023) la deja activa', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa === true, JSON.stringify(r.json));
+await db.permisoAmbiental.updateMany({ where: { acto: 'Resolución DGL No. 000632 de 2023' }, data: { estado: 'VENCIDO' } });
 r = await llamar('PATCH', `/declaraciones/${agua.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
 prueba('con el permiso vencido, NO deja autorizar el tratamiento a suelo (API)', r.status === 403 && /permiso/.test(r.json.mensaje), JSON.stringify(r.json));
 let bloqueada = false;
 try { await db.declaracion.update({ where: { id: agua.id }, data: { estado: 'AUTORIZADA', activa: true } }); } catch (e) { bloqueada = /ningún permiso/.test(String(e)); }
 prueba('…ni escribiendo directo en la base: la regla del trigger la rechaza', bloqueada);
-await db.permisoAmbiental.updateMany({ where: { acto: 'Resolución 0632-2023' }, data: { estado: 'VIGENTE' } });
+await db.permisoAmbiental.updateMany({ where: { acto: 'Resolución DGL No. 000632 de 2023' }, data: { estado: 'VIGENTE' } });
+r = await llamar('GET', '/declaraciones/catalogo-servicios', { token: T });
+const servTrampas = r.json.find?.((s) => s.codigo === 'SV-TRAMPAS'); const servFumiga = r.json.find?.((s) => s.codigo === 'SV-FUMIGACION');
+prueba('catálogo propio con los 10 servicios estándar de la planilla real', r.status === 200 && r.json.length >= 10 && servTrampas && servFumiga, JSON.stringify(r.json).slice(0, 200));
+const asignar = { catalogoIds: [servTrampas.id, servFumiga.id], clienteIds: [lodo.cliente.id], alcanceSedes: 'PRINCIPAL', frecuenciaDias: 15, solicitudAutomatica: true, precio: { precioUnitario: 0 }, autorizar: true };
+r = await llamar('POST', '/declaraciones/asignacion-masiva', { token: T, cuerpo: asignar });
+prueba('asignación masiva: 2 servicios al cliente, autorizados, con precio 0 (facturación por contrato)', r.status === 201 && r.json.creadas === 2 && r.json.autorizadas === 2, JSON.stringify(r.json));
+const trampasCliente = await db.declaracion.findFirst({ where: { clienteId: lodo.cliente.id, catalogoId: servTrampas.id }, include: { sucursales: true, tarifas: true } });
+prueba('…cada una con la sede principal, frecuencia de 15 días y su tarifa', trampasCliente?.estado === 'AUTORIZADA' && trampasCliente.activa && trampasCliente.sucursales.length === 1
+  && trampasCliente.frecuenciaDias === 15 && Number(trampasCliente.tarifas[0]?.precioUnitario) === 0);
+r = await llamar('POST', '/declaraciones/asignacion-masiva', { token: T, cuerpo: asignar });
+prueba('repetir la asignación no duplica: las omite y dice por qué', r.status === 201 && r.json.creadas === 0 && r.json.omitidas.length === 2 && /ya lo tiene/.test(r.json.omitidas[0].motivo), JSON.stringify(r.json));
 
 // Formulario de 8 secciones (POST /declaraciones)
 const cat = (await llamar('GET', '/declaraciones/catalogos', { token: T })).json;
@@ -307,7 +336,7 @@ r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.cliente
 prueba('crear el acta del periodo con las líneas aprobadas', r.status === 201 && /^ACT-\d{4}-\d{5}$/.test(r.json.numero), JSON.stringify(r.json));
 const actaB = r.json;
 r = await llamar('POST', `/actas/${actaB.id}/emitir`, { token: T8 });
-prueba('emitir: copia fija con soporte legal (Res. 0632-2023) y PDF', r.status === 201 && r.json.estado === 'EMITIDA' && r.json.pdfUrl && JSON.stringify(r.json.contenido).includes('0632-2023'), JSON.stringify(r.json).slice(0, 300));
+prueba('emitir: copia fija con soporte legal (Res. DGL 000632 de 2023) y PDF', r.status === 201 && r.json.estado === 'EMITIDA' && r.json.pdfUrl && JSON.stringify(r.json.contenido).includes('000632 de 2023'), JSON.stringify(r.json).slice(0, 300));
 const codigo = r.json.codigoVerificacion;
 prueba('el QR lleva a la página pública de verificación', r.json.urlVerificacion?.endsWith(`/#verificar/${codigo}`), r.json.urlVerificacion);
 const pdf = await descargar(`/actas/${actaB.id}/pdf`, T8);
@@ -337,6 +366,17 @@ prueba('con ARL y EPS el descargue se graba', r.status === 201 && r.json.estado 
 r = await llamar('POST', `/manifiestos/${mfD.id}/anular`, { token: T8, cuerpo: { causalId: (await db.catalogoItem.findFirst({ where: { tipo: 'CAUSAL' } })).id } });
 const lineaD = await db.solicitudItem.findFirst({ where: { solicitudId: solD.id } });
 prueba('anular el descargue: sin conciliación y la línea vuelve a pendiente', r.status === 201 && !(await db.conciliacion.findUnique({ where: { manifiestoId: mfD.id } })) && lineaD.estado === 'PENDIENTE');
+
+// Documentos reales: las solicitudes automáticas se agrupan por sede y fecha (antes, una por residuo)
+const sedePrincipal = await db.sucursal.findFirst({ where: { clienteId: suc.clienteId, esPrincipal: true } });
+const servicios = await db.declaracion.findMany({ where: { clienteId: suc.clienteId, solicitudAutomatica: true, tipo: 'SERVICIO' }, orderBy: { numero: 'asc' } });
+r = await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'CARGUE', clienteId: suc.clienteId, fechaServicio: '2026-11-27', vehiculoId: veh.id, conductorId: yo.id,
+  items: servicios.map((d) => ({ declaracionId: d.id, sucursalId: sedePrincipal.id, cantidad: 1 })) } });
+const mfAuto = r.json;
+r = await llamar('POST', `/manifiestos/${mfAuto.id}/grabar`, { token: T8, cuerpo: { ...firma, horaLlegada: '2026-11-27T08:00:00-05:00', horaSalida: '2026-11-27T09:00:00-05:00' } });
+const recurrentes = await db.solicitud.findMany({ where: { manifiestoOrigenId: mfAuto.id }, include: { items: true } });
+prueba('dos servicios con solicitud automática → UNA solicitud recurrente con dos ítems (misma sede y fecha)', r.status === 201 && servicios.length === 2 && recurrentes.length === 1
+  && recurrentes[0].items.length === 2 && recurrentes[0].fechaSolicitada.toISOString().slice(0, 10) === '2026-12-12', JSON.stringify({ g: r.status, m: r.json.mensaje, recurrentes }).slice(0, 300));
 
 // Torre de control (3-D): programación por línea, quitar de la ruta, descartar y actas de aliados
 r = await llamar('POST', '/solicitudes', { token: T8, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-27', items: [{ declaracionId: lodo.id, cantidadEstimada: 200 }, { declaracionId: lodo.id, cantidadEstimada: 300 }] } });

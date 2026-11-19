@@ -7,7 +7,7 @@ import shared from '@terraviva/shared';
 
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
   PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS,
-  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO } = shared;
+  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
@@ -72,16 +72,22 @@ async function main() {
   await porEmpresa('unidadNegocio', E, UNIDADES_NEGOCIO, (x) => ({ nombre: x.nombre, sigla: x.sigla }));
   const unidades = Object.fromEntries((await db.unidadNegocio.findMany({ where: { empresaId: E } })).map((u) => [u.codigo, u.id]));
   await porEmpresa('lineaServicio', E, LINEAS_SERVICIO, (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null, unidadNegocioId: unidades[x.unidad] }));
+  // Servicios estándar del catálogo propio (asignación masiva a muchos clientes). Solo se crean si faltan.
+  for (const x of SERVICIOS_ESTANDAR) {
+    if (await db.catalogoResiduo.findFirst({ where: { empresaId: E, codigo: x.codigo } })) continue;
+    const linea = await db.lineaServicio.findFirst({ where: { empresaId: E, codigo: x.linea } });
+    await db.catalogoResiduo.create({ data: { empresaId: E, tipo: 'SERVICIO', codigo: x.codigo, nombre: x.nombre, lineaServicioId: linea?.id ?? null, valores: { descripcion: x.nombre } } });
+  }
   await porEmpresa('metrica', E, METRICAS, (x) => ({ nombre: x.nombre, abreviacion: x.abreviacion, uso: x.uso, factorAKg: x.factorAKg }));
   await porEmpresa('tipoEmbalaje', E, TIPOS_EMBALAJE, (x) => ({ nombre: x.nombre, esOtro: !!x.esOtro }));
   await porEmpresa('materialEmbalaje', E, MATERIALES_EMBALAJE, (x) => ({ nombre: x.nombre, esOtro: !!x.esOtro }));
   await porEmpresa('disposicion', E, DISPOSICIONES, (x) => ({ nombre: x.nombre, requierePermiso: x.requierePermiso, propia: x.propia, soporteLegal: x.soporteLegal }));
 
-  // Permisos ambientales de la CAS y qué disposiciones ampara cada uno.
+  // Permisos ambientales (CAS y CDMB) y qué disposiciones ampara cada uno, tomados del certificado real PSAP2026-296.
   // ⚠ Las obligaciones y fechas son de ejemplo: ajústelas al acto administrativo.
-  for (const { acto, alcance, disposiciones, obligacion: [desc, per, f] } of PERMISOS_CAS) {
+  for (const { acto, autoridad = 'CAS', expedicion, alcance, disposiciones, obligacion: [desc, per, f] } of PERMISOS_CAS) {
     let p = await db.permisoAmbiental.findFirst({ where: { empresaId: E, acto } });
-    if (!p) p = await db.permisoAmbiental.create({ data: { empresaId: E, acto, autoridad: 'CAS', alcance, estado: 'VIGENTE' } });
+    if (!p) p = await db.permisoAmbiental.create({ data: { empresaId: E, acto, autoridad, alcance, estado: 'VIGENTE', expedicion: expedicion ? new Date(expedicion) : null } });
     for (const codigo of disposiciones) {
       const d = await db.disposicion.findUniqueOrThrow({ where: { empresaId_codigo: { empresaId: E, codigo } } });
       await db.permisoDisposicion.upsert({ where: { permisoId_disposicionId: { permisoId: p.id, disposicionId: d.id } }, update: {}, create: { permisoId: p.id, disposicionId: d.id } });

@@ -2,7 +2,7 @@
 // La usan: (1) el navegador para generar/leer el Excel y previsualizar, (2) scripts/generar-plantillas.ts
 // para producir los .xlsx del repositorio y (3) el API, que vuelve a validar todo antes de guardar.
 
-import { CODIGOS_BASE, ESTADOS_FISICOS, type ClaveCatalogo } from '../declaraciones/catalogos';
+import { CODIGOS_BASE, ESTADOS_FISICOS, corrienteDe, type ClaveCatalogo } from '../declaraciones/catalogos';
 
 export type TipoCol = 'texto' | 'numero' | 'fecha' | 'lista' | 'email' | 'si_no' | 'codigo';
 export interface Columna {
@@ -44,6 +44,8 @@ export interface Contexto {
   codigosInternos: Set<string>;
   /** Códigos vigentes por catálogo, en mayúsculas. */
   catalogos: Record<ClaveCatalogo, Set<string>>;
+  /** Nombre normalizado → códigos, por catálogo: la planilla puede traer el nombre exacto en vez del código. */
+  nombres?: Partial<Record<ClaveCatalogo, Map<string, string[]>>>;
   /** Disposiciones (código en mayúsculas) cubiertas hoy por un permiso, una licencia o el objeto social. */
   disposicionesCubiertas: Set<string>;
 }
@@ -156,11 +158,11 @@ export const PLANTILLAS: Plantilla[] = [
       { key: 'residuo', header: 'Residuo', requerido: true, tipo: 'texto', ejemplo: 'Lodos aceitosos de trampa de grasas', ayuda: '', ancho: 34 },
       { key: 'categoria', header: 'Categoría', requerido: true, tipo: 'codigo', catalogo: 'categorias', ejemplo: 'RESPEL', ayuda: 'Código de la categoría del declarado.', ancho: 12 },
       { key: 'tipoResiduo', header: 'Tipo de residuo', requerido: true, tipo: 'codigo', catalogo: 'tiposResiduo', ejemplo: 'IND', ayuda: '', ancho: 12 },
-      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'codigo', catalogo: 'lineas', ejemplo: '01', ayuda: 'Código de la línea; la unidad de negocio se deduce de ella.', ancho: 10 },
+      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'codigo', catalogo: 'lineas', ejemplo: '01', ayuda: 'Código o nombre exacto de la línea; la unidad de negocio se deduce de ella.', ancho: 10 },
       { key: 'peligroso', header: 'Peligroso', requerido: true, tipo: 'si_no', opciones: L.siNo, ejemplo: 'Sí', ayuda: '', ancho: 10 },
-      { key: 'corrienteY', header: 'Corriente Y', tipo: 'codigo', catalogo: 'corrientesY', ejemplo: 'Y18', ayuda: 'Anexo I Dec. 1076/2015.', ancho: 11,
+      { key: 'corrienteY', header: 'Corriente Y', tipo: 'codigo', catalogo: 'corrientesY', ejemplo: 'Y18', ayuda: 'Anexo I Dec. 1076/2015. Admite subcorrientes del IDEAM (Y9.1). El número UN va en su propia columna.', ancho: 11,
         validar: (v, f) => !v && si(f.peligroso) && !f.codigoA ? 'Un residuo peligroso necesita corriente Y o código A.' : null },
-      { key: 'codigoA', header: 'Código A', tipo: 'codigo', catalogo: 'codigosA', ejemplo: '', ayuda: 'Anexo II Dec. 1076/2015.', ancho: 11 },
+      { key: 'codigoA', header: 'Código A', tipo: 'codigo', catalogo: 'codigosA', ejemplo: '', ayuda: 'Anexo II Dec. 1076/2015. Admite subcorrientes del IDEAM (A4060.1).', ancho: 11 },
       { key: 'codigoUn', header: 'Código UN', tipo: 'texto', ejemplo: 'UN3082', ayuda: 'Formato UN y 4 dígitos.', ancho: 10,
         validar: (v) => v && !/^UN\d{4}$/i.test(v.trim()) ? 'Use el formato UN3082.' : null },
       { key: 'riesgos', header: 'Riesgos', tipo: 'codigo', catalogo: 'riesgos', multiple: true, ejemplo: 'T;I', ayuda: 'CRETIB y RAD, separados por punto y coma.', ancho: 10 },
@@ -201,7 +203,7 @@ export const PLANTILLAS: Plantilla[] = [
       { key: 'codigo', header: 'Código interno', tipo: 'texto', ejemplo: 'SV-USP', ayuda: 'Único por cliente.', ancho: 12 },
       { key: 'servicio', header: 'Servicio', requerido: true, tipo: 'texto', ejemplo: 'Mantenimiento de unidad sanitaria portátil', ayuda: '', ancho: 32 },
       { key: 'categoria', header: 'Categoría', requerido: true, tipo: 'codigo', catalogo: 'categorias', ejemplo: 'SERV', ayuda: '', ancho: 10 },
-      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'codigo', catalogo: 'lineas', ejemplo: '12', ayuda: 'Código de la línea; la unidad de negocio se deduce de ella.', ancho: 10 },
+      { key: 'linea', header: 'Línea de servicio', requerido: true, tipo: 'codigo', catalogo: 'lineas', ejemplo: '12', ayuda: 'Código o nombre exacto de la línea; la unidad de negocio se deduce de ella.', ancho: 10 },
       { key: 'descripcion', header: 'Descripción del servicio', requerido: true, tipo: 'texto', ejemplo: 'Incluye 2 mantenimientos semanales', ayuda: 'Máximo 1.000 caracteres.', ancho: 30,
         validar: (v) => v.length > 1000 ? 'Máximo 1.000 caracteres.' : null },
       { key: 'frecuenciaDias', header: 'Frecuencia (días)', tipo: 'numero', ejemplo: 7, ayuda: 'Cada cuántos días se presta (1 a 366).', ancho: 10,
@@ -284,6 +286,28 @@ export const plantilla = (id: string) => PLANTILLAS.find((p) => p.id === id)!;
 // ---------------- Validación de filas ----------------
 export interface FilaValidada { n: number; datos: Record<string, string>; errores: string[]; advertencias: string[] }
 
+/**
+ * Interpreta un valor de una columna de catálogo (documentos reales, planilla DMR):
+ * - el código tal cual («09», «BIO»);
+ * - el nombre exacto, sin importar mayúsculas ni tildes («Servicios especiales de gestión y limpieza»), si no es ambiguo;
+ * - en corrientes Y y códigos A, una subcorriente del IDEAM («Y9.1») cuya corriente exista: se registra al guardar.
+ * Devuelve el código del catálogo (o la subcorriente) y, si aplica, un aviso o el error.
+ */
+export function resolverCodigo(catalogo: ClaveCatalogo, valor: string, ctx: Pick<Contexto, 'catalogos' | 'nombres'>): { codigo?: string; aviso?: string; error?: string } {
+  const x = valor.trim(); const X = x.toUpperCase();
+  if (ctx.catalogos[catalogo].has(X)) return { codigo: X };
+  if (catalogo === 'corrientesY' || catalogo === 'codigosA') {
+    if (/^UN\d{4}$/.test(X)) return { error: `"${x}" es un número UN: va en la columna «Código UN».` };
+    const padre = corrienteDe(X);
+    if (padre && ctx.catalogos[catalogo].has(padre)) return { codigo: X, aviso: `"${x}" es una subcorriente de ${padre}: si aún no existe, se registrará.` };
+    return { error: `"${x}" no existe en el catálogo.` };
+  }
+  const cods = ctx.nombres?.[catalogo]?.get(norm(x)) ?? [];
+  if (cods.length === 1) return { codigo: cods[0], aviso: `"${x}" se tomó como el código ${cods[0]}.` };
+  if (cods.length > 1) return { error: `"${x}" coincide con varios códigos (${cods.join(', ')}): escriba el código.` };
+  return { error: `"${x}" no existe en el catálogo.` };
+}
+
 export function validarFilas(p: Plantilla, filas: Record<string, string>[], ctx: Contexto): FilaValidada[] {
   const vistos = new Map<string, number>();
   return filas.map((datos, i) => {
@@ -299,9 +323,10 @@ export function validarFilas(p: Plantilla, filas: Record<string, string>[], ctx:
         if (c.tipo === 'codigo' && c.catalogo) {
           const valores = c.multiple ? lista(v) : [v];
           if (!c.multiple && v.includes(';')) errores.push(`${c.header}: admite un solo código.`);
-          else {
-            const malos = valores.filter((x) => !ctx.catalogos[c.catalogo!].has(x.toUpperCase()));
-            if (malos.length) errores.push(`${c.header}: ${malos.map((x) => `"${x}"`).join(', ')} no existe en el catálogo.`);
+          else for (const x of valores) {
+            const r = resolverCodigo(c.catalogo, x, ctx);
+            if (r.error) errores.push(`${c.header}: ${r.error}`);
+            if (r.aviso) advertencias.push(`${c.header}: ${r.aviso}`);
           }
         }
       }
