@@ -27,6 +27,7 @@ import { EmpresaServidor } from './pages/torre/Empresa';
 import { ClientesServidor } from './pages/ClientesServidor';
 import { TarifasServidor } from './pages/TarifasServidor';
 import { PermisosServidor } from './pages/PermisosServidor';
+import { FlotaServidor, InspeccionesServidor } from './pages/FlotaServidor';
 import Verificar from './pages/Verificar';
 
 function Screen() {
@@ -61,7 +62,7 @@ function Screen() {
       case 'programacion': return MODO_REAL ? <ProgramacionServidor /> : <Programacion />;
       case 'programacion-tabla': return MODO_REAL ? <ProgramacionTablaServidor /> : <ProgramacionTabla />;
       case 'seguimiento': return MODO_REAL ? <SeguimientoServidor /> : <Seguimiento />;
-      case 'inspecciones': return <Inspecciones />;
+      case 'inspecciones': return MODO_REAL ? <InspeccionesServidor /> : <Inspecciones />;
       case 'manifiestos': return MODO_REAL ? <ManifiestosServidor /> : <Manifiestos />;
       case 'recepcion': return MODO_REAL ? <ConciliacionServidor /> : <Recepcion />;
       case 'descargues': return MODO_REAL ? <RecepcionPlantaServidor /> : <Recepcion />;
@@ -73,7 +74,7 @@ function Screen() {
       case 'ajustes': return <ConfigIndex />;
       case 'importar': return <Cargues />;
       case 'empresa': return MODO_REAL ? <EmpresaServidor /> : <MisDatos />;
-      case 'vehiculos': return <Vehiculos />;
+      case 'vehiculos': return MODO_REAL ? <FlotaServidor /> : <Vehiculos />;
       case 'usuarios': return <Usuarios />;
       case 'catalogos': return <Catalogos />;
       case 'etapas': return <Etapas />;

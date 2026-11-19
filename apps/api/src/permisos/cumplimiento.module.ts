@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
-import { EstadoPermiso } from '@prisma/client';
+import { EstadoPermiso, UnidadMedida } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
@@ -21,6 +21,13 @@ const EditarAliado = z.object({
   licencia: textoOpc(300), licenciaAutoridad: textoOpc(80), licenciaIndefinida: z.boolean().optional(), licenciaVence: fechaOpc, licenciaUrl: urlOpc,
   alcance: textoOpc(4000), excluyeTiposResiduo: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(20).optional(),
 }).refine((b) => !(b.licenciaIndefinida && b.licenciaVence), { message: 'Una licencia indefinida no lleva fecha de vencimiento.', path: ['licenciaVence'] });
+const DatosVehiculo = z.object({
+  marca: textoOpc(40), color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Color en formato #RRGGBB').optional(), tipo: z.string().trim().min(2).max(40),
+  capacidad: z.number().positive('La capacidad debe ser mayor que cero').max(1e6), unidadCap: z.nativeEnum(UnidadMedida).default('KG'), volumenM3: z.number().positive().max(1000).nullish(),
+  proveedorId: z.string().uuid().nullish(), soatVence: fechaOpc, rtmVence: fechaOpc, polizaRcVence: fechaOpc,
+});
+const CrearVehiculo = DatosVehiculo.extend({ placa: z.string().transform((x) => x.replace(/[\s-]/g, '').toUpperCase()).pipe(z.string().regex(/^[A-Z]{3}\d{2}[A-Z0-9]$|^[A-Z]{2}\d{4}$|^[A-Z]\d{5}$/, 'Placa colombiana: AAA123, AAA12A, AA1234 o A12345')) });
+const EditarVehiculo = DatosVehiculo.partial().extend({ activo: z.boolean().optional() });
 /** Estado de la licencia de un gestor aliado, con la misma regla de fn_aliado_vigente (la que decide la cobertura). */
 function estadoLicencia(p: { licencia: string | null; licenciaIndefinida: boolean; licenciaVence: Date | null }) {
   if (!p.licencia?.trim()) return { estado: 'SIN_LICENCIA' as const, cubre: false };
@@ -170,7 +177,30 @@ class CumplimientoService {
   residuos(a: Actor) {
     return this.db.catalogoResiduo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { codigo: 'asc' }, include: { lineaServicio: { select: { codigo: true, nombre: true } } } });
   }
-  vehiculos(a: Actor) { return this.db.vehiculo.findMany({ where: { empresaId: a.empresaId }, orderBy: { placa: 'asc' } }); }
+  vehiculos(a: Actor) { return this.db.vehiculo.findMany({ where: { empresaId: a.empresaId }, orderBy: [{ activo: 'desc' }, { placa: 'asc' }], include: { proveedor: { select: { id: true, razonSocial: true } } } }); }
+  /** Transportadores (terceros) a los que pertenece un vehículo que no es propio. */
+  transportadores(a: Actor) { return this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esTransportador: true }, orderBy: { razonSocial: 'asc' }, select: { id: true, razonSocial: true, nit: true } }); }
+  private async validarTransportador(a: Actor, proveedorId?: string | null) {
+    if (proveedorId && !(await this.db.proveedor.findFirst({ where: { id: proveedorId, empresaId: a.empresaId, esTransportador: true } })))
+      throw new BadRequestException({ mensaje: 'El transportador no existe.' });
+  }
+  async crearVehiculo(a: Actor, b: z.infer<typeof CrearVehiculo>) {
+    await this.validarTransportador(a, b.proveedorId);
+    if (await this.db.vehiculo.findUnique({ where: { placa: b.placa } })) throw new BadRequestException({ mensaje: `La placa ${b.placa} ya está registrada.` });
+    const v = await this.db.vehiculo.create({ data: { ...b, empresaId: a.empresaId } });
+    await this.audit.registrar(a, 'vehiculo', v.id, 'CREAR', undefined, v);
+    return v;
+  }
+  /** Edita un vehículo. No se borra: se inactiva (deja de ofrecerse para programar rutas). La placa no cambia. */
+  async editarVehiculo(a: Actor, id: string, b: z.infer<typeof EditarVehiculo>) {
+    const v = await this.db.vehiculo.findFirst({ where: { id, empresaId: a.empresaId } });
+    if (!v) throw new NotFoundException({ mensaje: 'Vehículo no encontrado.' });
+    await this.validarTransportador(a, b.proveedorId);
+    const r = await this.db.vehiculo.update({ where: { id }, data: b });
+    await this.audit.registrar(a, 'vehiculo', id, b.activo === false && v.activo ? 'INACTIVAR' : 'EDITAR',
+      { soatVence: v.soatVence, rtmVence: v.rtmVence, polizaRcVence: v.polizaRcVence, activo: v.activo, capacidad: v.capacidad }, b);
+    return r;
+  }
   /** Listas de la operación para la app de campo y la torre de control. */
   async operacion(a: Actor) {
     const [arl, eps, especificaciones, causales, destinos, etapas] = await Promise.all([
@@ -207,6 +237,9 @@ class CumplimientoController {
   @Get('catalogos/residuos') residuos(@ActorActual() a: Actor) { return this.s.residuos(a); }
   @Get('catalogos/operacion') operacion(@ActorActual() a: Actor) { return this.s.operacion(a); }
   @Get('vehiculos') vehiculos(@ActorActual() a: Actor) { return this.s.vehiculos(a); }
+  @Get('vehiculos/transportadores') transportadores(@ActorActual() a: Actor) { return this.s.transportadores(a); }
+  @Permiso('rutas.programar') @Post('vehiculos') crearVehiculo(@ActorActual() a: Actor, @Body(new Zod(CrearVehiculo)) b: z.infer<typeof CrearVehiculo>) { return this.s.crearVehiculo(a, b); }
+  @Permiso('rutas.programar') @Patch('vehiculos/:id') editarVehiculo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarVehiculo)) b: z.infer<typeof EditarVehiculo>) { return this.s.editarVehiculo(a, id, b); }
   @Get('personal') personal(@ActorActual() a: Actor) { return this.s.personal(a); }
   @Get('zonas') zonas(@ActorActual() a: Actor) { return this.s.zonas(a); }
   @Get('estados-recorrido') estados(@ActorActual() a: Actor) { return this.s.estadosRecorrido(a); }

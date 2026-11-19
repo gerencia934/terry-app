@@ -567,6 +567,34 @@ prueba('cancelar una ruta sin preoperacional sí se permite', r.status === 200, 
 r = await llamar('GET', '/alertas', { token: T });
 prueba('alertas responde con obligaciones de permisos', r.status === 200 && r.json.some((a) => a.tipo === 'cumplimiento'));
 
+console.log('\n4b. Inspecciones y flota (fase 1c)');
+r = await llamar('GET', `/inspecciones?desde=2026-11-01&hasta=2026-11-30&vehiculoId=${veh.id}`, { token: T });
+const noAprobada = r.json.filas?.find((p) => p.aprobado === false);
+prueba('inspecciones (oficina): por rango y vehículo, con el resumen de aprobadas y no aprobadas', r.status === 200 && r.json.total === 2 && r.json.resumen?.aprobadas === 1
+  && r.json.resumen.noAprobadas === 1 && noAprobada?._count.respuestas === 1 && !!noAprobada.conductor?.nombre, JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', `/inspecciones/${noAprobada.id}`, { token: T });
+prueba('…el detalle trae cada ítem con su grupo y el crítico no aprobado', r.status === 200 && r.json.respuestas.length === elementos.json.length
+  && r.json.respuestas.some((x) => x.resultado === 'NO_OK' && x.elemento.critico), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', '/inspecciones?desde=2026-11-01&hasta=2026-12-31&resultado=no-aprobada', { token: T });
+prueba('…y filtra por resultado', r.status === 200 && r.json.total >= 1 && r.json.filas.every((p) => p.aprobado === false), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'xyz-987', tipo: 'Furgón RESPEL', capacidad: 3500, unidadCap: 'KG', soatVence: fechaEn(20), rtmVence: fechaEn(200), polizaRcVence: fechaEn(300) } });
+const vehNuevo = r.json;
+prueba('flota: crear un vehículo normaliza la placa (xyz-987 → XYZ987)', r.status === 201 && vehNuevo.placa === 'XYZ987', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'XYZ987', tipo: 'Furgón', capacidad: 1 } });
+prueba('…no repite una placa', r.status === 400 && /ya está registrada/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: '12', tipo: 'Furgón', capacidad: 1 } });
+prueba('…y valida el formato de la placa', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', '/vehiculos', { token: thseq, cuerpo: { placa: 'XYZ988', tipo: 'Furgón', capacidad: 1 } });
+prueba('…lo crea quien programa rutas (HSEQ no) → 403', r.status === 403, String(r.status));
+r = await llamar('GET', '/alertas', { token: T });
+prueba('el SOAT que vence en 20 días sale en las alertas', r.status === 200 && r.json.some((x) => x.tipo === 'flota' && x.titulo.startsWith('XYZ987') && /SOAT/.test(x.titulo)), JSON.stringify(r.json.filter?.((x) => x.tipo === 'flota')).slice(0, 300));
+r = await llamar('PATCH', `/vehiculos/${vehNuevo.id}`, { token: T, cuerpo: { soatVence: fechaEn(365) } });
+const alertasFlota = await llamar('GET', '/alertas', { token: T });
+prueba('…al registrar el SOAT renovado, la alerta desaparece', r.status === 200 && !alertasFlota.json.some((x) => x.titulo.startsWith('XYZ987')), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PATCH', `/vehiculos/${vehNuevo.id}`, { token: T, cuerpo: { activo: false } });
+const audVeh = await db.auditoria.findFirst({ where: { entidad: 'vehiculo', entidadId: vehNuevo.id, accion: 'INACTIVAR' } });
+prueba('inactivar un vehículo no lo borra y queda en la auditoría', r.status === 200 && r.json.activo === false && !!audVeh, JSON.stringify(r.json).slice(0, 200));
+
 console.log('\n5. Roles y permisos');
 const conductor = await db.usuario.upsert({ where: { email: 'conductor.e2e@terravivasas.com' }, update: { intentosFallidos: 0, bloqueadoHasta: null },
   create: { empresaId: yo.empresa ? (await db.empresa.findFirst({ where: { nit: '901089780-8' } })).id : '', rolId: conductorRol.id, nombre: 'Conductor E2E', documento: '1', email: 'conductor.e2e@terravivasas.com', esConductor: true,
