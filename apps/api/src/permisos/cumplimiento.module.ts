@@ -6,6 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, type Actor } from '../common/http';
+import { veFinanzas } from '../finanzas/estado';
+import { DIAS_PARA_FACTURAR } from '../finanzas/finanzas.module';
 
 const dias = (f: Date) => Math.ceil((f.getTime() - Date.now()) / 86_400_000);
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD').transform((x) => new Date(`${x}T00:00:00Z`));
@@ -74,7 +76,7 @@ function estadoDelActo(p: { licencia: string | null; licenciaIndefinida: boolean
   const d = Math.round((p.licenciaVence.getTime() - fechaColombia().getTime()) / 86_400_000);
   return d < 0 ? { estado: 'VENCIDA' as const, cubre: false, dias: d } : { estado: d <= 60 ? 'POR_VENCER' as const : 'VIGENTE' as const, cubre: true, dias: d };
 }
-export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
+export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
 
 @Injectable()
 class CumplimientoService {
@@ -296,6 +298,18 @@ class CumplimientoService {
         ? { tipo: 'operacion', nivel: 'media', titulo: `Ruta ${r.codigo} (${r.vehiculo.placa}) sin preoperacional aprobado`, detalle: 'No puede salir hasta aprobar la inspección', referencia: r.id }
         : { tipo: 'operacion', nivel: 'alta', titulo: `Ruta ${r.codigo} sin vehículo asignado`, detalle: 'Asigne vehículo y conductor para que pueda salir', referencia: r.id }));
     if (pend) out.push({ tipo: 'operacion', nivel: 'info', titulo: `${pend} declaraciones por autorizar`, detalle: 'Revisar ficha de caracterización y cobertura de permisos' });
+    // Facturación (Siigo): solo la ven Comercial, Facturación y Gerencia
+    if (veFinanzas(a)) {
+      const antes = new Date(hoy.getTime() - DIAS_PARA_FACTURAR * 86_400_000);
+      const [sinFacturar, ultima] = await Promise.all([
+        this.db.manifiesto.count({ where: { empresaId: a.empresaId, estado: 'REALIZADO', fechaServicio: { lt: antes },
+          OR: [{ finanzas: null }, { finanzas: { facturado: false, estadoPago: { not: 'LIBRE' } } }] } }),
+        this.db.sincronizacionSiigo.findFirst({ where: { empresaId: a.empresaId }, orderBy: { iniciadaEn: 'desc' }, select: { estado: true, error: true } }),
+      ]);
+      if (sinFacturar) out.push({ tipo: 'finanzas', nivel: sinFacturar > 20 ? 'alta' : 'media', titulo: `${sinFacturar} ${sinFacturar === 1 ? 'manifiesto sin facturar' : 'manifiestos sin facturar'}`,
+        detalle: `Realizados hace más de ${DIAS_PARA_FACTURAR} días y sin factura en Siigo. Revíselos en Facturación` });
+      if (ultima?.estado === 'FALLIDA') out.push({ tipo: 'finanzas', nivel: 'alta', titulo: 'La última sincronización con Siigo falló', detalle: ultima.error ?? 'Vuelva a intentarlo desde Facturación' });
+    }
     const orden = { alta: 0, media: 1, info: 2 };
     return out.sort((x, y) => orden[x.nivel] - orden[y.nivel]);
   }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EstadoConciliacion, EstadoPago, FormaPago, Prisma, TipoNegociacion } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
 import { Trabajos, type ArchivoPreparado } from '../trabajos/trabajos.module';
+import { gestionaFinanzas, recalcularFinanzas, veFinanzas } from '../finanzas/estado';
 
 const id = z.string().uuid();
 const dosDecimales = (v: number) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
@@ -92,16 +93,20 @@ class ConciliacionesService {
       items: lineas,
     } });
     if (!c) throw new NotFoundException({ mensaje: 'Conciliación no encontrada.' });
+    const ve = veFinanzas(a);
     return {
       ...c,
-      items: c.items.map((l) => ({ ...l, valor: valorLinea(aTotal(l)), diferenciaPct: diferenciaPct(l.cantidadCargada.toString(), l.cantidadConciliada?.toString() ?? null) })),
+      // Factura y pago: solo para Comercial, Facturación y Gerencia
+      items: c.items.map((l) => { const x = { ...l, valor: valorLinea(aTotal(l)), diferenciaPct: diferenciaPct(l.cantidadCargada.toString(), l.cantidadConciliada?.toString() ?? null) }; return ve ? x : { ...x, facturaNumero: undefined, facturaEmision: undefined, facturaVencimiento: undefined, estadoPago: undefined }; }),
       totales: totalesConciliacion(c.items.map(aTotal), [bascula(c.manifiesto)]),
     };
   }
 
   /** Edita varias líneas a la vez (grilla). La base bloquea cantidades y precios si ya está aprobada y exige justificar diferencias de más de ±2 %. */
   async editarItems(a: Actor, id: string, b: z.infer<typeof EditarItems>) {
-    await this.propia(a, id);
+    const conc = await this.propia(a, id);
+    const tocaFactura = b.items.some((l) => l.facturaNumero !== undefined || l.facturaEmision !== undefined || l.facturaVencimiento !== undefined || l.estadoPago !== undefined);
+    if (tocaFactura && !gestionaFinanzas(a)) throw new ForbiddenException({ mensaje: 'Registrar facturas y pagos le corresponde a Facturación (permiso «finanzas.gestionar»).' });
     await this.db.$transaction(async (tx) => {
       for (const { id: itemId, ...datos } of b.items) {
         const r = await tx.conciliacionItem.updateMany({ where: { id: itemId, conciliacionId: id }, data: datos });
@@ -109,6 +114,7 @@ class ConciliacionesService {
       }
       await this.audit.registrar(a, 'conciliacion', id, 'EDITAR', undefined, { lineas: b.items.length }, tx);
     });
+    if (tocaFactura) await recalcularFinanzas(this.db, a.empresaId, [conc.manifiestoId]);
     return this.obtener(a, id);
   }
 
@@ -196,14 +202,18 @@ class ConciliacionesService {
     ws.addRow([`Conciliación del manifiesto ${c.manifiesto.numero} · ${c.manifiesto.cliente.razonSocial} (NIT ${c.manifiesto.cliente.nit})`]).font = { bold: true, size: 13 };
     ws.addRow([`Fecha de servicio: ${c.manifiesto.fechaServicio.toISOString().slice(0, 10)} · Estado: ${c.estado}`]);
     ws.addRow([]);
-    const h = ws.addRow(['Generador', 'Residuo / servicio', 'Cant. cargada', 'Cant. conciliada', 'Unidad', 'Dif. %', 'Precio unitario', 'Valor', 'Negociación', 'Forma de pago', 'Disposición', 'Orden de compra', 'Factura', 'Emisión', 'Vencimiento', 'Estado de pago', 'Justificación']);
+    const ve = veFinanzas(a);
+    const columnas = ['Generador', 'Residuo / servicio', 'Cant. cargada', 'Cant. conciliada', 'Unidad', 'Dif. %', 'Precio unitario', 'Valor', 'Negociación', 'Forma de pago', 'Disposición', 'Orden de compra', 'Factura', 'Emisión', 'Vencimiento', 'Estado de pago', 'Justificación'];
+    const QUITAR = new Set([12, 13, 14, 15]); // factura, emisión, vencimiento y estado de pago
+    const filtra = <T,>(xs: T[]) => (ve ? xs : xs.filter((_, i) => !QUITAR.has(i)));
+    const h = ws.addRow(filtra(columnas));
     h.font = { bold: true, color: { argb: 'FFFFFFFF' } }; h.eachCell((x) => { x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E7838' } }; });
-    for (const l of c.items) ws.addRow([
+    for (const l of c.items) ws.addRow(filtra([
       l.manifiestoItem.sucursal.nombre, l.manifiestoItem.declaracion.nombre, Number(l.cantidadCargada), l.cantidadConciliada === null ? null : Number(l.cantidadConciliada),
       l.metrica?.abreviacion ?? l.manifiestoItem.metrica?.abreviacion ?? '', l.diferenciaPct, l.precioUnitario === null ? null : Number(l.precioUnitario), l.valor,
       l.tipoNegociacion ?? '', l.formaPago ?? '', l.disposicion?.nombre ?? '', l.ordenCompra ?? '', l.facturaNumero ?? '',
-      l.facturaEmision?.toISOString().slice(0, 10) ?? '', l.facturaVencimiento?.toISOString().slice(0, 10) ?? '', l.estadoPago, l.justificacion ?? '',
-    ]);
+      ve ? l.facturaEmision?.toISOString().slice(0, 10) ?? '' : '', ve ? l.facturaVencimiento?.toISOString().slice(0, 10) ?? '' : '', ve ? l.estadoPago ?? '' : '', l.justificacion ?? '',
+    ]));
     ws.addRow([]);
     const t = c.totales;
     for (const u of t.porUnidad) ws.addRow([`Total ${u.unidad}`, '', u.cargado, u.conciliado]);

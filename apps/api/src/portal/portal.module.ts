@@ -30,7 +30,7 @@ import { AuthService, hashClave } from '../auth/auth.service';
 import { ManifiestosModule, ManifiestosService } from '../manifiestos/manifiestos.module';
 import { ImportacionModule, ImportacionService } from '../importacion/importacion.module';
 import { CertificadoComercialModule, CertificadoComercialService } from '../clientes/certificado-comercial.module';
-import { certificadosRetenidos, mensajePendientePago } from '../actas/cartera';
+import { mensajePortal, retencionesCertificados } from '../finanzas/estado';
 
 type Tx = Prisma.TransactionClient;
 const Pagina = z.object({ pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
@@ -239,21 +239,22 @@ export class PortalService {
           destino: { select: { razonSocial: true, esPropio: true } }, _count: { select: { items: true } },
         } }),
       ]);
-      // Sujeto al pago: con una factura vencida y sin pagar el certificado se ve pero no se descarga (mensaje amable)
+      // Regla del certificado del cliente (factura, pago o factura vencida): se ve, pero no se descarga (mensaje amable).
+      // Se evalúa fuera de la sesión del portal: la base no le deja leer la información financiera interna.
       const empresa = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
-      const retenidos = await certificadosRetenidos(tx, empresa.configuracion, filas.map((x) => x.id));
+      const retenidos = await retencionesCertificados(this.db, empresa.configuracion, filas.map((x) => x.id), 'PORTAL');
       return { total, pagina, porPagina, filas: filas.map((x) => {
-        const facturas = retenidos.get(x.id);
-        return { ...x, pendientePago: facturas ? { facturas, mensaje: mensajePendientePago(facturas) } : null };
+        const r = retenidos.get(x.id);
+        return { ...x, pendientePago: r ? { facturas: r.facturas, mensaje: mensajePortal(r) } : null };
       }) };
     });
   }
 
-  /** Certificado del cliente con facturas vencidas y sin pagar: no se entrega el enlace (ni se sirve uno ya entregado). */
-  private async exigirPago(tx: Tx, a: Actor, actaId: string) {
+  /** Certificado retenido por la regla de su cliente: no se entrega el enlace (ni se sirve uno ya entregado). */
+  private async exigirPago(_tx: Tx, a: Actor, actaId: string) {
     const empresa = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
-    const facturas = (await certificadosRetenidos(tx, empresa.configuracion, [actaId])).get(actaId);
-    if (facturas) throw new ForbiddenException({ mensaje: mensajePendientePago(facturas), codigo: 'PENDIENTE_PAGO', facturas });
+    const r = (await retencionesCertificados(this.db, empresa.configuracion, [actaId], 'PORTAL')).get(actaId);
+    if (r) throw new ForbiddenException({ mensaje: mensajePortal(r), codigo: r.motivo === 'FACTURA' ? 'PENDIENTE_FACTURA' : 'PENDIENTE_PAGO', facturas: r.facturas });
   }
 
   /**

@@ -36,6 +36,12 @@ const Esquema = z.object({
   // Cloudflare R2 con sus propios nombres (equivalen a los S3_*): bucket, cuenta (arma la dirección si falta R2_ENDPOINT) y claves
   R2_BUCKET_NAME: z.string().trim().default(''), R2_ACCOUNT_ID: z.string().trim().default(''), R2_ENDPOINT: z.string().trim().default(''),
   R2_ACCESS_KEY_ID: z.string().trim().default(''), R2_SECRET_ACCESS_KEY: z.string().trim().default(''),
+  // Siigo Nube: facturas y pagos de los manifiestos. Las claves van solo en el .env del API (nunca en la web ni en git).
+  SIIGO_URL: z.string().trim().url().default('https://api.siigo.com'),
+  SIIGO_USERNAME: z.string().trim().default(''), SIIGO_ACCESS_KEY: z.string().trim().default(''), SIIGO_PARTNER_ID: z.string().trim().default(''),
+  // Sincronización diaria (a esta hora de Colombia, una vez por día aunque haya varias copias del API)
+  SIIGO_SINCRONIZAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
+  SIIGO_HORA: sinVacio(z.coerce.number().int().min(0).max(23).default(6)),
   // Cola de trabajos (ZIP, Excel): esta copia del API los procesa (en producción puede haber una copia solo para eso)
   TRABAJOS_PROCESAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   TRABAJOS_SIMULTANEOS: sinVacio(z.coerce.number().int().min(1).max(8).default(2)),

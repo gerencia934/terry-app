@@ -3,25 +3,27 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Bell, Menu, X, Home, FileText, Tags, Truck, CalendarDays, ClipboardCheck, FileStack, Scale, BarChart3, Users, Car, UserCog,
   ListTree, ShieldCheck, Smartphone, Moon, Sun, Search, Upload, Download, Hourglass, Radar, Table2, Boxes, Settings,
-  Building2, Award, Milestone, FileSpreadsheet, Server, FlaskConical, type LucideIcon,
+  Building2, Award, Milestone, FileSpreadsheet, Server, FlaskConical, Receipt, type LucideIcon,
 } from 'lucide-react';
 import { useRouter, type RouteName } from '../lib/router';
 import { cx } from '../lib/format';
 import { useAlertas } from '../lib/alertas';
-import { MODO_REAL, salir, salirDeTodos, sesionActual } from '../lib/api';
+import { MODO_REAL, salir, salirDeTodos, sesionActual, tienePermiso } from '../lib/api';
 import { VentanaDobleFactor } from './DobleFactor';
 import { Descargas } from './Descargas';
 import logoDark from '../assets/logo-dark.webp';
 import logoLight from '../assets/logo-light.webp';
 
-interface Item { route: RouteName; label: string; icon: LucideIcon; desc?: string }
+interface Item { route: RouteName; label: string; icon: LucideIcon; desc?: string; /** Solo se muestra con este permiso. */ permiso?: string }
 interface Grupo { id: string; label: string; items: Item[] }
 // Navegación organizada por la cadena de trazabilidad de Terra Viva: comercial → logística → campo → planta → cumplimiento.
 export const GRUPOS: Grupo[] = [
   { id: 'inicio', label: '', items: [{ route: 'inicio', label: 'Inicio', icon: Home }] },
   { id: 'comercial', label: 'Comercial', items: [
     { route: 'clientes', label: 'Clientes y sedes', icon: Users }, { route: 'declaraciones', label: 'Declaraciones', icon: FileText, desc: 'Residuos y servicios por sede' },
-    { route: 'tarifas', label: 'Tarifas', icon: Tags, desc: 'Actualizar precios en bloque' }, { route: 'exportar', label: 'Exportar', icon: Download }] },
+    { route: 'tarifas', label: 'Tarifas', icon: Tags, desc: 'Actualizar precios en bloque' },
+    { route: 'facturacion', label: 'Facturación', icon: Receipt, desc: 'Siigo: manifiestos sin facturar, por pagar y pagados', permiso: 'finanzas.ver' },
+    { route: 'exportar', label: 'Exportar', icon: Download }] },
   { id: 'logistica', label: 'Logística', items: [
     { route: 'solicitudes', label: 'Solicitudes', icon: Truck }, { route: 'por-confirmar', label: 'Por confirmar', icon: Hourglass, desc: 'Pedidos del portal y por frecuencia' },
     { route: 'programacion', label: 'Programación', icon: CalendarDays }, { route: 'programacion-tabla', label: 'Programación en tabla', icon: Table2 },
@@ -42,6 +44,8 @@ export const GRUPOS: Grupo[] = [
 /** Secciones que ya leen y escriben en el servidor (el resto se conecta en la fase 1b). */
 const CONECTADAS = new Set<RouteName>(['inicio', 'indicadores', 'inventario', 'catalogos', 'etapas', 'clientes', 'tarifas', 'permisos', 'inspecciones', 'vehiculos', 'usuarios', 'declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
 const TODOS = GRUPOS.flatMap((g) => g.items.map((i) => ({ ...i, grupo: g.label })));
+/** El ítem se ve si no pide permiso o si el usuario lo tiene (Facturación: solo Comercial, Facturación y Gerencia). */
+const visible = (i: Item) => !i.permiso || !MODO_REAL || tienePermiso(i.permiso);
 
 export function Logo({ className = 'h-9', onDark }: { className?: string; onDark?: boolean }) {
   if (onDark) return <img src={logoDark} alt="Terra Viva S.A.S. E.S.P." className={cx('w-auto', className)} />;
@@ -72,7 +76,7 @@ function Navegacion({ route, go }: { route: RouteName; go: (r: RouteName) => voi
       {GRUPOS.map((g) => (
         <div key={g.id} className="flex flex-col gap-0.5">
           {g.label && <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.09em] text-subtle">{g.label}</p>}
-          {g.items.map((it) => (
+          {g.items.filter(visible).map((it) => (
             <button key={it.route} onClick={() => go(it.route)} aria-current={route === it.route ? 'page' : undefined}
               className={cx('flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-[13.5px] transition-colors',
                 route === it.route ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-muted hover:bg-surface-2 hover:text-fg')}>
@@ -103,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, []);
   useEffect(() => { if (buscar) setTimeout(() => qRef.current?.focus(), 30); }, [buscar]);
-  const resultados = useMemo(() => TODOS.filter((i) => `${i.grupo} ${i.label} ${i.desc ?? ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 9), [q]);
+  const resultados = useMemo(() => TODOS.filter(visible).filter((i) => `${i.grupo} ${i.label} ${i.desc ?? ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 9), [q]);
   const cerrarSesion = async () => { await salir(); go('login'); };
   const cerrarTodas = async () => { await salirDeTodos(); go('login'); };
   const [menuUsuario, setMenuUsuario] = useState(false);

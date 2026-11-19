@@ -2,6 +2,7 @@
 // Requiere el API corriendo (API_URL) y la base sembrada con prisma/seed.mjs.
 //   API_URL=http://localhost:3000/api/v1 ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/e2e.mjs
 import { createHmac, randomUUID } from 'node:crypto';
+import http from 'node:http';
 import ExcelJS from 'exceljs';
 import { PrismaClient } from '@prisma/client';
 import shared from '@terraviva/shared';
@@ -1167,7 +1168,7 @@ const tPB = (await entrarPortal('portal.b@cliente-b.test', 'PortalB2026!')).acce
 prueba('(cliente B con su sede, una declaración y un usuario de consulta)', !!sedeB.id && !!declB.id && !!tPB, JSON.stringify({ sedeB: sedeB.id, declB: declB.id }));
 
 // Barrera 1a: el usuario del portal no usa ninguna ruta de oficina
-const rutasOficina = ['/declaraciones', '/clientes', `/clientes/${clienteA.id}`, '/solicitudes', '/manifiestos', '/actas', '/conciliaciones', '/informes/inicio', '/alertas', '/vehiculos',
+const rutasOficina = ['/finanzas/resumen', '/finanzas/manifiestos', '/declaraciones', '/clientes', `/clientes/${clienteA.id}`, '/solicitudes', '/manifiestos', '/actas', '/conciliaciones', '/informes/inicio', '/alertas', '/vehiculos',
   '/permisos-ambientales', '/declaraciones/catalogos', '/importacion/historial', '/archivos?clave=x', '/zonas', '/municipios?q=bu', `/clientes/${clienteA.id}/usuarios-portal`,
   '/programacion/pendientes', '/empresa', '/usuarios', '/gestores-aliados', '/inspecciones?desde=2026-01-01&hasta=2026-12-31', '/informes/indicadores?desde=2026-01-01&hasta=2026-12-31'];
 const fugas = [];
@@ -1462,6 +1463,141 @@ prueba('…el QR lo verifica como certificado comercial, sin datos del cliente',
 let ccFijo = false;
 try { await db.certificadoComercial.update({ where: { id: ccB.id }, data: { numero: 'CC-OTRO' } }); } catch (e) { ccFijo = /no se modifica ni se borra/.test(String(e)); }
 prueba('…y es una copia fija: ni escribiendo directo en la base se cambia', ccFijo);
+
+console.log('\n9b. Facturación con Siigo (simulado: las pruebas nunca tocan la cuenta real)');
+// Siigo simulado en el puerto 3999: el API apunta a él con SIIGO_URL (y usuario «prueba», Partner-Id «TERRYGO-PRUEBAS»)
+const siigoFacturas = [], siigoNotas = [];
+const siigoSimulado = http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://siigo');
+  const json = (codigo, cuerpo) => { res.writeHead(codigo, { 'content-type': 'application/json' }); res.end(JSON.stringify(cuerpo)); };
+  if (req.method === 'POST' && u.pathname === '/auth') {
+    let b = ''; req.on('data', (c) => { b += c; });
+    req.on('end', () => { const j = JSON.parse(b || '{}'); if (j.username !== 'prueba' || req.headers['partner-id'] !== 'TERRYGO-PRUEBAS') json(401, {}); else json(200, { access_token: 'token-simulado', expires_in: 86400, token_type: 'Bearer' }); });
+    return;
+  }
+  if (req.headers.authorization !== 'Bearer token-simulado' || req.headers['partner-id'] !== 'TERRYGO-PRUEBAS') { json(401, {}); return; }
+  const lista = u.pathname === '/v1/invoices' ? siigoFacturas : u.pathname === '/v1/credit-notes' ? siigoNotas : null;
+  if (!lista) { json(404, {}); return; }
+  const nombre = u.searchParams.get('name');
+  const todas = nombre ? lista.filter((x) => x.name === nombre) : lista;
+  const p = Number(u.searchParams.get('page') ?? 1), t = Number(u.searchParams.get('page_size') ?? 100);
+  json(200, { pagination: { page: p, page_size: t, total_results: todas.length }, results: todas.slice((p - 1) * t, p * t) });
+});
+await new Promise((ok) => siigoSimulado.listen(3999, ok));
+siigoSimulado.unref();
+const sincronizarSiigo = async () => {
+  const x = await llamar('POST', '/finanzas/siigo/sincronizar', { token: T8, cuerpo: {} });
+  for (let i = 0; i < 60; i++) {
+    const e = await llamar('GET', '/finanzas/siigo', { token: T8 });
+    if (e.json.ultima && e.json.ultima.estado !== 'EN_CURSO') return { inicio: x, estado: e.json };
+    await new Promise((ok) => setTimeout(ok, 500));
+  }
+  return { inicio: x, estado: null };
+};
+const clienteFin = await db.cliente.findUnique({ where: { id: suc.clienteId } });
+const rolLogistica = rolesE2e.roles?.find((x) => x.nombre === 'Logística');
+const logisticaE2e = await db.usuario.create({ data: { empresaId: clienteFin.empresaId, rolId: rolLogistica.id, nombre: 'Logística E2E', documento: '778', email: 'logistica.e2e@terravivasas.com',
+  passwordHash: await hashFijo('Logistica2026!') } });
+const tLog = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: logisticaE2e.email, clave: 'Logistica2026!' } })).json)).accessToken;
+const [finCom, finLog, finHseq, finCond] = await Promise.all([tcom, tLog, thseq, tc].map((t) => llamar('GET', '/finanzas/resumen', { token: t })));
+prueba('facturación: la ve Comercial (con Facturación y Gerencia); Logística, HSEQ y el conductor no → 403', finCom.status === 200 && finCom.json.siigo?.configurado === true
+  && [finLog, finHseq].every((x) => x.status === 403) && [401, 403].includes(finCond.status), JSON.stringify([finCom.status, finLog.status, finHseq.status, finCond.status]));
+// Dos servicios realizados y conciliados (hace 10 y 9 días)
+const servicioFin = async (dias, cantidad) => {
+  const fecha = fechaEn(-dias);
+  const m = (await llamar('POST', '/manifiestos', { token: T8, cuerpo: { tipo: 'DESCARGUE', clienteId: suc.clienteId, fechaServicio: fecha,
+    transporte: { empresaTransportadora: 'Limpieza y Logística E2E', nit: '901234567', placa: 'LPM847', tipoVehiculo: 'Vacuum', conductorNombre: 'Conductor del cliente', conductorDocumento: '91000111', conductorArlId: ops.arl[0].id, conductorEpsId: ops.eps[0].id },
+    items: [{ declaracionId: lodo.id, sucursalId: suc.id, cantidad }] } })).json;
+  await llamar('POST', `/manifiestos/${m.id}/grabar`, { token: T8, cuerpo: { ...firma, ...receptor, horaLlegada: `${fecha}T07:00:00-05:00`, horaSalida: `${fecha}T07:40:00-05:00`, pesoEntrada: 9000, pesoSalida: 6000 } });
+  const conc = await db.conciliacion.findUnique({ where: { manifiestoId: m.id }, include: { items: true } });
+  if (conc) {
+    await llamar('POST', `/conciliaciones/${conc.id}/igualar`, { token: T8, cuerpo: {} });
+    // Sin tarifa en esa fecha: el precio se pone a mano (la base no aprueba líneas sin precio)
+    await llamar('PATCH', `/conciliaciones/${conc.id}/items`, { token: T8, cuerpo: { items: conc.items.map((x) => ({ id: x.id, precioUnitario: 100000 })) } });
+    await llamar('POST', `/conciliaciones/${conc.id}/aprobar`, { token: T8 });
+  }
+  return { ...m, conc, fecha, n: m.numero?.replace(/^\D+/, '') };
+};
+const mf1 = await servicioFin(10, 3), mf2 = await servicioFin(9, 4);
+prueba('(dos servicios realizados y conciliados para facturación)', !!mf1.conc && !!mf2.conc && (await db.conciliacion.count({ where: { id: { in: [mf1.conc?.id, mf2.conc?.id] }, estado: 'APROBADA' } })) === 2,
+  JSON.stringify([mf1.numero, mf2.numero]));
+// Alertas: solo para facturación
+const [alCom, alHseq] = await Promise.all([llamar('GET', '/alertas', { token: tcom }), llamar('GET', '/alertas', { token: thseq })]);
+prueba('alerta «manifiestos sin facturar»: la ve Comercial; HSEQ no ve ninguna alerta de facturación', alCom.json.some?.((x) => x.tipo === 'finanzas' && /sin facturar/.test(x.titulo))
+  && !alHseq.json.some?.((x) => x.tipo === 'finanzas'), JSON.stringify(alCom.json.filter?.((x) => x.tipo === 'finanzas')));
+// Siigo: una factura cita el manifiesto 2 (pendiente) y otra cita un manifiesto de otro cliente
+siigoFacturas.push(
+  { id: 'fv-e2e-1', name: 'FV-2-9001', date: fechaEn(-8), total: 400000, balance: 400000, customer: { identification: clienteFin.nit }, observations: `SERVICIO SEGUN MANIFIESTO ${mf2.n}`,
+    payments: [{ due_date: fechaEn(22), value: 400000 }], stamp: { status: 'Accepted' }, public_url: 'https://siigo.example/fv-2-9001' },
+  { id: 'fv-e2e-2', name: 'FV-2-9002', date: fechaEn(-8), total: 50000, balance: 50000, customer: { identification: '800999111' }, observations: `manifiesto ${mf1.n}`, payments: [], stamp: { status: 'Accepted' } });
+let sync = await sincronizarSiigo();
+const finM2 = await db.manifiestoFinanzas.findUnique({ where: { manifiestoId: mf2.id } });
+const lineaM2 = await db.conciliacionItem.findFirst({ where: { conciliacionId: mf2.conc.id } });
+prueba('sincronizar con Siigo: la factura que cita el manifiesto lo deja facturado y pasa a la conciliación su número, vencimiento y estado',
+  sync.inicio.status === 202 && sync.estado?.ultima?.estado === 'LISTA' && finM2?.facturado === true && finM2.estadoPago === 'PENDIENTE' && finM2.facturas.includes('FV-2-9001')
+  && lineaM2.facturaNumero === 'FV-2-9001' && lineaM2.estadoPago === 'PENDIENTE' && lineaM2.facturaVencimiento?.toISOString().slice(0, 10) === fechaEn(22),
+  JSON.stringify([sync.estado?.ultima, finM2, lineaM2?.facturaNumero]).slice(0, 400));
+prueba('…la que cita un manifiesto de otro cliente (otro NIT) no se enlaza y queda como aviso', !(await db.facturaManifiesto.count({ where: { manifiestoId: mf1.id } }))
+  && sync.estado.ultima.avisos.some((x) => x.includes('FV-2-9002')), JSON.stringify(sync.estado?.ultima?.avisos));
+const [concHseq, concFac] = await Promise.all([llamar('GET', `/conciliaciones/${mf2.conc.id}`, { token: thseq }), llamar('GET', `/conciliaciones/${mf2.conc.id}`, { token: T8 })]);
+const editaLog = await llamar('PATCH', `/conciliaciones/${mf2.conc.id}/items`, { token: tLog, cuerpo: { items: [{ id: lineaM2.id, estadoPago: 'PAGADA' }] } });
+prueba('la conciliación muestra factura y pago solo a facturación; Logística no los registra → 403', concHseq.status === 200 && !('facturaNumero' in concHseq.json.items[0])
+  && !('estadoPago' in concHseq.json.items[0]) && concFac.json.items[0].facturaNumero === 'FV-2-9001' && editaLog.status === 403, JSON.stringify([concHseq.json.items?.[0]?.facturaNumero, editaLog.status]));
+// Regla «Exigir factura»: el manifiesto 1 no tiene factura
+const reglaLog = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: tLog, cuerpo: { regla: 'EXIGIR_FACTURA' } });
+r = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: tcom, cuerpo: { regla: 'EXIGIR_FACTURA' } });
+const fichaLog = await llamar('GET', `/clientes/${clienteFin.id}`, { token: tLog });
+prueba('la regla del certificado la cambia Comercial (no Logística) y solo la ven facturación', r.status === 200 && r.json.reglaCertificado === 'EXIGIR_FACTURA' && reglaLog.status === 403
+  && fichaLog.status === 200 && !('reglaCertificado' in fichaLog.json), JSON.stringify([r.status, reglaLog.status, 'reglaCertificado' in (fichaLog.json ?? {})]));
+const periodoFin = { clienteId: suc.clienteId, periodoDesde: fechaEn(-12), periodoHasta: fechaEn(-1) };
+const actaF1 = (await llamar('POST', '/actas', { token: T8, cuerpo: { ...periodoFin, conciliacionItemIds: mf1.conc.items.map((x) => x.id) } })).json;
+r = await llamar('POST', `/actas/${actaF1.id}/emitir`, { token: thseq });
+prueba('«Exigir factura»: no deja emitir el certificado de un manifiesto sin factura (a HSEQ, sin datos de facturación) → 409', r.status === 409 && r.json.codigo === 'REGLA_CERTIFICADO'
+  && r.json.mensaje.includes(mf1.numero) && !/FV-|factura FV/.test(r.json.mensaje), JSON.stringify(r.json));
+const libreLog = await llamar('POST', `/finanzas/manifiestos/${mf1.id}/libre`, { token: tcom, cuerpo: { motivo: 'Servicio de cortesía por la visita técnica' } });
+r = await llamar('POST', `/finanzas/manifiestos/${mf1.id}/libre`, { token: T8, cuerpo: { motivo: 'Servicio de cortesía por la visita técnica' } });
+const emitidoF1 = await llamar('POST', `/actas/${actaF1.id}/emitir`, { token: thseq });
+prueba('…facturación (no Comercial) lo marca sin cobro, con su motivo, y ya se emite', libreLog.status === 403 && r.status === 201 && r.json.finanzas?.estadoPago === 'LIBRE'
+  && emitidoF1.status === 201 && emitidoF1.json.estado === 'EMITIDA', JSON.stringify([libreLog.status, r.status, emitidoF1.status, emitidoF1.json.mensaje]));
+// Regla «Exigir pago»: el manifiesto 2 tiene factura, pero sin pagar
+await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: T8, cuerpo: { regla: 'EXIGIR_PAGO' } });
+const actaF2 = (await llamar('POST', '/actas', { token: T8, cuerpo: { ...periodoFin, conciliacionItemIds: mf2.conc.items.map((x) => x.id) } })).json;
+const [emiteHseq, emiteFac] = [await llamar('POST', `/actas/${actaF2.id}/emitir`, { token: thseq }), await llamar('POST', `/actas/${actaF2.id}/emitir`, { token: T8 })];
+prueba('«Exigir pago»: con la factura sin pagar no se emite (facturación ve cuál falta)', emiteHseq.status === 409 && emiteFac.status === 409 && emiteFac.json.mensaje.includes('FV-2-9001')
+  && !emiteHseq.json.mensaje.includes('FV-2-9001'), JSON.stringify([emiteHseq.json.mensaje, emiteFac.json.mensaje]));
+siigoFacturas[0].balance = 0;
+sync = await sincronizarSiigo();
+const emitidoF2 = await llamar('POST', `/actas/${actaF2.id}/emitir`, { token: T8 });
+prueba('…cuando Siigo la muestra pagada, la sincronización lo deja «pagado» y el certificado se emite', sync.estado?.ultima?.estado === 'LISTA'
+  && (await db.manifiestoFinanzas.findUnique({ where: { manifiestoId: mf2.id } }))?.estadoPago === 'PAGADO' && emitidoF2.status === 201, JSON.stringify([emitidoF2.status, emitidoF2.json.mensaje]));
+// Si el pago se reversa en Siigo, el certificado emitido queda retenido (oficina y portal) hasta que facturación lo libere
+siigoFacturas[0].balance = 400000;
+sync = await sincronizarSiigo();
+const [ofiHseq, portalCert] = await Promise.all([llamar('POST', `/actas/${actaF2.id}/enlace`, { token: thseq, cuerpo: {} }), llamar('POST', `/portal/certificados/${actaF2.id}/enlace`, { token: tPA })]);
+const certsPortalFin = await llamar('GET', '/portal/certificados?porPagina=200', { token: tPA });
+prueba('…si el pago se reversa, el certificado queda retenido en la oficina y en el portal (mensaje amable al cliente)', ofiHseq.status === 403 && ofiHseq.json.codigo === 'REGLA_CERTIFICADO'
+  && portalCert.status === 403 && portalCert.json.codigo === 'PENDIENTE_PAGO' && /cuando se registre el pago de la factura FV-2-9001/.test(portalCert.json.mensaje)
+  && certsPortalFin.json.filas?.find((x) => x.id === actaF2.id)?.pendientePago?.facturas?.includes('FV-2-9001'), JSON.stringify([ofiHseq.status, portalCert.json]).slice(0, 300));
+r = await llamar('POST', `/actas/${actaF2.id}/liberar-descarga`, { token: T8 });
+const ofiLiberada = await llamar('POST', `/actas/${actaF2.id}/enlace`, { token: thseq, cuerpo: {} });
+prueba('…facturación lo libera (queda quién y cuándo) y ya se descarga', r.status === 201 && ofiLiberada.status === 200, JSON.stringify([r.status, ofiLiberada.status]));
+// Nota crédito por el total: la factura queda anulada y el manifiesto vuelve a «sin facturar»
+siigoNotas.push({ id: 'nc-e2e-1', name: 'NC-1-77', total: 400000, invoice: { id: 'fv-e2e-1', name: 'FV-2-9001' } });
+sync = await sincronizarSiigo();
+const panelSinFacturar = await llamar('GET', '/finanzas/manifiestos?estado=SIN_FACTURAR&porPagina=200', { token: tcom });
+prueba('una nota crédito por el total anula la factura: el manifiesto vuelve a «sin facturar»', (await db.facturaSiigo.findFirst({ where: { nombre: 'FV-2-9001' } }))?.estado === 'ANULADA'
+  && panelSinFacturar.json.filas?.some((x) => x.id === mf2.id), JSON.stringify(panelSinFacturar.json.filas?.map((x) => x.numero)));
+// Enlace manual (factura que no cita el manifiesto) y lo que no se permite
+siigoFacturas.push({ id: 'fv-e2e-3', name: 'FV-2-9003', date: fechaEn(-2), total: 380000, balance: 0, customer: { identification: clienteFin.nit }, observations: 'Servicio de noviembre', payments: [] });
+const [enlaceOtro, enlaceBien] = [await llamar('POST', `/finanzas/manifiestos/${mf2.id}/facturas`, { token: T8, cuerpo: { factura: 'FV-2-9002' } }),
+  await llamar('POST', `/finanzas/manifiestos/${mf2.id}/facturas`, { token: T8, cuerpo: { factura: 'fv-2-9003' } })];
+prueba('enlazar a mano una factura de Siigo del mismo cliente (la consulta por su número); una de otro cliente no → 400', enlaceOtro.status === 400 && /otro cliente/.test(enlaceOtro.json.mensaje)
+  && enlaceBien.status === 201 && enlaceBien.json.finanzas?.estadoPago === 'PAGADO' && enlaceBien.json.facturas?.some((x) => x.origen === 'MANUAL' && x.factura.nombre === 'FV-2-9003'),
+  JSON.stringify([enlaceOtro.json, enlaceBien.json.finanzas]).slice(0, 300));
+await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: T8, cuerpo: { regla: 'AL_VENCER' } });
+const auditoriaFin = await db.auditoria.count({ where: { accion: { in: ['REGLA_CERTIFICADO', 'LIBRE', 'ENLAZAR_FACTURA', 'SINCRONIZAR'] } } });
+prueba('…y todo queda en la auditoría (regla, sin cobro, enlaces y sincronizaciones)', auditoriaFin >= 6, String(auditoriaFin));
+siigoSimulado.close();
 
 console.log('\n10. Verificación en dos pasos (requisitos de producción §4)');
 // Códigos de una app de autenticación (RFC 6238, como Google Authenticator): HMAC-SHA1 de pasos de 30 segundos

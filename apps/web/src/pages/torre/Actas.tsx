@@ -19,6 +19,8 @@ interface ActaFila {
   generadorNit: string | null; generadorNombre: string | null;
   /** Facturas vencidas y sin pagar: el cliente no lo descarga en su portal hasta que se paguen o se libere. */
   pendientePago: string[] | null;
+  /** Regla del certificado del cliente: retenido en el portal o, con «Exigir factura / pago», también en la oficina (el detalle, solo para facturación). */
+  retencion: { alcance: 'PORTAL' | 'TODOS'; mensaje: string; motivo?: 'FACTURA' | 'PAGO' | 'VENCIDA'; facturas?: string[]; manifiestos?: string[] } | null;
 }
 interface ActaDetalle extends Omit<ActaFila, '_count' | 'cliente' | 'destino'> {
   descargaLiberadaEn: string | null; descargaLiberadaPor: { nombre: string } | null;
@@ -61,7 +63,8 @@ export function ActasServidor() {
     { key: 'emi', header: 'Emitida', render: (a) => (a.emitidaEn ? fechaHoraCo(a.emitidaEn) : '—'), priority: 3 },
     { key: 'est', header: 'Estado', render: (a) => (
       <span className="flex flex-wrap items-center gap-1"><EstadoBadge estado={a.estado} />
-        {a.pendientePago && <span title={`En el portal se descarga al registrar el pago de ${a.pendientePago.join(', ')}`}><Badge tone="warn"><Clock size={11} /> Pago pendiente</Badge></span>}</span>
+        {a.retencion && <span title={a.retencion.mensaje}><Badge tone={a.retencion.alcance === 'TODOS' ? 'bad' : 'warn'}><Clock size={11} />
+          {a.retencion.motivo === 'FACTURA' ? 'Sin factura' : a.retencion.motivo ? 'Pago pendiente' : 'Retenido'}</Badge></span>}</span>
     ), priority: 3 },
   ];
   return (
@@ -148,9 +151,9 @@ function DetalleActa({ id, onClose, onCambio }: { id: string | null; onClose: ()
             ...(a.cargadaPor ? [['Cargada por', a.cargadaPor.nombre]] as [string, string][] : []),
             ...(a.pdfSha256 ? [['Huella del PDF (SHA-256)', <span className="num break-all text-[11px]">{a.pdfSha256}</span>]] as [string, React.ReactNode][] : []),
             ...(a.estado === 'ANULADA' ? [['Anulación', `${fechaHoraCo(a.anuladaEn)} · ${a.motivoAnulacion ?? ''}`]] as [string, string][] : []),
-            ...(a.estado === 'EMITIDA' ? [['Portal del cliente', a.pendientePago
-              ? <span className="flex flex-col items-start gap-1.5"><span className="text-warn">Se descarga cuando se registre el pago de {a.pendientePago.join(', ')} (vencida{a.pendientePago.length > 1 ? 's' : ''}).</span>
-                  {tienePermiso('conciliaciones.gestionar') && <Button size="sm" disabled={ocupado} onClick={() => hacer(() => api(`/actas/${a.id}/liberar-descarga`, { cuerpo: {} }), 'Descarga liberada: el cliente ya puede descargarlo en su portal.')}><Unlock size={14} /> Liberar descarga</Button>}</span>
+            ...(a.estado === 'EMITIDA' ? [[a.retencion?.alcance === 'TODOS' ? 'Descarga' : 'Portal del cliente', a.retencion
+              ? <span className="flex flex-col items-start gap-1.5"><span className="text-warn">{a.retencion.mensaje}</span>
+                  {tienePermiso('finanzas.gestionar') && <Button size="sm" disabled={ocupado} onClick={() => hacer(() => api(`/actas/${a.id}/liberar-descarga`, { cuerpo: {} }), 'Descarga liberada: el cliente ya puede descargarlo en su portal.')}><Unlock size={14} /> Liberar descarga</Button>}</span>
               : a.descargaLiberadaEn ? `Descarga liberada el ${fechaHoraCo(a.descargaLiberadaEn)}${a.descargaLiberadaPor ? ` por ${a.descargaLiberadaPor.nombre}` : ''}`
               : 'Disponible para descargar']] as [string, React.ReactNode][] : []),
             ...(a.estado !== 'BORRADOR' ? [['Verificación', <span className="flex flex-wrap items-center gap-2"><span className="num text-[12px]">{a.codigoVerificacion}</span>

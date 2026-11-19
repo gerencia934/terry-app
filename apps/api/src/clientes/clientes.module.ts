@@ -5,6 +5,14 @@ import { SECTORES, dvNit, sectorDe } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Municipios } from '../common/servicios';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
+import { veFinanzas } from '../finanzas/estado';
+
+/** La regla del certificado (financiera) solo la ven Comercial, Facturación y Gerencia. */
+function sinRegla<T extends object>(a: Actor, x: T): T {
+  if (veFinanzas(a)) return x;
+  const { reglaCertificado: _r, ...y } = x as T & { reglaCertificado?: unknown };
+  return y as T;
+}
 
 const Filtros = z.object({
   q: z.string().optional(), tipo: z.nativeEnum(TipoCliente).optional(), activo: z.enum(['true', 'false']).optional(),
@@ -75,7 +83,7 @@ class ClientesService {
         _count: { select: { declaraciones: { where: { estado: 'AUTORIZADA', activa: true } } } },
       } }),
     ]);
-    return { total, pagina, porPagina, filas };
+    return { total, pagina, porPagina, filas: filas.map((x) => sinRegla(a, x)) };
   }
 
   async obtener(a: Actor, id: string) {
@@ -86,7 +94,7 @@ class ClientesService {
     } });
     if (!c) throw new NotFoundException({ mensaje: 'Cliente no encontrado.' });
     const activas = await this.db.declaracion.count({ where: { clienteId: id, estado: 'AUTORIZADA', activa: true } });
-    return { ...c, declaracionesActivas: activas };
+    return sinRegla(a, { ...c, declaracionesActivas: activas });
   }
 
   private async validarAsesor(a: Actor, asesorId?: string | null) {
@@ -110,7 +118,7 @@ class ClientesService {
       throw new BadRequestException({ mensaje: `Ya existe un cliente con el NIT ${b.nit}.` });
     const c = await this.db.cliente.create({ data: { ...b, sector, empresaId: a.empresaId, dv: dvNit(b.nit) } });
     await this.audit.registrar(a, 'cliente', c.id, 'CREAR', undefined, c);
-    return c;
+    return sinRegla(a, c);
   }
 
   /**
@@ -156,10 +164,10 @@ class ClientesService {
       // (inactivarlo o activarlo no lo exige)
       if (Object.keys(d.despues).some((k) => !SOLO_ESTADO.includes(k)) && !c.representanteLegal?.trim() && !datos.representanteLegal)
         throw new BadRequestException({ mensaje: 'Falta el representante legal del cliente: es obligatorio. Si es persona natural, escriba su nombre.' });
-      if (!d.hay) return { ...c, inactivadas };
+      if (!d.hay) return sinRegla(a, { ...c, inactivadas });
       const r = await tx.cliente.update({ where: { id }, data: { ...datos, ...estado } });
       await this.audit.registrar(a, 'cliente', id, inactivando ? 'INACTIVAR' : activando ? 'ACTIVAR' : 'EDITAR', d.antes, { ...d.despues, ...(inactivadas ? { declaracionesInactivadas: inactivadas } : {}) }, tx);
-      return { ...r, inactivadas };
+      return sinRegla(a, { ...r, inactivadas });
     });
   }
 

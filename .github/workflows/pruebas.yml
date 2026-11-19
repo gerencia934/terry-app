@@ -97,6 +97,13 @@ jobs:
 
       - name: Encender el API
         working-directory: apps/api
+        env:
+          # Siigo simulado por la prueba de punta a punta (puerto 3999): nunca se usa una cuenta real
+          SIIGO_URL: http://localhost:3999
+          SIIGO_USERNAME: prueba
+          SIIGO_ACCESS_KEY: prueba
+          SIIGO_PARTNER_ID: TERRYGO-PRUEBAS
+          SIIGO_SINCRONIZAR: 'false'
         run: |
           nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for i in $(seq 1 30); do

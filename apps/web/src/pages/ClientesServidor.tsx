@@ -1,7 +1,7 @@
 // Clientes y sedes conectados al API (fase 1c). Nada se borra: un cliente o una sede se inactiva.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, BadgeCheck, Building2, Clock, FileText, Loader2, Mail, MapPin, Pencil, Phone, Plus, Star, Upload } from 'lucide-react';
-import { MOTIVOS_INACTIVACION, SECTORES, dvNit, type MotivoInactivacionCliente } from '@terraviva/shared';
+import { MOTIVOS_INACTIVACION, REGLAS_CERTIFICADO, SECTORES, dvNit, type MotivoInactivacionCliente, type ReglaCertificado } from '@terraviva/shared';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, ColorBadge, DefList, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { BuscarMunicipio, type MunicipioBuscado } from '../components/BuscarMunicipio';
@@ -151,6 +151,7 @@ function DetalleCliente({ id, puedeEditar, abrir }: { id: string; puedeEditar: b
         {puedeEditar && c.activo && <BotonCertificadoComercial clienteId={c.id} />}
         <Button size="sm" variant="ghost" onClick={() => { verDeclaracionesDe({ id: c.id, razonSocial: c.razonSocial, nit: c.nit, tipo: c.tipo }); go('declaraciones'); }}><FileText size={14} /> Ver sus declaraciones</Button>
       </div>
+      {tienePermiso('finanzas.ver') && <FacturacionCliente clienteId={c.id} />}
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-[15px] font-semibold">Sedes ({c.sucursales.filter((s) => s.activa).length} activas)</h3>
@@ -233,6 +234,36 @@ function BotonCertificadoComercial({ clienteId }: { clienteId: string }) {
     setOcupado(false);
   };
   return <Button size="sm" variant="ghost" disabled={ocupado} onClick={pedir}>{ocupado ? <Loader2 size={14} className="animate-spin" /> : <BadgeCheck size={14} />} Certificado comercial</Button>;
+}
+
+/**
+ * Facturación del cliente (solo Comercial, Facturación y Gerencia): la regla de su certificado de disposición y cuántos
+ * manifiestos tiene sin facturar o por pagar según Siigo.
+ */
+function FacturacionCliente({ clienteId }: { clienteId: string }) {
+  const toast = useToast();
+  const { go } = useRouter();
+  const d = useApi<{ reglaCertificado: ReglaCertificado; sinFacturar: number; porPagar: number }>(`/finanzas/clientes/${clienteId}`);
+  const [ocupado, setOcupado] = useState(false);
+  const cambiar = async (regla: ReglaCertificado) => {
+    setOcupado(true);
+    try { await api(`/finanzas/clientes/${clienteId}/regla-certificado`, { metodo: 'PATCH', cuerpo: { regla } }); d.recargar(); toast(`Regla del certificado: ${REGLAS_CERTIFICADO[regla].nombre}.`, 'ok'); }
+    catch (e) { toast(mensajeError(e, 'No se pudo cambiar la regla.'), 'warn'); }
+    setOcupado(false);
+  };
+  if (!d.datos) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line p-3.5">
+      <p className="text-[13px] font-semibold">Facturación</p>
+      <Field label="Regla del certificado" id="cl-regla" hint={REGLAS_CERTIFICADO[d.datos.reglaCertificado].descripcion}>
+        <Select id="cl-regla" value={d.datos.reglaCertificado} disabled={ocupado} onChange={(e) => cambiar(e.target.value as ReglaCertificado)}>
+          {(Object.entries(REGLAS_CERTIFICADO) as [ReglaCertificado, { nombre: string }][]).map(([k, x]) => <option key={k} value={k}>{x.nombre}</option>)}
+        </Select>
+      </Field>
+      <p className="text-[13px] text-muted">{d.datos.sinFacturar} {d.datos.sinFacturar === 1 ? 'manifiesto sin facturar' : 'manifiestos sin facturar'} · {d.datos.porPagar} por pagar.{' '}
+        <button type="button" className="font-medium text-brand underline" onClick={() => go('facturacion')}>Ver en Facturación</button></p>
+    </div>
+  );
 }
 
 // ---------------- Formulario del cliente ----------------

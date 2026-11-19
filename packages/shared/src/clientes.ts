@@ -18,13 +18,22 @@ export const AVISO_CLIENTE_INACTIVO: Record<MotivoInactivacionCliente, string> =
   OTRO: 'Su cuenta está inactiva por el momento. Puede seguir consultando su información; para pedir servicios o cargar declaraciones, comuníquese con su asesor comercial.',
 };
 
+/** Regla del certificado de disposición de cada cliente (Siigo, gerencia 19-11-2026). */
+export const REGLAS_CERTIFICADO = {
+  AL_VENCER: { nombre: 'Retener si hay facturas vencidas', descripcion: 'La regla amable: se emite siempre; en el portal se descarga salvo que tenga una factura vencida (días de gracia en Ajustes).' },
+  EXIGIR_FACTURA: { nombre: 'Exigir factura', descripcion: 'No se emite ni se descarga el certificado mientras sus manifiestos no tengan factura.' },
+  EXIGIR_PAGO: { nombre: 'Exigir pago', descripcion: 'No se emite ni se descarga el certificado mientras sus facturas no estén pagadas.' },
+  LIBRE: { nombre: 'Libre', descripcion: 'Se emite y se descarga sin restricciones financieras.' },
+} as const;
+export type ReglaCertificado = keyof typeof REGLAS_CERTIFICADO;
+
 /** Sector económico del cliente: lista cerrada (los primeros seis los pidió la gerencia; el resto completa «entre otros»). */
 export const SECTORES = [
   'Hidrocarburos', 'Doméstico', 'Industrial', 'Agrícola', 'Minero', 'Alimenticio',
   'Salud', 'Construcción', 'Comercio y servicios', 'Transporte', 'Entidad pública', 'Educativo', 'Otro',
 ] as const;
 
-const normal = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const normal = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 /** Nombres que se escribían antes a mano y su sector de la lista. */
 const SINONIMOS: Record<string, (typeof SECTORES)[number]> = {
   petrolero: 'Hidrocarburos', petroleo: 'Hidrocarburos', 'oil & gas': 'Hidrocarburos', 'oil and gas': 'Hidrocarburos', 'petroleo y gas': 'Hidrocarburos',

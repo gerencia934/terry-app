@@ -39,6 +39,27 @@ enum TipoCliente {
   GESTOR // el cliente gestiona residuos de terceros: cada sede es un generador
 }
 
+/// Regla del certificado de disposición de cada cliente (Siigo, gerencia 19-11-2026).
+enum ReglaCertificado {
+  AL_VENCER // la regla amable: en el portal se retiene si hay una factura vencida (días de gracia en Ajustes)
+  EXIGIR_FACTURA // no se emite ni se descarga sin factura
+  EXIGIR_PAGO // no se emite ni se descarga sin pago
+  LIBRE // sin restricciones financieras
+}
+
+enum EstadoPagoManifiesto {
+  PENDIENTE
+  PAGADO
+  LIBRE // facturación lo marcó sin cobro (con su motivo)
+}
+
+enum EstadoFacturaSiigo {
+  PENDIENTE
+  ABONADA
+  PAGADA
+  ANULADA // sus notas crédito la anulan
+}
+
 /// Por qué se inactiva un cliente (gerencia, 19-11-2026). En OTRO, la nota describe la eventualidad.
 enum MotivoInactivacion {
   PAGOS_PENDIENTES
@@ -292,6 +313,9 @@ model Empresa {
 
   trabajos                Trabajo[] // cola de trabajos (ZIP, Excel)
   certificadosComerciales CertificadoComercial[]
+  facturasSiigo           FacturaSiigo[]
+  manifiestosFinanzas     ManifiestoFinanzas[]
+  sincronizacionesSiigo   SincronizacionSiigo[]
   @@map("empresas")
 }
 
@@ -401,6 +425,9 @@ model Usuario {
   @@index([empresaId])
   trabajos                Trabajo[] // lo que pidió preparar (sus descargas)
   certificadosComerciales CertificadoComercial[] @relation("CertificadoComercialSolicitante")
+  facturasEnlazadas       FacturaManifiesto[]
+  manifiestosLiberados    ManifiestoFinanzas[]
+  sincronizacionesSiigo   SincronizacionSiigo[]
   @@map("usuarios")
 }
 
@@ -454,6 +481,7 @@ model Cliente {
   motivoInactivacion MotivoInactivacion? @map("motivo_inactivacion")
   notaInactivacion   String?             @map("nota_inactivacion") @db.VarChar(500) // interna: el portal no la muestra
   inactivadoEn       DateTime?           @map("inactivado_en") @db.Timestamptz
+  reglaCertificado   ReglaCertificado    @default(AL_VENCER) @map("regla_certificado") // solo la ven y cambian Comercial, Facturación y Gerencia
   camposExtra      Json            @default("{}") @map("campos_extra")
 
   empresa        Empresa        @relation(fields: [empresaId], references: [id])
@@ -466,6 +494,7 @@ model Cliente {
   cargues        CargueMasivo[]
   usuariosPortal Usuario[]      @relation("UsuarioPortal")
   certificadosComerciales CertificadoComercial[]
+  facturasSiigo  FacturaSiigo[]
 
   @@unique([empresaId, nit])
   @@map("clientes")
@@ -1286,6 +1315,9 @@ model Manifiesto {
   evidencias      ManifiestoEvidencia[]
   conciliacion    Conciliacion?
   recurrentes     Solicitud[]           @relation("SolicitudRecurrente")
+  // Facturación (tablas aparte: solo las leen los módulos de finanzas, nunca las pantallas de campo ni el portal)
+  facturas        FacturaManifiesto[]
+  finanzas        ManifiestoFinanzas?
 
   @@unique([empresaId, numero])
   @@index([empresaId, estado, fechaServicio])
@@ -1479,6 +1511,95 @@ model Trabajo {
 
   @@index([usuarioId, creadoEn(sort: Desc)], map: "ix_trabajos_usuario")
   @@map("trabajos")
+}
+
+/// Factura de venta traída de Siigo Nube (copia local para cruzarla con los manifiestos).
+model FacturaSiigo {
+  id                 String             @id @default(uuid()) @db.Uuid
+  empresaId          String             @map("empresa_id") @db.Uuid
+  siigoId            String             @map("siigo_id") @db.VarChar(60)
+  nombre             String             @db.VarChar(30) // FV-2-1234
+  fecha              DateTime           @db.Date
+  vence              DateTime?          @db.Date
+  total              Decimal            @db.Decimal(16, 2)
+  saldo              Decimal            @db.Decimal(16, 2)
+  notasCredito       Decimal            @default(0) @map("notas_credito") @db.Decimal(16, 2)
+  estado             EstadoFacturaSiigo
+  estadoDian         String?            @map("estado_dian") @db.VarChar(30)
+  clienteNit         String             @map("cliente_nit") @db.VarChar(20)
+  clienteId          String?            @map("cliente_id") @db.Uuid
+  manifiestosCitados String[]           @default([]) @map("manifiestos_citados")
+  urlPublica         String?            @map("url_publica")
+  sincronizadaEn     DateTime           @default(now()) @map("sincronizada_en") @db.Timestamptz
+
+  empresa     Empresa             @relation(fields: [empresaId], references: [id])
+  cliente     Cliente?            @relation(fields: [clienteId], references: [id])
+  manifiestos FacturaManifiesto[]
+
+  @@unique([empresaId, siigoId])
+  @@index([empresaId, nombre], map: "ix_facturas_siigo_nombre")
+  @@map("facturas_siigo")
+}
+
+/// Qué factura cubre qué manifiesto: CITADO (la factura cita el manifiesto), NUMERO (la conciliación tiene el número) o MANUAL.
+model FacturaManifiesto {
+  facturaId    String   @map("factura_id") @db.Uuid
+  manifiestoId String   @map("manifiesto_id") @db.Uuid
+  origen       String   @db.VarChar(20)
+  creadoEn     DateTime @default(now()) @map("creado_en") @db.Timestamptz
+  creadoPorId  String?  @map("creado_por_id") @db.Uuid
+
+  factura    FacturaSiigo @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  manifiesto Manifiesto   @relation(fields: [manifiestoId], references: [id])
+  creadoPor  Usuario?     @relation(fields: [creadoPorId], references: [id])
+
+  @@id([facturaId, manifiestoId])
+  @@index([manifiestoId], map: "ix_factura_manifiestos_manifiesto")
+  @@map("factura_manifiestos")
+}
+
+/// Estado financiero de un manifiesto realizado (lo recalcula la sincronización y cada cambio de facturación).
+model ManifiestoFinanzas {
+  manifiestoId  String               @id @map("manifiesto_id") @db.Uuid
+  empresaId     String               @map("empresa_id") @db.Uuid
+  facturado     Boolean              @default(false)
+  estadoPago    EstadoPagoManifiesto @default(PENDIENTE) @map("estado_pago")
+  facturas      String[]             @default([])
+  saldo         Decimal?             @db.Decimal(16, 2)
+  vence         DateTime?            @db.Date
+  libreMotivo   String?              @map("libre_motivo") @db.VarChar(300)
+  librePorId    String?              @map("libre_por_id") @db.Uuid
+  libreEn       DateTime?            @map("libre_en") @db.Timestamptz
+  actualizadoEn DateTime             @default(now()) @map("actualizado_en") @db.Timestamptz
+
+  manifiesto Manifiesto @relation(fields: [manifiestoId], references: [id])
+  empresa    Empresa    @relation(fields: [empresaId], references: [id])
+  librePor   Usuario?   @relation(fields: [librePorId], references: [id])
+
+  @@index([empresaId, estadoPago, facturado], map: "ix_manifiestos_finanzas")
+  @@map("manifiestos_finanzas")
+}
+
+/// Cada sincronización con Siigo: AUTOMATICA (una al día) o MANUAL (botón de facturación).
+model SincronizacionSiigo {
+  id          String    @id @default(uuid()) @db.Uuid
+  empresaId   String    @map("empresa_id") @db.Uuid
+  origen      String    @db.VarChar(20)
+  dia         DateTime  @db.Date
+  usuarioId   String?   @map("usuario_id") @db.Uuid
+  estado      String    @default("EN_CURSO") @db.VarChar(20)
+  iniciadaEn  DateTime  @default(now()) @map("iniciada_en") @db.Timestamptz
+  terminadaEn DateTime? @map("terminada_en") @db.Timestamptz
+  facturas    Int       @default(0)
+  enlazadas   Int       @default(0)
+  avisos      Json      @default("[]")
+  error       String?   @db.VarChar(500)
+
+  empresa Empresa  @relation(fields: [empresaId], references: [id])
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@index([empresaId, iniciadaEn(sort: Desc)], map: "ix_sincronizaciones_siigo")
+  @@map("sincronizaciones_siigo")
 }
 
 /// Certificado comercial del cliente (modelo PD-GG-F-01, dinámico). Copia fija: uno por cliente y día, no se modifica ni

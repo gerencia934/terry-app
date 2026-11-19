@@ -122,6 +122,8 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
   const aprobada = c?.estado === 'APROBADA';
   const gestiona = tienePermiso('conciliaciones.gestionar');
   const aprueba = tienePermiso('conciliaciones.aprobar');
+  // Factura y pago: solo los ven Comercial, Facturación y Gerencia, y solo Facturación los registra
+  const veFactura = tienePermiso('finanzas.ver'), registraFactura = tienePermiso('finanzas.gestionar');
 
   const valores = useMemo(() => new Map((c?.items ?? []).map((l) => [l.id, { ...editable(l), ...cambios[l.id] }])), [c, cambios]);
   const sucias = (c?.items ?? []).filter((l) => { const o = editable(l); const v = valores.get(l.id)!; return (Object.keys(o) as (keyof Editable)[]).some((k) => o[k] !== v[k]); });
@@ -135,7 +137,7 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
   const totales = c ? totalesConciliacion(c.items.map(aTotal), [c.manifiesto]) : null;
   const faltan = c?.items.filter(sinJustificar).length ?? 0;
   const set = (lid: string, k: keyof Editable, v: string) => setCambios((s) => ({ ...s, [lid]: { ...s[lid], [k]: v } }));
-  const bloqueado = (k: keyof Editable) => !gestiona || (aprobada && !CARTERA.includes(k));
+  const bloqueado = (k: keyof Editable) => (CARTERA.includes(k) ? !registraFactura : !gestiona || aprobada);
 
   const ejecutar = async (fn: () => Promise<ConcDetalle>, ok: string) => {
     setOcupado(true);
@@ -209,6 +211,7 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
             <thead className="bg-surface-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted">
               <tr>
                 {['Generador y residuo', 'Cargado', 'Conciliado', 'Dif.', 'Precio unitario', 'Valor', 'Negociación', 'Forma de pago', 'Justificación', 'Orden de compra', 'Factura', 'Emisión', 'Vencimiento', 'Pago', 'Acta']
+                  .filter((h) => veFactura || !['Factura', 'Emisión', 'Vencimiento', 'Pago'].includes(h))
                   .map((h, i) => <th key={h} className={cx('whitespace-nowrap px-2 py-2.5 text-left', [1, 2, 3, 4, 5].includes(i) && 'text-right')}>{h}</th>)}
               </tr>
             </thead>
@@ -225,10 +228,12 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
                   <td className="w-[140px] px-2">{campo(l, 'formaPago', 'Forma de pago')}</td>
                   <td className="w-[200px] px-2">{campo(l, 'justificacion', 'Justificación')}</td>
                   <td className="w-[120px] px-2">{campo(l, 'ordenCompra', 'Orden de compra')}</td>
-                  <td className="w-[110px] px-2">{campo(l, 'facturaNumero', 'Factura')}</td>
-                  <td className="w-[140px] px-2">{campo(l, 'facturaEmision', 'Emisión de la factura')}</td>
-                  <td className="w-[140px] px-2">{campo(l, 'facturaVencimiento', 'Vencimiento de la factura')}</td>
-                  <td className="w-[110px] px-2">{campo(l, 'estadoPago', 'Estado del pago')}</td>
+                  {veFactura && <>
+                    <td className="w-[110px] px-2">{campo(l, 'facturaNumero', 'Factura')}</td>
+                    <td className="w-[140px] px-2">{campo(l, 'facturaEmision', 'Emisión de la factura')}</td>
+                    <td className="w-[140px] px-2">{campo(l, 'facturaVencimiento', 'Vencimiento de la factura')}</td>
+                    <td className="w-[110px] px-2">{campo(l, 'estadoPago', 'Estado del pago')}</td>
+                  </>}
                   <td className="num whitespace-nowrap px-2">{l.acta ? `${l.acta.numero}` : '—'}</td>
                 </tr>
               ))}
@@ -245,7 +250,8 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
             <div className="flex justify-between text-[13px]"><span>Cargado <b className="num">{cant(l.cantidadCargada)} {unidadDe(l) ?? ''}</b></span><Dif l={l} /><span className="num font-medium">{valor(l)}</span></div>
             <div className="grid grid-cols-2 gap-2.5">
               {([['cantidadConciliada', 'Conciliado'], ['precioUnitario', 'Precio unitario'], ['tipoNegociacion', 'Negociación'], ['formaPago', 'Forma de pago'],
-                ['facturaNumero', 'Factura'], ['estadoPago', 'Pago'], ['facturaEmision', 'Emisión'], ['facturaVencimiento', 'Vencimiento']] as [keyof Editable, string][]).map(([k, e]) => (
+                ['facturaNumero', 'Factura'], ['estadoPago', 'Pago'], ['facturaEmision', 'Emisión'], ['facturaVencimiento', 'Vencimiento']] as [keyof Editable, string][])
+                .filter(([k]) => veFactura || !CARTERA.includes(k)).map(([k, e]) => (
                 <label key={k} className="flex min-w-0 flex-col gap-1 text-[12px] text-muted">{e}{campo(l, k, e)}</label>
               ))}
               <label className="col-span-2 flex flex-col gap-1 text-[12px] text-muted">Justificación{campo(l, 'justificacion', 'Justificación')}</label>

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
@@ -13,7 +13,7 @@ import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, paginar, type Actor } from '../common/http';
 import type { Config } from '../config';
 import { pdfActa, type BloqueRcd, type ContenidoActa } from './pdf';
-import { certificadosRetenidos } from './cartera';
+import { mensajeOficina, retencionesCertificados, sinFacturacion, veFinanzas, type Retencion } from '../finanzas/estado';
 import { Trabajos, type ArchivoPreparado } from '../trabajos/trabajos.module';
 import { TIPOS_RCD } from '@terraviva/shared';
 
@@ -111,15 +111,32 @@ class ActasService {
         cliente: { select: { razonSocial: true } }, destino: { select: { razonSocial: true } }, emitidaPor: { select: { nombre: true } }, cargadaPor: { select: { nombre: true } },
         _count: { select: { items: true } } } }),
     ]);
-    // Cartera: los emitidos con facturas vencidas y sin pagar quedan retenidos en el portal (la oficina los ve y los libera)
-    const retenidos = await this.retenidos(a, filas.filter((x) => x.estado === 'EMITIDA').map((x) => x.id));
-    return { total, pagina, porPagina, filas: filas.map(({ contenido: _c, ...x }) => ({ ...x, pendientePago: retenidos.get(x.id) ?? null })) };
+    // Regla del certificado de cada cliente: retenido en el portal o, con «Exigir factura / pago», también en la oficina
+    const retenciones = await this.vistaRetenciones(a, filas.filter((x) => x.estado === 'EMITIDA').map((x) => x.id));
+    return { total, pagina, porPagina, filas: filas.map(({ contenido: _c, ...x }) => ({ ...x, ...(retenciones.get(x.id) ?? { pendientePago: null, retencion: null }) })) };
   }
 
-  private async retenidos(a: Actor, ids: string[]) {
-    if (!ids.length) return new Map<string, string[]>();
+  /** Certificados retenidos por la regla de su cliente («para»: emitir, descargar en la oficina o en el portal). */
+  private async retenciones(a: Actor, ids: string[], para: 'EMITIR' | 'OFICINA' | 'PORTAL') {
+    if (!ids.length) return new Map<string, Retencion>();
     const empresa = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
-    return certificadosRetenidos(this.db, empresa.configuracion, ids);
+    return retencionesCertificados(this.db, empresa.configuracion, ids, para);
+  }
+
+  /**
+   * Cómo se ve la retención en la oficina. Facturación, Comercial y Gerencia ven el detalle (facturas y manifiestos);
+   * los demás solo que está retenido y dónde (la información de facturación no es para ellos).
+   */
+  private async vistaRetenciones(a: Actor, ids: string[]) {
+    const [portal, oficina] = await Promise.all([this.retenciones(a, ids, 'PORTAL'), this.retenciones(a, ids, 'OFICINA')]);
+    const out = new Map<string, { pendientePago: string[] | null; retencion: { alcance: 'PORTAL' | 'TODOS'; mensaje: string; motivo?: string; facturas?: string[]; manifiestos?: string[] } }>();
+    for (const [id, r] of portal) {
+      const alcance = oficina.has(id) ? 'TODOS' as const : 'PORTAL' as const;
+      out.set(id, veFinanzas(a)
+        ? { pendientePago: r.motivo === 'FACTURA' ? null : r.facturas, retencion: { alcance, motivo: r.motivo, facturas: r.facturas, manifiestos: r.manifiestos, mensaje: mensajeOficina(r, 'descargar') } }
+        : { pendientePago: null, retencion: { alcance, mensaje: alcance === 'TODOS' ? 'Retenido por la regla de facturación del cliente: Facturación lo libera.' : 'Retenido en el portal del cliente por facturación.' } });
+    }
+    return out;
   }
 
   async obtener(a: Actor, id: string) {
@@ -132,8 +149,10 @@ class ActasService {
           disposicion: { select: { nombre: true, propia: true } } } } } },
     } });
     if (!x) throw new NotFoundException({ mensaje: 'Acta no encontrada.' });
-    const pendientePago = x.estado === 'EMITIDA' ? (await this.retenidos(a, [x.id])).get(x.id) ?? null : null;
-    return { ...x, urlVerificacion: this.urlVerificacion(x.codigoVerificacion), pendientePago };
+    const ret = x.estado === 'EMITIDA' ? (await this.vistaRetenciones(a, [x.id])).get(x.id) : undefined;
+    // Las líneas llevan factura y pago: solo para quien ve facturación
+    return { ...x, items: veFinanzas(a) ? x.items : x.items.map(sinFacturacion), urlVerificacion: this.urlVerificacion(x.codigoVerificacion),
+      pendientePago: ret?.pendientePago ?? null, retencion: ret?.retencion ?? null };
   }
 
   /**
@@ -144,7 +163,7 @@ class ActasService {
     const acta = await this.propia(a, id);
     if (acta.estado !== 'EMITIDA') throw new BadRequestException({ mensaje: 'Solo se libera la descarga de un certificado emitido.' });
     if (acta.descargaLiberadaEn) throw new BadRequestException({ mensaje: `La descarga del certificado ${acta.numero} ya está liberada.` });
-    const facturas = (await this.retenidos(a, [id])).get(id) ?? [];
+    const facturas = (await this.retenciones(a, [id], 'PORTAL')).get(id)?.facturas ?? [];
     const r = await this.db.acta.update({ where: { id }, data: { descargaLiberadaEn: new Date(), descargaLiberadaPorId: a.id } });
     await this.audit.registrar(a, 'acta', id, 'LIBERAR_DESCARGA', { facturasPendientes: facturas }, { descargaLiberadaEn: r.descargaLiberadaEn });
     return { id, numero: r.numero, descargaLiberadaEn: r.descargaLiberadaEn };
@@ -374,6 +393,11 @@ class ActasService {
     if (!acta) throw new NotFoundException({ mensaje: 'Acta no encontrada.' });
     if (acta.estado !== 'BORRADOR') throw new BadRequestException({ mensaje: `El acta ${acta.numero} ya fue emitida o anulada.` });
     if (acta.origen === 'CARGADA') throw new BadRequestException({ mensaje: 'Las actas cargadas de un aliado se emiten al cargarlas.' });
+    // Regla del certificado del cliente: «Exigir factura» o «Exigir pago» no dejan emitir hasta tenerlos (o marcarlos sin cobro)
+    const ret = (await this.retenciones(a, [id], 'EMITIR')).get(id);
+    if (ret) throw new ConflictException({ codigo: 'REGLA_CERTIFICADO', manifiestos: ret.manifiestos,
+      mensaje: veFinanzas(a) ? mensajeOficina(ret, 'emitir', acta.cliente.razonSocial)
+        : `No se puede emitir todavía: la regla de facturación de ${acta.cliente.razonSocial} lo retiene (manifiestos ${ret.manifiestos.join(', ')}). Consulte con Facturación.` });
     const contenido = await this.contenido(a, acta, true);
     const buf = await pdfActa(contenido);
     const pdf = await this.archivos.guardar(a.empresaId, 'actas', buf, ['pdf']);
@@ -433,6 +457,11 @@ class ActasService {
   /** PDF guardado del acta: verifica la empresa y entrega un enlace firmado de 5 minutos (en S3 no pasa por el API). */
   private async pdfGuardado(a: Actor, id: string, descargar: boolean) {
     const acta = await this.propia(a, id);
+    if (acta.estado === 'EMITIDA') {
+      const ret = (await this.retenciones(a, [id], 'OFICINA')).get(id);
+      if (ret) throw new ForbiddenException({ codigo: 'REGLA_CERTIFICADO', mensaje: veFinanzas(a) ? mensajeOficina(ret, 'descargar')
+        : 'Este certificado está retenido por la regla de facturación del cliente. Facturación puede liberarlo.' });
+    }
     const clave = acta.pdfUrl ?? acta.archivoUrl;
     if (!clave) throw new NotFoundException({ mensaje: `El acta ${acta.numero} aún no tiene PDF (está en borrador).` });
     return { clave, opciones: { nombre: `${acta.numero}${acta.estado === 'ANULADA' ? '-ANULADA' : ''}.pdf`, adjunto: descargar } };
@@ -451,8 +480,13 @@ class ActasService {
   private async zipPreparado(a: Actor, ids: string[]): Promise<ArchivoPreparado> {
     const actas = await this.db.acta.findMany({ where: { id: { in: ids }, empresaId: a.empresaId, estado: { not: 'BORRADOR' } }, orderBy: { numero: 'asc' } });
     if (!actas.length) throw new NotFoundException({ mensaje: 'No hay actas emitidas en la selección.' });
+    // Los retenidos por la regla de su cliente no van en el ZIP: se listan aparte
+    const retenidos = await this.retenciones(a, actas.filter((x) => x.estado === 'EMITIDA').map((x) => x.id), 'OFICINA');
+    const salen = actas.filter((x) => !retenidos.has(x.id));
+    if (!salen.length) throw new ForbiddenException({ codigo: 'REGLA_CERTIFICADO', mensaje: 'Todos los certificados elegidos están retenidos por la regla de facturación de su cliente.' });
     const zip = new JSZip();
-    for (const x of actas) zip.file(`${x.numero}${x.estado === 'ANULADA' ? '-ANULADA' : ''}.pdf`, await this.archivoPdf(a, x));
+    for (const x of salen) zip.file(`${x.numero}${x.estado === 'ANULADA' ? '-ANULADA' : ''}.pdf`, await this.archivoPdf(a, x));
+    if (retenidos.size) zip.file('RETENIDOS.txt', `Estos certificados no van en el ZIP: la regla de facturación de su cliente los retiene.\r\n${actas.filter((x) => retenidos.has(x.id)).map((x) => x.numero).join('\r\n')}\r\n`);
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     await this.audit.registrar(a, 'acta', actas.map((x) => x.numero).join(',').slice(0, 200), 'EXPORTAR', undefined, { formato: 'zip', actas: actas.length });
     return { buf, nombre: `certificados-${fechaColombia().toISOString().slice(0, 10)}.zip`, ext: 'zip' };
@@ -493,7 +527,7 @@ class ActasController {
   @Permiso('actas.emitir') @Post(':id/emitir') emitir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.emitir(a, id); }
   @Permiso('actas.emitir') @Patch('lineas/:lineaId/certificado-aliado') certificadoAliado(@ActorActual() a: Actor, @Param('lineaId', ParseUUIDPipe) lineaId: string, @Body(new Zod(CertificadoAliado)) b: z.infer<typeof CertificadoAliado>) { return this.s.certificadoAliado(a, lineaId, b); }
   // Cartera: quien registra facturas y pagos libera la descarga en el portal de un certificado con facturas vencidas
-  @Permiso('conciliaciones.gestionar') @Post(':id/liberar-descarga') liberar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.liberarDescarga(a, id); }
+  @Permiso('finanzas.gestionar') @Post(':id/liberar-descarga') liberar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.liberarDescarga(a, id); }
   @Permiso('actas.emitir') @Post(':id/anular') anular(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Anular)) b: z.infer<typeof Anular>) { return this.s.anular(a, id, b); }
 }
 

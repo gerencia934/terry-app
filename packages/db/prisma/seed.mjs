@@ -24,14 +24,19 @@ const PERMISOS = [
   ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel o CSV'],
   ['importacion.revertir', 'Deshacer cargues de declaraciones de otras personas o con declaraciones autorizadas (las anula; no borra)'],
   ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
+  // Facturación (Siigo): solo Comercial, Facturación (financiero) y Gerencia ven facturas, pagos y sus alertas
+  ['finanzas.ver', 'Ver facturas, pagos, la regla de certificado de los clientes y las alertas de manifiestos sin facturar'],
+  ['finanzas.gestionar', 'Sincronizar con Siigo, enlazar facturas, registrar pagos, marcar manifiestos sin cobro y liberar certificados'],
 ];
 const ROLES = {
   Administrador: ['*'],
   Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar',
     'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'],
   HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'importacion.revertir', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'],
-  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo'],
-  Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo'],
+  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo',
+    'finanzas.ver'],
+  Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo',
+    'finanzas.ver', 'finanzas.gestionar'],
   Conductor: ['rutas.operar', 'manifiestos.operar'],
   Auxiliar: ['rutas.operar', 'manifiestos.operar'],
   // Portal de clientes: sin permisos de oficina; lo que ve lo decide su cliente y su perfil (apps/api/src/portal)

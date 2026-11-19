@@ -16,13 +16,13 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 68 tablas, 24 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 72 tablas, 25 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel y CSV) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Usuarios | `GET/POST usuarios`, `PATCH usuarios/:id`, `POST usuarios/:id/invitacion`, `GET roles` (solo administración) | Nadie escribe contraseñas: el usuario nuevo recibe una invitación de 72 horas para crear la suya; nada se borra: inactivar cierra sus sesiones al instante; nadie se inactiva ni se cambia el rol a sí mismo; desbloquear tras intentos fallidos; matriz de permisos por rol |
 | Archivos | Carpeta local (desarrollo) o S3 / Cloudflare R2 / MinIO (`ALMACENAMIENTO=s3`; R2 también con sus nombres `R2_*`): fotos y firma de la inspección, firmas, licencias, PDF y lo que prepara la cola | Hecho (enlaces firmados de 5 minutos; R2 conectado el 19-11-2026) |
 | PDF | Gotenberg (HTML → PDF) | Fase 2 |
-| Integraciones | Factura electrónica DIAN, RNDC | Fase 3 |
+| Integraciones | Siigo Nube (facturas y pagos, solo lectura); RNDC y Wialon | Siigo hecho el 19-11-2026; las demás en su fase |
 
 ## 3. API (`apps/api`, prefijo `/api/v1`)
 
@@ -41,6 +41,7 @@ certificado ante la CAS o el cliente.
 | Empresa | `empresa`, `PATCH empresa/configuracion`, `PATCH empresa/consecutivos/:documento`, `empresa/textos-legales` (versiones) | Numeración TV/PSAP (el último número solo sube); textos legales con versión que salen según la disposición |
 | Archivos | `GET archivos/enlace?clave=` (enlace firmado de 5 minutos), `GET archivos?clave=` (redirige al enlace), `GET archivos/d/:token` (público: el token es la autorización; solo almacén local) | Carpeta local por empresa o S3 / R2 / MinIO; tipo real validado al subir; en S3 el archivo no pasa por el API |
 | Cola de trabajos | `GET trabajos` («Mis descargas»), `GET trabajos/:id`, `POST trabajos/:id/enlace` | ZIP y Excel se preparan aparte: la petición responde 202 y cada copia del API toma un trabajo con `FOR UPDATE SKIP LOCKED`; se reintenta hasta 3 veces lo inesperado (no la validación ni los permisos), se vuelve a exigir el permiso al preparar y el archivo preparado vence a los 7 días (`TRABAJOS_DIAS`). `TRABAJOS_PROCESAR=false` deja una copia del API sin preparar |
+| Facturación (Siigo) | `GET finanzas/resumen · siigo · manifiestos · clientes/:id` (`finanzas.ver`), `PATCH finanzas/clientes/:id/regla-certificado`, `POST finanzas/siigo/sincronizar`, `POST/DELETE finanzas/manifiestos/:id/facturas[/:facturaId]`, `POST/DELETE finanzas/manifiestos/:id/libre` (`finanzas.gestionar`) | Sincronización diaria (una por día y empresa aunque haya varias copias) y manual; cruce por manifiesto citado y NIT; regla del certificado al emitir y al descargar; tablas aparte con RLS que el portal no lee |
 | Certificado comercial | `POST clientes/:id/certificado-comercial` (`clientes.editar`), `GET clientes/:id/certificados-comerciales`, `POST clientes/certificados-comerciales/:id/enlace`; portal: `POST portal/certificado-comercial` (cualquier perfil) | Modelo PD-GG-F-01 dinámico: uno por cliente y día (el mismo si se pide otra vez), consecutivo CC-AAAA-0001 (Ajustes › Numeración), PDF en el almacenamiento con su huella y QR (`verificar/:codigo`), copia fija (trigger). No a clientes inactivos; la frase de cumplimiento solo sin facturas vencidas; los aliados no se nombran |
 | Portal de clientes | Solo usuarios de un cliente: `GET portal/yo · resumen · declaraciones[/:id] · solicitudes · manifiestos · certificados · informe?anio=`, `POST portal/manifiestos/:id/enlace · certificados/:id/enlace`, `POST portal/declaraciones/cargue/:plantilla/vista-previa · confirmar`, `GET portal/solicitudes/opciones`, `POST portal/solicitudes`, `POST portal/solicitudes/:id/cancelar`, `GET/POST portal/usuarios`, `PATCH portal/usuarios/:id`, `POST portal/usuarios/:id/invitacion · 2fa/restablecer`. Oficina: `GET/POST clientes/:id/usuarios-portal`, `PATCH …/:uid`, `POST …/:uid/invitacion · …/:uid/2fa/restablecer` (`clientes.editar`). Pública: `GET descargas/:token` | Ver «Portal de clientes» abajo |
 

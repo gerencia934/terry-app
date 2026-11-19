@@ -4,7 +4,7 @@ import { MODO_REAL, api } from './api';
 import { HOY, VEHICULOS, PERSONAS, PERMISOS, RUTAS, PREOPS, DECLARACIONES, CONCILIACION, vehiculo } from '../data/mock';
 import { diasEntre, fmtFecha } from './format';
 
-export interface Alerta { id: string; tone: 'bad' | 'warn' | 'info'; titulo: string; detalle: string; route: RouteName; categoria: 'Cumplimiento' | 'Flota' | 'Operación' | 'Comercial' }
+export interface Alerta { id: string; tone: 'bad' | 'warn' | 'info'; titulo: string; detalle: string; route: RouteName; categoria: 'Cumplimiento' | 'Flota' | 'Operación' | 'Comercial' | 'Facturación' }
 
 /** Reglas de alerta. En producción las ejecuta un job diario (BullMQ) y envía correo/push. */
 export function alertas(): Alerta[] {
@@ -42,9 +42,9 @@ export function alertas(): Alerta[] {
   return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
 }
 
-interface AlertaApi { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; referencia?: string }
-const RUTA: Record<AlertaApi['tipo'], RouteName> = { cumplimiento: 'permisos', flota: 'vehiculos', personal: 'usuarios', operacion: 'programacion' };
-const CAT: Record<AlertaApi['tipo'], Alerta['categoria']> = { cumplimiento: 'Cumplimiento', flota: 'Flota', personal: 'Flota', operacion: 'Operación' };
+interface AlertaApi { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; referencia?: string }
+const RUTA: Record<AlertaApi['tipo'], RouteName> = { cumplimiento: 'permisos', flota: 'vehiculos', personal: 'usuarios', operacion: 'programacion', finanzas: 'facturacion' };
+const CAT: Record<AlertaApi['tipo'], Alerta['categoria']> = { cumplimiento: 'Cumplimiento', flota: 'Flota', personal: 'Flota', operacion: 'Operación', finanzas: 'Facturación' };
 
 /** Alertas del servidor en modo real; las de ejemplo en modo demostración. */
 export function useAlertas(): Alerta[] {
