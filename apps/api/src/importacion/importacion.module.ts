@@ -8,7 +8,7 @@ import type { Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
-  ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm,
+  ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm, plantillaPortal,
   resolverCodigo, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -35,9 +35,11 @@ type Ids = Record<ClaveCatalogo, Map<string, string>>;
 /** Nombre normalizado → códigos, por catálogo (la planilla puede traer el nombre exacto). */
 type Nombres = NonNullable<Contexto['nombres']>;
 const conjuntos = (ids: Ids) => Object.fromEntries(Object.entries(ids).map(([k, v]) => [k, new Set(v.keys())])) as Contexto['catalogos'];
+/** Cliente que carga desde su portal: su NIT y las sedes que puede ver (vacío = todas las de su empresa). */
+export interface ClientePortal { id: string; nit: string; sedes: string[] }
 
 @Injectable()
-class ImportacionService {
+export class ImportacionService {
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly declaraciones: DeclaracionesService, private readonly municipios: Municipios) {}
 
   plantilla(id: string): Plantilla {
@@ -98,6 +100,75 @@ class ImportacionService {
     };
   }
 
+  /** Contexto del cargue desde el portal: solo el NIT del cliente y sus sedes activas (las que el usuario puede ver). */
+  private async contextoCliente(empresaId: string, cliente: ClientePortal, ids: Ids, nombres: Nombres): Promise<Contexto> {
+    const [sedes, disposiciones] = await Promise.all([
+      this.db.sucursal.findMany({ where: { clienteId: cliente.id, activa: true, ...(cliente.sedes.length ? { id: { in: cliente.sedes } } : {}) }, select: { nombre: true, codigo: true } }),
+      this.db.$queryRaw<{ codigo: string }[]>`SELECT codigo FROM disposiciones WHERE empresa_id = ${empresaId}::uuid AND activo AND fn_disposicion_cubierta(id, empresa_id)`,
+    ]);
+    return {
+      nitsClientes: new Set([cliente.nit]),
+      sucursalesPorNit: new Map([[cliente.nit, new Set(sedes.flatMap((x) => [norm(x.nombre), ...(x.codigo ? [norm(x.codigo)] : [])]))]]),
+      placas: new Set(), emails: new Set(), numerosDeclaracion: new Set(), codigosInternos: new Set(),
+      catalogos: conjuntos(ids), nombres, disposicionesCubiertas: new Set(disposiciones.map((d) => d.codigo.toUpperCase())),
+    };
+  }
+
+  /**
+   * Cargue de declaraciones desde el portal de clientes (fase C). Mismas plantillas y reglas que en la oficina, salvo:
+   * el NIT es siempre el de su empresa (no va en la plantilla), solo sus sedes (las que el usuario ve) y sin precio.
+   */
+  async validarPortal(a: Actor, id: string, cliente: ClientePortal, file?: Express.Multer.File, delimitador?: string) {
+    if (!file) throw new BadRequestException({ mensaje: 'Adjunte el archivo en el campo «archivo».' });
+    const p = plantillaPortal(id);
+    if (!p) throw new NotFoundException({ mensaje: 'Desde el portal se cargan declaraciones de residuos o de servicios.' });
+    const separador = delimitadorDe(delimitador);
+    if (delimitador && !separador) throw new BadRequestException({ mensaje: 'Separador no válido: use punto y coma, coma, tabulador o barra vertical.' });
+    let leido: PlanillaLeida;
+    try { leido = await leerPlanilla(p, file.originalname, file.buffer.buffer.slice(file.buffer.byteOffset, file.buffer.byteOffset + file.buffer.byteLength) as ArrayBuffer, { delimitador: separador }); }
+    catch (e) { throw new BadRequestException({ mensaje: e instanceof ErrorPlanilla ? e.message : 'No se pudo leer el archivo. Verifique que sea la plantilla en .xlsx, o un CSV con sus mismos encabezados.' }); }
+    if (leido.filas.length > 2000) throw new BadRequestException({ mensaje: 'Máximo 2.000 filas por archivo. Divídalo en varios.' });
+    const { ids, nombres } = await this.ids(a.empresaId);
+    // El NIT es el de su empresa: lo pone el sistema en cada fila
+    const filas = validarFilas(p, leido.filas.map((x) => ({ ...x, nit: cliente.nit })), await this.contextoCliente(a.empresaId, cliente, ids, nombres));
+    if (cliente.sedes.length) for (const x of filas)
+      if (['todas', 'principal'].includes(norm(x.datos.sedes ?? ''))) x.errores.push('Sedes: usted ve solo algunas sedes. Escriba los códigos (o los nombres) de sus sedes.');
+    await this.codigosRepetidos(a.empresaId, filas, true);
+    const hash = createHash('sha256').update(file.buffer).digest('hex');
+    const previo = await this.db.cargueMasivo.findFirst({ where: { empresaId: a.empresaId, clienteId: cliente.id, archivoHash: hash, estado: 'CONFIRMADO' }, orderBy: { creadoEn: 'desc' }, select: { creadoEn: true } });
+    return { plantilla: p, ids, nombres, hash, archivo: file.originalname, faltantes: leido.faltantes, filas,
+      formato: leido.formato, delimitador: leido.delimitador ?? null, codificacion: leido.codificacion ?? null,
+      avisos: previo ? [`Este mismo archivo ya se cargó el ${previo.creadoEn.toLocaleString('sv-SE', { timeZone: 'America/Bogota' }).slice(0, 16)}.`] : [],
+      resumen: { leidas: filas.length, validas: filas.filter((x) => !x.errores.length).length, conErrores: filas.filter((x) => x.errores.length).length, conAdvertencias: filas.filter((x) => x.advertencias.length).length } };
+  }
+
+  /**
+   * Guarda el cargue del portal en una transacción del cliente (`enTransaccion`, con la barrera de la base). Todo queda
+   * PENDIENTE y sin precio: Terra Viva fija la tarifa y lo autoriza. La responsabilidad del generador la aceptó quien carga.
+   */
+  async confirmarPortal(a: Actor, id: string, cliente: ClientePortal, enTransaccion: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>, file?: Express.Multer.File, delimitador?: string) {
+    const v = await this.validarPortal(a, id, cliente, file, delimitador);
+    if (v.faltantes.length) throw new BadRequestException({ mensaje: `Faltan columnas obligatorias: ${v.faltantes.join(', ')}.` });
+    const validas = v.filas.filter((x) => !x.errores.length);
+    if (!validas.length) throw new BadRequestException({ mensaje: 'Ninguna fila es válida. Corrija los errores y vuelva a cargar.' });
+    const errores = v.filas.filter((x) => x.errores.length).map((x) => ({ fila: x.n, mensajes: x.errores }));
+    const cargue = await enTransaccion(async (tx) => {
+      const c = await tx.cargueMasivo.create({ data: {
+        empresaId: a.empresaId, clienteId: cliente.id, plantilla: id, archivo: v.archivo.slice(0, 200), archivoHash: v.hash, formato: v.formato, delimitador: v.delimitador,
+        estado: 'CONFIRMADO', tipoCargue: 'DECLARACIONES', filasLeidas: v.filas.length, filasOk: validas.length, filasError: errores.length, errores, usuarioId: a.id,
+      } });
+      for (const x of validas) {
+        try {
+          const datos = await this.declaracion(tx, a, id, x.datos, v.ids, v.nombres);
+          await this.declaraciones.crear(a, { ...datos, precio: null, borrador: false, responsabilidadAceptada: true }, tx, c.id);
+        } catch (e) { if (e instanceof BadRequestException) throw new BadRequestException({ mensaje: `Fila ${x.n}: ${(e.getResponse() as { mensaje?: string }).mensaje ?? e.message}` }); throw e; }
+      }
+      return c;
+    });
+    await this.audit.registrar(a, 'cargue_masivo', cargue.id, 'CONFIRMAR_PORTAL', undefined, { plantilla: id, clienteId: cliente.id, creadas: validas.length });
+    return { cargueId: cargue.id, creadas: validas.length, rechazadas: v.resumen.conErrores, filasRechazadas: v.filas.filter((x) => x.errores.length), avisos: v.avisos };
+  }
+
   /** Lee y valida el archivo (Excel o CSV) contra los datos de la empresa. En CSV, `delimitador` fija el separador. */
   async validar(a: Actor, id: string, file?: Express.Multer.File, delimitador?: string) {
     if (!file) throw new BadRequestException({ mensaje: 'Adjunte el archivo en el campo «archivo».' });
@@ -120,12 +191,14 @@ class ImportacionService {
   }
 
   /** Una declaración nueva no puede repetir el código interno de otra del mismo cliente. */
-  private async codigosRepetidos(empresaId: string, filas: FilaValidada[]) {
+  private async codigosRepetidos(empresaId: string, filas: FilaValidada[], portal = false) {
     // Las anuladas (cargue deshecho) liberan su código: el archivo corregido se puede volver a cargar
     const existentes = await this.db.declaracion.findMany({ where: { empresaId, codigoInterno: { not: null }, estado: { not: 'ANULADA' } }, select: { codigoInterno: true, cliente: { select: { nit: true } } } });
     const set = new Set(existentes.map((d) => `${d.cliente.nit}|${d.codigoInterno!.toUpperCase()}`));
     for (const f of filas) if (f.datos.codigo && set.has(`${digitos(f.datos.nit)}|${f.datos.codigo.trim().toUpperCase()}`))
-      f.errores.push(`Código interno: el cliente ya tiene una declaración con el código ${f.datos.codigo}. Modifíquela desde el formulario.`);
+      f.errores.push(portal
+        ? `Código interno: su empresa ya tiene una declaración con el código ${f.datos.codigo}. Para cambiarla, escríbale a su asesor de Terra Viva.`
+        : `Código interno: el cliente ya tiene una declaración con el código ${f.datos.codigo}. Modifíquela desde el formulario.`);
   }
 
   async vistaPrevia(a: Actor, id: string, file?: Express.Multer.File, delimitador?: string) {
@@ -399,5 +472,5 @@ class ImportacionController {
   confirmar(@ActorActual() a: Actor, @Param('id') id: string, @Body('delimitador') d?: string, @UploadedFile() f?: Express.Multer.File) { return this.s.confirmar(a, id, f, d); }
 }
 
-@Module({ imports: [DeclaracionesModule], controllers: [ImportacionController], providers: [ImportacionService] })
+@Module({ imports: [DeclaracionesModule], controllers: [ImportacionController], providers: [ImportacionService], exports: [ImportacionService] })
 export class ImportacionModule {}

@@ -115,7 +115,7 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
         {(['CONSULTA', 'ADMIN'] as const).map((p) => (
           <label key={p} className={cx('flex items-start gap-2.5 rounded-lg border p-3 text-[13px]', v.perfil === p ? 'border-brand bg-brand-soft/40' : 'border-line', yo && 'opacity-60')}>
             <input type="radio" name="perfil" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.perfil === p} onChange={() => setV((s) => ({ ...s, perfil: p }))} />
-            <span><span className="font-medium">{PERFIL[p]}</span><br /><span className="text-muted">{p === 'ADMIN' ? 'Consulta y descarga todo, e invita y gestiona a los usuarios de su empresa.' : 'Consulta y descarga; no gestiona usuarios.'}</span></span>
+            <span><span className="font-medium">{PERFIL[p]}</span><br /><span className="text-muted">{p === 'ADMIN' ? 'Consulta y descarga, carga declaraciones, pide y cancela servicios, e invita a los usuarios de su empresa.' : 'Solo consulta y descarga: no carga, no pide ni gestiona usuarios.'}</span></span>
           </label>
         ))}
       </fieldset>

@@ -1124,6 +1124,85 @@ prueba('un administrador limitado a una sede no crea usuarios sin límite, no ve
 r = await llamar('POST', '/portal/usuarios', { token: tAdminSede, cuerpo: { email: 'auxiliar.c002@cliente-a.test', nombre: 'Auxiliar Sede C002', documento: '52111999', sucursalIds: [sedeC002.id] } });
 prueba('…pero sí crea usuarios de su misma sede', r.status === 201, JSON.stringify(r.json).slice(0, 150));
 
+// Escritura desde el portal (solo el perfil Administrador): cargar sus declaraciones y pedir servicios
+const csvPortal = (id, filas, d = ';') => {
+  const p = shared.plantillaPortal(id);
+  const celda = (v) => { const x = String(v ?? ''); return x.includes(d) || /["\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  return Buffer.from([p.columnas.map((c) => c.header + (c.requerido ? ' *' : '')), ...filas.map((x) => p.columnas.map((c) => x[c.key] ?? ''))]
+    .map((fila) => fila.map(celda).join(d)).join('\r\n') + '\r\n', 'utf8');
+};
+const filaPortal = (x) => {
+  const { nit: _n, metrica: _m, precio: _p, ...resto } = filaResiduo({ categoria: 'NOPEL', peligroso: 'No', corrienteY: '', riesgos: '', disposiciones: 'BIO', frecuenciaDias: '15', cantidad: '200', ...x });
+  return resto;
+};
+const formPortal = (buf, extra = {}) => { const fm = formDe(buf, 'mis-declaraciones.csv'); for (const [k, v] of Object.entries(extra)) fm.append(k, v); return fm; };
+const csvCliente = csvPortal('decl-residuos', [
+  filaPortal({ codigo: 'PORTAL-01', residuo: 'Aceite de cocina usado', sedes: 'C001' }),
+  filaPortal({ codigo: 'PORTAL-02', residuo: 'Residuo de una sede que no existe', sedes: 'C999' }),
+  filaPortal({ codigo: 'RP-018', residuo: 'Código repetido', sedes: 'C001' }),
+]);
+const errorDe = (j, codigo) => j.filas?.find((x) => x.datos.codigo === codigo)?.errores.join(' ') ?? '';
+r = await llamar('POST', '/portal/declaraciones/cargue/decl-residuos/vista-previa', { token: tPA, form: formPortal(csvCliente) });
+prueba('portal: el administrador revisa su archivo de declaraciones (sin NIT ni precio) y ve qué filas fallan', r.status === 201 && r.json.resumen?.validas === 1
+  && r.json.resumen.conErrores === 2 && /C999/.test(errorDe(r.json, 'PORTAL-02')) && /su empresa ya tiene/.test(errorDe(r.json, 'RP-018')) && !r.json.faltantes.length,
+  JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', '/portal/declaraciones/cargue/decl-residuos/confirmar', { token: tPA, form: formPortal(csvCliente) });
+prueba('…sin aceptar la declaración de responsabilidad no carga', r.status === 400 && /responsabilidad/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', '/portal/declaraciones/cargue/decl-residuos/confirmar', { token: tPA, form: formPortal(csvCliente, { aceptaResponsabilidad: 'true' }) });
+const declPortal = await db.declaracion.findFirst({ where: { clienteId: clienteA.id, codigoInterno: 'PORTAL-01' }, include: { tarifas: true, cargue: true } });
+prueba('…al confirmar, sus declaraciones quedan en revisión, sin precio y a nombre de su empresa', r.status === 201 && r.json.creadas === 1 && r.json.rechazadas === 2
+  && declPortal?.estado === 'PENDIENTE' && !declPortal.activa && declPortal.tarifas.length === 0 && declPortal.creadoPorId === portalA.id
+  && declPortal.responsabilidadAceptada && declPortal.cargue?.clienteId === clienteA.id, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', `/declaraciones?clienteId=${clienteA.id}&estado=PENDIENTE&porPagina=200`, { token: T8 });
+prueba('…y la oficina la ve por revisar', r.status === 200 && r.json.filas.some((d) => d.id === declPortal.id), String(r.json.total));
+r = await llamar('POST', '/portal/declaraciones/cargue/decl-residuos/vista-previa', { token: tPB, form: formPortal(csvCliente) });
+prueba('…un usuario de consulta no carga declaraciones → 403', r.status === 403, String(r.status));
+r = await llamar('POST', '/portal/declaraciones/cargue/decl-residuos/vista-previa', { token: tAdminSede, form: formPortal(csvPortal('decl-residuos', [
+  filaPortal({ codigo: 'PORTAL-03', residuo: 'Para todas las sedes', sedes: 'TODAS' }), filaPortal({ codigo: 'PORTAL-04', residuo: 'En otra sede', sedes: 'C001' }),
+  filaPortal({ codigo: 'PORTAL-05', residuo: 'En su sede', sedes: 'C002' }),
+])) });
+prueba('…un administrador limitado a una sede solo carga para su sede', r.status === 201 && r.json.resumen?.validas === 1 && errorDe(r.json, 'PORTAL-05') === ''
+  && /algunas sedes/.test(errorDe(r.json, 'PORTAL-03')) && /C001/.test(errorDe(r.json, 'PORTAL-04')), JSON.stringify(r.json.resumen));
+
+// Pedir servicios: quedan «por confirmar» en la oficina; el cliente cancela lo que nadie ha confirmado
+r = await llamar('GET', '/portal/solicitudes/opciones', { token: tPA });
+const opcionC001 = r.json.sedes?.find((x) => x.codigo === 'C001');
+const declPedir = opcionC001?.declaraciones[0];
+prueba('portal: para pedir ve sus sedes y en cada una lo autorizado y activo (no lo que está en revisión)', r.status === 200 && !!declPedir
+  && !r.json.sedes.some((x) => x.declaraciones.some((d) => d.id === declPortal.id)), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { sucursalId: opcionC001.id, fechaSolicitada: fechaEn(4), ordenCompra: 'OC-PORTAL-1', observaciones: 'Entrar por la portería 2',
+  items: [{ declaracionId: declPedir.id, cantidadEstimada: 120, jornada: 'AM' }] } });
+const pedidoPortal = r.json;
+const solPortal = pedidoPortal.id ? await db.solicitud.findUnique({ where: { id: pedidoPortal.id }, include: { items: true } }) : null;
+prueba('…pide un servicio: queda por confirmar, a su nombre y con la tarifa vigente', r.status === 201 && solPortal?.aprobacion === 'PENDIENTE' && solPortal.estado === 'PENDIENTE'
+  && solPortal.clienteId === clienteA.id && solPortal.creadoPorId === portalA.id && solPortal.items.length === 1 && solPortal.items[0].precioUnitario !== null, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', '/solicitudes?aprobacion=PENDIENTE&porPagina=200', { token: T8 });
+prueba('…y la oficina lo ve en «Por confirmar», marcado como pedido del portal', r.status === 200 && r.json.filas.some((x) => x.id === pedidoPortal.id && x.creadoPor?.clienteId === clienteA.id),
+  String(r.json.total));
+// Un administrador del cliente B (lo crea la oficina) no ve ni cancela lo del cliente A
+r = await llamar('POST', `/clientes/${clienteB.id}/usuarios-portal`, { token: T8, cuerpo: { email: 'admin.b@cliente-b.test', nombre: 'Administrador Cliente B', documento: '52999777', perfil: 'ADMIN' } });
+await db.usuario.update({ where: { id: r.json.id }, data: { passwordHash: await hashFijo('AdminB2026!') } });
+const tAdminB = (await entrarPortal('admin.b@cliente-b.test', 'AdminB2026!')).accessToken;
+const [p1, p2, p3, p4, p5] = await Promise.all([
+  llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { sucursalId: opcionC001.id, fechaSolicitada: fechaEn(-2), items: [{ declaracionId: declPedir.id, cantidadEstimada: 1 }] } }),
+  llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { sucursalId: opcionC001.id, fechaSolicitada: fechaEn(4), items: [{ declaracionId: declPortal.id, cantidadEstimada: 1 }] } }),
+  llamar('POST', '/portal/solicitudes', { token: tPB, cuerpo: { sucursalId: sedeB.id, fechaSolicitada: fechaEn(4), items: [{ declaracionId: declB.id, cantidadEstimada: 1 }] } }),
+  llamar('POST', `/portal/solicitudes/${pedidoPortal.id}/cancelar`, { token: tAdminB, cuerpo: { motivo: 'Intento de otro cliente' } }),
+  llamar('POST', '/portal/solicitudes', { token: tAdminB, cuerpo: { sucursalId: opcionC001.id, fechaSolicitada: fechaEn(4), items: [{ declaracionId: declPedir.id, cantidadEstimada: 1 }] } }),
+]);
+prueba('…no pide con fecha pasada ni lo que sigue en revisión; consulta no pide; el cliente B no cancela ni pide con sedes de A',
+  p1.status === 400 && p2.status === 400 && p3.status === 403 && p4.status === 404 && p5.status === 404, JSON.stringify([p1.status, p2.status, p3.status, p4.status, p5.status]));
+r = await llamar('POST', `/portal/solicitudes/${pedidoPortal.id}/cancelar`, { token: tPA, cuerpo: { motivo: 'Ya no lo necesitamos' } });
+const solCancelada = await db.solicitud.findUnique({ where: { id: pedidoPortal.id }, include: { items: true, causal: true } });
+prueba('…lo cancela mientras nadie lo ha confirmado: sus líneas quedan descartadas, con la causal y el motivo', r.status === 201 && solCancelada.estado === 'CANCELADA'
+  && solCancelada.items.every((i) => i.estado === 'DESCARTADO') && solCancelada.causal?.codigo === 'CAU-PORTAL' && /Ya no lo necesitamos/.test(solCancelada.observaciones ?? ''),
+  JSON.stringify(r.json));
+r = await llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { sucursalId: opcionC001.id, fechaSolicitada: fechaEn(5), items: [{ declaracionId: declPedir.id, cantidadEstimada: 80 }] } });
+const pedido2 = r.json;
+await llamar('PATCH', `/solicitudes/${pedido2.id}/aprobacion`, { token: T8, cuerpo: { aprobacion: 'APROBADA' } });
+r = await llamar('POST', `/portal/solicitudes/${pedido2.id}/cancelar`, { token: tPA, cuerpo: { motivo: 'Cambio de planes' } });
+prueba('…pero si Terra Viva ya lo confirmó, no lo cancela desde el portal', r.status === 400 && /confirm/.test(r.json.mensaje), JSON.stringify(r.json));
+
 // Límite de peticiones (al final: deja la IP de la prueba sin poder ingresar durante un minuto).
 // El ingreso cuenta por correo y por IP: una oficina sale a internet por una sola IP y no debe bloquearse entera.
 let r11;

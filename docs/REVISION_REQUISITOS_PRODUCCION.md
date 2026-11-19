@@ -137,7 +137,7 @@ si Siigo o Wialon fallan, la operación sigue.
 3. **Declaraciones, fases B y C:**
    - formulario de 8 secciones (hecho el 19-11-2026);
    - CSV;
-   - cargue desde el portal;
+   - cargue desde el portal (hecho el 19-11-2026);
    - reversión de lotes.
 4. **Antes de cargar datos reales** (infraestructura y seguridad):
    - nube;
@@ -148,7 +148,7 @@ si Siigo o Wialon fallan, la operación sigue.
    - 2FA;
    - monitoreo.
 5. **Siguientes pasos:**
-   - portal de clientes;
+   - portal de clientes (hecho el 19-11-2026: consulta, descarga, cargue de declaraciones y pedidos);
    - Wialon;
    - Siigo;
    - módulo Comercial;

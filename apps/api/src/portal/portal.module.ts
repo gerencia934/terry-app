@@ -5,12 +5,17 @@
 //   2. Cada consulta corre en una transacción con app.cliente_id fijado: la base (RLS, migración
 //      20261126000000_portal_clientes) solo deja ver las filas de ese cliente, aunque el API tuviera un error.
 // Descargas: enlace firmado de 5 minutos, generado después de verificar que el documento es del cliente.
+// Escritura (solo el perfil Administrador del cliente): cargar sus declaraciones (quedan en revisión, sin precio), pedir
+// servicios (quedan «por confirmar») y cancelar los que nadie ha confirmado. La base limita además qué puede escribir una
+// sesión del portal (migración 20261127000000_portal_escritura).
 import {
   BadRequestException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res,
+  UploadedFile, UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule, JwtService } from '@nestjs/jwt';
-import { Prisma, PerfilPortal } from '@prisma/client';
+import { Jornada, Prisma, PerfilPortal } from '@prisma/client';
 import type { Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
@@ -22,6 +27,7 @@ import type { Config } from '../config';
 import { AuthModule } from '../auth/auth.module';
 import { AuthService, hashClave } from '../auth/auth.service';
 import { ManifiestosModule, ManifiestosService } from '../manifiestos/manifiestos.module';
+import { ImportacionModule, ImportacionService } from '../importacion/importacion.module';
 
 type Tx = Prisma.TransactionClient;
 const Pagina = z.object({ pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
@@ -36,26 +42,42 @@ const DatosUsuario = z.object({
 });
 const CrearUsuario = DatosUsuario.extend({ email: z.string().trim().toLowerCase().email('Correo inválido').max(150) });
 const EditarUsuario = DatosUsuario.partial().extend({ activo: z.boolean().optional() });
+const PedirServicio = z.object({
+  sucursalId: z.string().uuid('Elija la sede.'),
+  fechaSolicitada: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha en formato AAAA-MM-DD.'),
+  ordenCompra: textoOpc(40), observaciones: textoOpc(1000),
+  items: z.array(z.object({
+    declaracionId: z.string().uuid(), cantidadEstimada: z.number().positive('La cantidad debe ser mayor que cero.').max(1e9), jornada: z.nativeEnum(Jornada).optional(),
+  })).min(1, 'Elija al menos un residuo o servicio.').max(50, 'Máximo 50 líneas por solicitud.'),
+});
+const Cancelar = z.object({ motivo: z.string().trim().min(5, 'Cuéntenos el motivo (mínimo 5 caracteres).').max(300) });
 const ROL_PORTAL = 'Cliente (portal)';
+/** Causal con la que queda una solicitud que cancela el propio cliente (se crea la primera vez que se usa). */
+const CAUSAL_PORTAL = { codigo: 'CAU-PORTAL', nombre: 'Cancelada por el cliente desde el portal' };
 type Documento = 'acta' | 'manifiesto';
 
 @Injectable()
 export class PortalService {
   private readonly claveDescargas: string;
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly auth: AuthService, private readonly archivos: Archivos,
-    private readonly manifiestos: ManifiestosService, private readonly jwt: JwtService, cfg: ConfigService<Config, true>) {
+    private readonly manifiestos: ManifiestosService, private readonly importacion: ImportacionService, private readonly jwt: JwtService, cfg: ConfigService<Config, true>) {
     // Clave propia de los enlaces de descarga (distinta de la de las sesiones)
     this.claveDescargas = createHash('sha256').update(`${cfg.get('JWT_SECRET', { infer: true })}:descargas-portal`).digest('base64url');
   }
 
   /** Segunda barrera: las consultas del portal corren con app.cliente_id y la base solo deja ver ese cliente. */
-  conCliente<T>(a: Actor, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  conCliente<T>(a: Actor, fn: (tx: Tx) => Promise<T>, timeout = 20_000): Promise<T> {
     const cliente = a.clienteId;
     if (!cliente) throw new ForbiddenException({ mensaje: 'Solo para usuarios del portal de clientes.' });
     return this.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.cliente_id', ${cliente}, true)`;
       return fn(tx);
-    }, { timeout: 20_000, maxWait: 10_000 });
+    }, { timeout, maxWait: 10_000 });
+  }
+
+  /** Lo que escribe en el portal (cargar, pedir, cancelar, gestionar usuarios) lo hace solo el perfil Administrador. */
+  private soloAdmin(a: Actor) {
+    if (a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Su perfil en el portal es de consulta: pídale a su administrador que lo haga o que le cambie el perfil.' });
   }
 
   /** Sedes que puede ver el usuario (vacío = todas las de su cliente). */
@@ -250,6 +272,107 @@ export class PortalService {
     });
   }
 
+  // ---------------- Cargue de sus declaraciones ----------------
+  /**
+   * Cargue de declaraciones desde el portal (fase C): la misma plantilla de la oficina sin NIT ni precio. Revisar no
+   * guarda nada; confirmar exige aceptar la declaración de responsabilidad del generador y deja todo en revisión.
+   */
+  async cargueDeclaraciones(a: Actor, plantilla: string, file: Express.Multer.File | undefined, delimitador: string | undefined, confirmar: boolean, acepta: boolean) {
+    this.soloAdmin(a);
+    const cliente = await this.conCliente(a, async (tx) => ({
+      ...(await tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { id: true, nit: true } })), sedes: await this.sedes(tx, a),
+    }));
+    if (!confirmar) {
+      const { plantilla: _p, ids: _i, nombres: _n, hash: _h, ...r } = await this.importacion.validarPortal(a, plantilla, cliente, file, delimitador);
+      return r;
+    }
+    if (!acepta) throw new BadRequestException({ mensaje: 'Para cargar, acepte la declaración de responsabilidad del generador.' });
+    return this.importacion.confirmarPortal(a, plantilla, cliente, (fn) => this.conCliente(a, fn, 120_000), file, delimitador);
+  }
+
+  // ---------------- Pedir servicios ----------------
+  /** Lo que el usuario puede pedir: sus sedes activas y, en cada una, las declaraciones autorizadas y activas. */
+  async opcionesPedido(a: Actor) {
+    return this.conCliente(a, async (tx) => {
+      const sedes = await this.sedes(tx, a);
+      const hoy = fechaColombia();
+      const filas = await tx.sucursal.findMany({
+        where: { clienteId: a.clienteId, activa: true, ...(sedes.length ? { id: { in: sedes } } : {}) }, orderBy: [{ esPrincipal: 'desc' }, { nombre: 'asc' }], take: 300,
+        select: { id: true, codigo: true, nombre: true, municipio: { select: { nombre: true } },
+          declaraciones: { where: { activa: true, declaracion: { estado: 'AUTORIZADA', activa: true } }, select: { declaracion: { select: {
+            id: true, numero: true, nombre: true, codigoInterno: true, tipo: true,
+            tarifas: { where: { vigenteDesde: { lte: hoy }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { metrica: { select: { abreviacion: true } } } },
+          } } } } },
+      });
+      return { hoy: hoy.toISOString().slice(0, 10), sedes: filas.map((x) => ({
+        id: x.id, codigo: x.codigo, nombre: x.nombre, municipio: x.municipio?.nombre ?? null,
+        declaraciones: x.declaraciones.map(({ declaracion: d }) => ({ id: d.id, numero: d.numero, nombre: d.nombre, codigoInterno: d.codigoInterno, tipo: d.tipo, unidad: d.tarifas[0]?.metrica?.abreviacion ?? null }))
+          .sort((p, q) => p.nombre.localeCompare(q.nombre, 'es')),
+      })) };
+    });
+  }
+
+  /**
+   * Pedido de servicio desde el portal: una sede, sus residuos o servicios autorizados y activos, la fecha deseada. Queda
+   * PENDIENTE de aprobación («Por confirmar» en la oficina) con la tarifa vigente a esa fecha, como un pedido de la oficina.
+   */
+  async pedirServicio(a: Actor, b: z.infer<typeof PedirServicio>) {
+    this.soloAdmin(a);
+    const fecha = new Date(`${b.fechaSolicitada}T00:00:00Z`);
+    const hoy = fechaColombia();
+    if (Number.isNaN(fecha.getTime())) throw new BadRequestException({ mensaje: 'Fecha no válida.' });
+    if (fecha < hoy) throw new BadRequestException({ mensaje: 'La fecha no puede ser anterior a hoy.' });
+    if (fecha.getTime() > hoy.getTime() + 366 * 86_400_000) throw new BadRequestException({ mensaje: 'Pida el servicio con máximo un año de anticipación.' });
+    const ids = b.items.map((i) => i.declaracionId);
+    if (new Set(ids).size !== ids.length) throw new BadRequestException({ mensaje: 'Cada residuo o servicio va una sola vez en la solicitud.' });
+    return this.conCliente(a, async (tx) => {
+      const sedes = await this.sedes(tx, a);
+      const sede = (!sedes.length || sedes.includes(b.sucursalId))
+        ? await tx.sucursal.findFirst({ where: { id: b.sucursalId, clienteId: a.clienteId, activa: true }, select: { id: true, nombre: true } }) : null;
+      if (!sede) throw new NotFoundException({ mensaje: 'Sede no encontrada.' });
+      const decls = await tx.declaracion.findMany({
+        where: { id: { in: ids }, clienteId: a.clienteId, estado: 'AUTORIZADA', activa: true, sucursales: { some: { sucursalId: sede.id, activa: true } } },
+        select: { id: true, tarifas: { where: { vigenteDesde: { lte: fecha }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fecha } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { precioUnitario: true } } },
+      });
+      if (decls.length !== ids.length) throw new BadRequestException({ mensaje: `Algún residuo o servicio no está autorizado y activo para la sede «${sede.nombre}».` });
+      const precio = (id: string) => decls.find((d) => d.id === id)?.tarifas[0]?.precioUnitario ?? null;
+      const s = await tx.solicitud.create({ data: {
+        empresaId: a.empresaId, clase: 'FORMAL', operacion: 'CARGA', clienteId: a.clienteId!, fechaSolicitada: fecha, aprobacion: 'PENDIENTE', creadoPorId: a.id,
+        ordenCompra: b.ordenCompra ?? null, observaciones: b.observaciones ?? null,
+        totalEstimado: b.items.reduce((acc, i) => acc + i.cantidadEstimada * Number(precio(i.declaracionId) ?? 0), 0),
+      } });
+      // La base vuelve a rechazar líneas con declaraciones no autorizadas, inactivas, de otro cliente o de otra sede
+      for (const i of b.items) await tx.solicitudItem.create({ data: {
+        solicitudId: s.id, declaracionId: i.declaracionId, sucursalId: sede.id, cantidadEstimada: i.cantidadEstimada, jornada: i.jornada ?? null, precioUnitario: precio(i.declaracionId),
+      } });
+      await this.audit.registrar(a, 'solicitud', s.id, 'CREAR_PORTAL', undefined, { numero: s.numero, sede: sede.nombre, lineas: b.items.length }, tx);
+      return { id: s.id, numero: s.numero };
+    });
+  }
+
+  /** El cliente cancela un pedido que Terra Viva aún no ha confirmado ni programado. Sus líneas quedan descartadas (regla de la base). */
+  async cancelarSolicitud(a: Actor, id: string, motivo: string) {
+    this.soloAdmin(a);
+    return this.conCliente(a, async (tx) => {
+      const sedes = await this.sedes(tx, a);
+      const s = await tx.solicitud.findFirst({ where: { id, clienteId: a.clienteId }, select: { id: true, numero: true, estado: true, aprobacion: true, observaciones: true, items: { select: { sucursalId: true } } } });
+      // Un usuario limitado a unas sedes solo cancela pedidos de sus sedes
+      if (!s || (sedes.length && !s.items.every((i) => sedes.includes(i.sucursalId)))) throw new NotFoundException({ mensaje: 'Solicitud no encontrada.' });
+      if (s.estado === 'CANCELADA') throw new BadRequestException({ mensaje: 'La solicitud ya está cancelada.' });
+      if (s.estado !== 'PENDIENTE' || s.aprobacion !== 'PENDIENTE')
+        throw new BadRequestException({ mensaje: 'Terra Viva ya confirmó o programó esta solicitud: para cancelarla, comuníquese con su asesor.' });
+      const causal = await tx.catalogoItem.upsert({
+        where: { empresaId_tipo_codigo: { empresaId: a.empresaId, tipo: 'CAUSAL', codigo: CAUSAL_PORTAL.codigo } }, update: {},
+        create: { empresaId: a.empresaId, tipo: 'CAUSAL', ...CAUSAL_PORTAL }, select: { id: true },
+      });
+      await tx.solicitud.update({ where: { id }, data: {
+        estado: 'CANCELADA', causalCancelacionId: causal.id, observaciones: [s.observaciones, `Cancelada por el cliente desde el portal: ${motivo}`].filter(Boolean).join('\n'),
+      } });
+      await this.audit.registrar(a, 'solicitud', id, 'CANCELAR_PORTAL', { estado: s.estado }, { estado: 'CANCELADA', motivo }, tx);
+      return { id, numero: s.numero, estado: 'CANCELADA' as const };
+    });
+  }
+
   // ---------------- Descargas con enlace firmado ----------------
   /** Verifica que el documento sea del cliente (y de sus sedes) y entrega un enlace firmado de 5 minutos. */
   async enlace(a: Actor, tipo: Documento, id: string) {
@@ -389,6 +512,8 @@ export class PortalService {
   }
 }
 
+const archivo = FileInterceptor('archivo', { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+
 /** Rutas del portal: solo usuarios de un cliente (el guard global responde 403 a cualquier otra ruta). */
 @Controller('portal')
 @SoloPortal()
@@ -404,6 +529,18 @@ class PortalController {
   @Get('certificados') certificados(@ActorActual() a: Actor, @Query(new Zod(FiltroAnio)) f: z.infer<typeof FiltroAnio>) { return this.s.certificados(a, f); }
   @Post('certificados/:id/enlace') enlaceCertificado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlace(a, 'acta', id); }
   @Get('informe') informe(@ActorActual() a: Actor, @Query(new Zod(FiltroInforme)) f: z.infer<typeof FiltroInforme>) { return this.s.informe(a, f.anio); }
+  // Cargue de sus declaraciones (plantilla decl-residuos o decl-servicios del portal): revisar y confirmar
+  @Post('declaraciones/cargue/:plantilla/vista-previa') @UseInterceptors(archivo)
+  previaCargue(@ActorActual() a: Actor, @Param('plantilla') p: string, @Body('delimitador') d?: string, @UploadedFile() f?: Express.Multer.File) {
+    return this.s.cargueDeclaraciones(a, p, f, d, false, false);
+  }
+  @Post('declaraciones/cargue/:plantilla/confirmar') @UseInterceptors(archivo)
+  confirmarCargue(@ActorActual() a: Actor, @Param('plantilla') p: string, @Body('delimitador') d?: string, @Body('aceptaResponsabilidad') acepta?: string, @UploadedFile() f?: Express.Multer.File) {
+    return this.s.cargueDeclaraciones(a, p, f, d, true, acepta === 'true');
+  }
+  @Get('solicitudes/opciones') opciones(@ActorActual() a: Actor) { return this.s.opcionesPedido(a); }
+  @Post('solicitudes') pedir(@ActorActual() a: Actor, @Body(new Zod(PedirServicio)) b: z.infer<typeof PedirServicio>) { return this.s.pedirServicio(a, b); }
+  @Post('solicitudes/:id/cancelar') cancelar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Cancelar)) b: z.infer<typeof Cancelar>) { return this.s.cancelarSolicitud(a, id, b.motivo); }
   @Get('usuarios') usuarios(@ActorActual() a: Actor) { return this.s.usuarios(a, a.clienteId!); }
   @Post('usuarios') crearUsuario(@ActorActual() a: Actor, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, a.clienteId!, b); }
   @Patch('usuarios/:id') editarUsuario(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarUsuario)) b: z.infer<typeof EditarUsuario>) { return this.s.editarUsuario(a, a.clienteId!, id, b); }
@@ -430,5 +567,5 @@ class DescargasController {
   @Publico() @Get(':token') descargar(@Param('token') token: string, @Res() res: Response) { return this.s.descargar(token, res); }
 }
 
-@Module({ imports: [AuthModule, ManifiestosModule, JwtModule.register({})], controllers: [PortalController, UsuariosPortalOficinaController, DescargasController], providers: [PortalService] })
+@Module({ imports: [AuthModule, ManifiestosModule, ImportacionModule, JwtModule.register({})], controllers: [PortalController, UsuariosPortalOficinaController, DescargasController], providers: [PortalService] })
 export class PortalModule {}

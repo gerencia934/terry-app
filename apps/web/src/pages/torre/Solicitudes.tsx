@@ -20,7 +20,10 @@ interface SolItem {
 interface Sol {
   id: string; numero: number; clase: 'PRE' | 'FORMAL'; operacion: 'CARGA' | 'DESCARGA'; fechaSolicitada: string; aprobacion: 'PENDIENTE' | 'APROBADA' | 'NO_APROBADA';
   estado: string; totalEstimado: string | null; ordenCompra: string | null; observaciones: string | null; createdAt: string; cliente: { razonSocial: string }; items: SolItem[];
+  /** Con clienteId: la pidió el cliente desde su portal. */
+  creadoPor?: { nombre: string; clienteId: string | null } | null;
 }
+const desdePortal = (s: Sol) => !!s.creadoPor?.clienteId;
 interface DeclCliente {
   id: string; numero: number; nombre: string; codigoInterno: string | null; activa: boolean;
   sucursales: { activa: boolean; sucursal: { id: string; codigo: string | null; nombre: string } }[];
@@ -44,7 +47,7 @@ export function SolicitudesServidor({ porConfirmar = false }: { porConfirmar?: b
     { key: 'n', header: 'N.º', render: (s) => <span className="num font-medium">{s.numero}</span>, priority: 3 },
     { key: 'f', header: 'Para el', render: (s) => <span className={cx('num', s.fechaSolicitada.slice(0, 10) < hoy && s.estado === 'PENDIENTE' && 'text-bad')}>{fmtFechaCorta(s.fechaSolicitada)}</span>, priority: 1 },
     { key: 'cli', header: 'Cliente', render: (s) => <span className="block max-w-[220px] truncate">{s.cliente.razonSocial}</span>, priority: 3 },
-    { key: 'clase', header: 'Origen', render: (s) => (s.clase === 'PRE' ? <Badge tone="info">Recurrente</Badge> : s.operacion === 'DESCARGA' ? 'Descarga en planta' : 'Recolección'), priority: 2 },
+    { key: 'clase', header: 'Origen', render: (s) => (s.clase === 'PRE' ? <Badge tone="info">Recurrente</Badge> : desdePortal(s) ? <Badge tone="brand">Portal del cliente</Badge> : s.operacion === 'DESCARGA' ? 'Descarga en planta' : 'Recolección'), priority: 2 },
     { key: 'sedes', header: 'Sedes', render: (s) => <span className="block max-w-[160px] truncate">{sedes(s)}</span>, priority: 3 },
     { key: 'lin', header: 'Líneas', align: 'right', render: (s) => s.items.length, priority: 3 },
     { key: 'tot', header: 'Estimado', align: 'right', render: (s) => (s.totalEstimado ? fmtCOP(Number(s.totalEstimado)) : '—'), priority: 3 },
@@ -111,7 +114,7 @@ function DetalleSolicitud({ s, onClose, onCambio }: { s: Sol | null; onClose: ()
           <DefList items={[
             ['Cliente', s.cliente.razonSocial],
             ['Para el', fmtFecha(s.fechaSolicitada)],
-            ['Origen', s.clase === 'PRE' ? 'Recurrente (la generó TERRY-GO al grabar un manifiesto)' : s.operacion === 'DESCARGA' ? 'Descarga en planta' : 'Recolección en la sede'],
+            ['Origen', s.clase === 'PRE' ? 'Recurrente (la generó TERRY-GO al grabar un manifiesto)' : desdePortal(s) ? `Pedida por el cliente desde su portal (${s.creadoPor!.nombre})` : s.operacion === 'DESCARGA' ? 'Descarga en planta' : 'Recolección en la sede'],
             ['Aprobación', <EstadoBadge estado={s.aprobacion} />],
             ['Avance', <EstadoBadge estado={s.estado} />],
             ...(s.ordenCompra ? [['Orden de compra', s.ordenCompra]] as [string, string][] : []),

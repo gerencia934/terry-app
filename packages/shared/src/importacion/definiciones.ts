@@ -295,6 +295,24 @@ export const PLANTILLAS: Plantilla[] = [
 ];
 export const plantilla = (id: string) => PLANTILLAS.find((p) => p.id === id)!;
 
+// ---------------- Portal de clientes ----------------
+/** Columnas que el cliente no llena en su portal: el NIT es el de su empresa (lo pone el sistema) y el precio lo fija Terra Viva. */
+const SOLO_OFICINA = new Set(['nit', 'metrica', 'precio']);
+/**
+ * Plantillas del cargue de declaraciones desde el portal de clientes: las mismas de la oficina, con las mismas reglas,
+ * sin NIT ni precio. Lo que el cliente carga queda en revisión: Terra Viva fija la tarifa y lo autoriza.
+ */
+export const PLANTILLAS_PORTAL: Plantilla[] = PLANTILLAS.filter((p) => p.id === 'decl-residuos' || p.id === 'decl-servicios').map((p) => ({
+  ...p,
+  archivo: p.archivo.replace('TV_plantilla_', 'TV_portal_'),
+  descripcion: p.id === 'decl-residuos'
+    ? 'Los residuos que su empresa entrega a Terra Viva y en qué sedes. Quedan en revisión: Terra Viva fija la tarifa y los autoriza.'
+    : 'Los servicios que su empresa contrata con Terra Viva (unidades sanitarias, lavado de tanques, fumigación…) y en qué sedes. Quedan en revisión.',
+  llave: p.llave.filter((k) => !SOLO_OFICINA.has(k)),
+  columnas: p.columnas.filter((c) => !SOLO_OFICINA.has(c.key)).map((c) => (c.key === 'cantidad' ? { ...c, ayuda: 'Cantidad aproximada en cada servicio.' } : c)),
+}));
+export const plantillaPortal = (id: string) => PLANTILLAS_PORTAL.find((p) => p.id === id);
+
 // ---------------- Lectura de archivos (Excel o CSV) ----------------
 /** Encabezado comparable con el de la plantilla: sin «*», tildes, mayúsculas ni espacios de más. */
 export const limpiarEncabezado = (s: string) => s.replace(/\*/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();

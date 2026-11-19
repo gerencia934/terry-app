@@ -236,6 +236,32 @@ await rechaza('no se le asigna una sede de otro cliente', () => db.usuarioSucurs
 const vista = await db.$transaction(async (tx) => { await tx.$executeRaw`SELECT set_config('app.cliente_id', ${otroCliente.id}, true)`; return { suyos: await tx.sucursal.count(), ajenas: await tx.declaracion.count({ where: { clienteId: cliente.id } }) }; });
 prueba('RLS: con la sesión de un cliente, la base solo muestra sus filas', vista.suyos === 1 && vista.ajenas === 0, JSON.stringify(vista));
 
+// Lo que puede escribir una sesión del portal (migración 20261127000000_portal_escritura), además del aislamiento
+const comoCliente = (fn) => db.$transaction(async (tx) => { await tx.$executeRaw`SELECT set_config('app.cliente_id', ${cliente.id}, true)`; return fn(tx); });
+const RLS = /row-level security|seguridad de registros/i;
+await rechaza('portal: el cliente no fija tarifas (las fija Terra Viva)', () => comoCliente((tx) => tx.tarifa.create({ data: {
+  declaracionId: dSimple.id, precioUnitario: 1, tipoNegociacion: 'COBRO', formaPago: 'CONTADO', vigenteDesde: new Date('2027-01-01'), metricaId: kg } })), RLS);
+const cambioDecl = await comoCliente((tx) => tx.declaracion.updateMany({ where: { id: dSimple.id }, data: { observaciones: 'Cambiada desde el portal' } }));
+prueba('portal: no cambia una declaración ya creada (la revisa y la autoriza Terra Viva)', cambioDecl.count === 0, JSON.stringify(cambioDecl));
+await rechaza('portal: no crea una solicitud ya aprobada (queda por confirmar)', () => comoCliente((tx) => tx.solicitud.create({ data: {
+  empresaId: E, clase: 'FORMAL', clienteId: cliente.id, fechaSolicitada: new Date('2027-01-15'), aprobacion: 'APROBADA', aprobadaEn: new Date() } })), RLS);
+const pedido = await comoCliente(async (tx) => {
+  const p = await tx.solicitud.create({ data: { empresaId: E, clase: 'FORMAL', clienteId: cliente.id, fechaSolicitada: new Date('2027-01-15') } });
+  await tx.solicitudItem.create({ data: { solicitudId: p.id, declaracionId: dSimple.id, sucursalId: sedeA.id, cantidadEstimada: 10 } });
+  return p;
+});
+await comoCliente((tx) => tx.solicitud.update({ where: { id: pedido.id }, data: { estado: 'CANCELADA', causalCancelacionId: causal } }));
+const cancelado = await db.solicitud.findUniqueOrThrow({ where: { id: pedido.id }, include: { items: true } });
+prueba('portal: pide un servicio (pendiente) y lo cancela; la base descarta sus líneas', cancelado.estado === 'CANCELADA' && cancelado.items.length === 1
+  && cancelado.items.every((i) => i.estado === 'DESCARTADO'), JSON.stringify({ estado: cancelado.estado, lineas: cancelado.items.map((i) => i.estado) }));
+const [cambioSol, cambioMf, cambioUsuario] = await comoCliente(async (tx) => [
+  await tx.solicitud.updateMany({ where: { id: sol.id }, data: { observaciones: 'Cambiada desde el portal' } }),
+  await tx.manifiesto.updateMany({ where: { clienteId: cliente.id }, data: { observaciones: 'Cambiado desde el portal' } }),
+  await tx.usuario.updateMany({ where: { id: admin.id }, data: { telefono: '3000000000' } }),
+]);
+prueba('portal: no cambia solicitudes ya confirmadas, ni manifiestos, ni usuarios de Terra Viva', cambioSol.count === 0 && cambioMf.count === 0 && cambioUsuario.count === 0,
+  JSON.stringify([cambioSol.count, cambioMf.count, cambioUsuario.count]));
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

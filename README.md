@@ -79,13 +79,14 @@ Con el API corriendo y la base sembrada (`ADMIN_PASSWORD` = la de `SEED_ADMIN_PA
 ADMIN_PASSWORD='su-clave' DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:e2e
 ```
 
-322 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
+334 pruebas: autenticación, sesiones (también cerrar en todos los dispositivos), aceptación de la política de datos,
 límites de peticiones, roles, aislamiento entre empresas, clientes y sedes, tarifas, permisos y gestores aliados, flota e inspecciones, usuarios (invitación, inactivar cierra sesiones), inicio, indicadores y recepción en planta, importación de Excel y CSV (también deshacer un cargue),
 declaraciones (crear, completar y editar desde el formulario de 8 secciones) y permisos ambientales,
 residuos no autorizados, inspección vehicular, tarifas, auditoría (con IP e inmutable) y la cadena operativa completa:
 programación por línea, ruta, GPS, manifiesto con firma y fotos, conciliación, certificado PDF con QR y hash, actas de
 aliados e informes, y el portal de clientes: un cliente no ve nada de otro (listados, detalle, descargas con enlace
-firmado, filtros e informes), ni por el API ni en la base (RLS). Al final prueban el límite de ingresos: durante un
+firmado, filtros e informes), ni por el API ni en la base (RLS); el administrador del cliente carga sus declaraciones
+(quedan en revisión), pide servicios y cancela los que nadie ha confirmado. Al final prueban el límite de ingresos: durante un
 minuto esa IP no puede volver a ingresar.
 
 Reglas de la cadena operativa escritas directamente en la base (sin API), sobre una base migrada y sembrada:
@@ -94,8 +95,8 @@ Reglas de la cadena operativa escritas directamente en la base (sin API), sobre 
 DATABASE_URL=postgresql://terraviva:terraviva@localhost:5432/terraviva npm run test:reglas -w @terraviva/db
 ```
 
-77 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
-conciliación, actas, descargue en planta, las reglas de cumplimiento de la gerencia, deshacer un cargue, el historial de cumplimiento de obligaciones y los usuarios del portal de clientes (perfil, sedes y RLS).
+82 pruebas: aprobación y programación por línea, rutas y rastreo GPS (también sin señal), grabar y anular manifiestos,
+conciliación, actas, descargue en planta, las reglas de cumplimiento de la gerencia, deshacer un cargue, el historial de cumplimiento de obligaciones y los usuarios del portal de clientes (perfil, sedes y RLS) y lo que puede escribir una sesión del portal.
 
 **En GitHub** (`.github/`), cada cambio en `main` o en una rama `fase-*`, y cada pull request, corre solo:
 - **Pruebas:** compila todo, migra y siembra una base nueva y corre las dos suites. También falla si una librería de

@@ -84,6 +84,7 @@ class LogisticaService {
       this.db.solicitud.count({ where }),
       this.db.solicitud.findMany({ where, take, skip, orderBy: { numero: 'desc' }, include: {
         cliente: { select: { razonSocial: true } },
+        creadoPor: { select: { nombre: true, clienteId: true } }, // con clienteId: la pidió el cliente desde su portal
         items: { include: {
           sucursal: { select: { codigo: true, nombre: true, municipioDane: true } },
           declaracion: { select: { numero: true, nombre: true, codigoInterno: true, disposiciones: { where: { principal: true }, select: { disposicion: { select: { nombre: true } } } } } },

@@ -40,7 +40,7 @@ certificado ante la CAS o el cliente.
 | Informes | `informes/inicio` (cadena del mes, operación de hoy, agenda, obligaciones; cifras de dinero solo con «informes.ver»), `informes/indicadores` (toneladas, facturado, comprado y servicios por mes; por cliente, destino, tratamiento, vehículo y conductor; inspecciones y diferencia de báscula), `informes/recepcion-planta` (lo que entró a Los Pinos por tratamiento), `informes/rutas/rendimiento`, `informes/rutas/costos` | Sobre las conciliaciones no anuladas; toneladas solo de líneas en masa (factor a kg); lo facturado coincide con el consolidado de conciliaciones; fletes en Excel |
 | Empresa | `empresa`, `PATCH empresa/configuracion`, `PATCH empresa/consecutivos/:documento`, `empresa/textos-legales` (versiones) | Numeración TV/PSAP (el último número solo sube); textos legales con versión que salen según la disposición |
 | Archivos | `archivos?clave=` | Carpeta local por empresa (S3/R2 en producción); tipo real validado |
-| Portal de clientes | Solo usuarios de un cliente: `GET portal/yo · resumen · declaraciones[/:id] · solicitudes · manifiestos · certificados · informe?anio=`, `POST portal/manifiestos/:id/enlace · certificados/:id/enlace`, `GET/POST portal/usuarios`, `PATCH portal/usuarios/:id`, `POST portal/usuarios/:id/invitacion`. Oficina: `GET/POST clientes/:id/usuarios-portal`, `PATCH …/:uid`, `POST …/:uid/invitacion` (`clientes.editar`). Pública: `GET descargas/:token` | Ver «Portal de clientes» abajo |
+| Portal de clientes | Solo usuarios de un cliente: `GET portal/yo · resumen · declaraciones[/:id] · solicitudes · manifiestos · certificados · informe?anio=`, `POST portal/manifiestos/:id/enlace · certificados/:id/enlace`, `POST portal/declaraciones/cargue/:plantilla/vista-previa · confirmar`, `GET portal/solicitudes/opciones`, `POST portal/solicitudes`, `POST portal/solicitudes/:id/cancelar`, `GET/POST portal/usuarios`, `PATCH portal/usuarios/:id`, `POST portal/usuarios/:id/invitacion`. Oficina: `GET/POST clientes/:id/usuarios-portal`, `PATCH …/:uid`, `POST …/:uid/invitacion` (`clientes.editar`). Pública: `GET descargas/:token` | Ver «Portal de clientes» abajo |
 
 Detalle de la cadena operativa: `docs/operacion/MODELO_OPERACION.md`.
 
@@ -61,8 +61,9 @@ por minuto en cada ruta. En ingreso, recuperar y restablecer la contraseña hay 
 Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar y Cliente (portal).
 
 **Portal de clientes (requisitos de producción §2).** Un usuario del portal está ligado a un cliente (`usuarios.cliente_id`),
-con perfil **Administrador** (invita y gestiona a los de su empresa) o **Consulta**, y opcionalmente limitado a algunas
-sedes (`usuario_sucursales`). Consulta y descarga solo lo suyo, con doble barrera:
+con perfil **Administrador** (además carga sus declaraciones, pide y cancela servicios, e invita y gestiona a los de su
+empresa) o **Consulta** (solo consulta y descarga), y opcionalmente limitado a algunas sedes (`usuario_sucursales`).
+Consulta, descarga y escribe solo lo suyo, con doble barrera:
 1. **API.** El token lleva el cliente y el perfil. El guard global le responde 403 (`codigo: PORTAL`) en toda ruta que no
    sea del portal, y el personal de Terra Viva recibe 403 en las del portal. Cada consulta filtra por el cliente del token
    (nunca por un id que mande el navegador) y por sus sedes; un documento de otro cliente responde 404.
@@ -72,6 +73,20 @@ sedes (`usuario_sucursales`). Consulta y descarga solo lo suyo, con doble barrer
    un error. Sin `app.cliente_id` (personal de Terra Viva) todo se ve como antes. PostgreSQL no aplica la RLS a un
    superusuario ni a un usuario con BYPASSRLS: el API debe conectarse con un usuario sin esos privilegios (en producción
    no arranca si no, y las pruebas automáticas lo verifican). FORCE hace que aplique también al dueño de las tablas.
+   Además, políticas RESTRICTIVE (migración `20261127000000_portal_escritura`) limitan qué escribe una sesión del
+   portal: declaraciones solo nuevas y en revisión (sin tarifas), solicitudes solo «por confirmar» y su cancelación
+   mientras nadie las confirme, cargues solo de declaraciones, usuarios solo de su empresa; nada más (clientes, sedes,
+   manifiestos, conciliaciones, actas).
+
+**Lo que escribe el cliente (perfil Administrador).**
+- **Cargar sus declaraciones** con la misma plantilla de la oficina, sin NIT (es el de su empresa) ni precio (lo fija
+  Terra Viva), y las mismas validaciones. Solo en sus sedes; quien ve algunas sedes no usa TODAS ni PRINCIPAL. Revisar no
+  guarda; confirmar exige aceptar la declaración de responsabilidad del generador. Todo queda PENDIENTE para que Terra
+  Viva fije la tarifa y lo autorice; el cargue queda con su cliente y se deshace desde la oficina.
+- **Pedir un servicio** en una de sus sedes, con lo autorizado y activo allí, la fecha (de hoy a un año), la cantidad
+  aproximada y la jornada. Queda «por confirmar», con la tarifa vigente a esa fecha; la oficina lo ve marcado como
+  pedido del portal.
+- **Cancelar** un pedido que nadie ha confirmado ni programado, con el motivo: la base descarta sus líneas.
 
 Las descargas usan un **enlace firmado de 5 minutos** (`/descargas/<token>`, clave propia distinta de la de las
 sesiones), que el API entrega solo después de verificar que el documento es del cliente y de sus sedes; al servirlo
@@ -102,8 +117,9 @@ en cada listado, detalle, descarga, filtro e informe de otro.
   Ajustes) y buscador con Ctrl + K.
 - Portal de clientes (`pages/portal/`, rutas `#portal…`): inicio con su resumen y próximos servicios, declaraciones,
   solicitudes, manifiestos (cargado en la sede y pesado en planta), certificados con su verificación pública, informe
-  del año por residuo y por mes (Excel) y usuarios (solo el administrador del cliente). Un usuario del portal no ve la
-  oficina, y la oficina no entra al portal.
+  del año por residuo y por mes (Excel) y usuarios (solo el administrador del cliente). El administrador también carga
+  declaraciones (`pages/portal/Escritura.tsx`: plantilla, revisión fila por fila y aceptación de responsabilidad), pide
+  servicios y cancela los que nadie ha confirmado. Un usuario del portal no ve la oficina, y la oficina no entra al portal.
 - Móvil: tablas que se vuelven tarjetas, filtros en hoja inferior, calendario que pasa a agenda,
   app del conductor con botones grandes.
 
@@ -116,5 +132,5 @@ en cada listado, detalle, descarga, filtro e informe de otro.
 | 1b / 3 | Núcleo operativo: modelo y reglas (3-A), API (3-B), app del conductor sin señal (3-C) y torre de control (3-D) | ✅ |
 | 1c | Conectar a la API lo que aún era de ejemplo: clientes, tarifas, permisos, inspecciones, flota, usuarios, inicio, indicadores, inventario (entradas) y catálogos | ✅ (falta el saldo de inventario y editar catálogos: preguntas F1 y F2) |
 | 2 | PDF de manifiestos y certificados, fotos y firmas en S3, tarea diaria de alertas por correo | |
-| 3 | Portal de clientes: consulta y descarga con doble barrera (API + RLS), usuarios del cliente e informe anual | ✅ (siguen: cargue de declaraciones y pedidos de servicio desde el portal) |
+| 3 | Portal de clientes: consulta y descarga con doble barrera (API + RLS), usuarios del cliente, informe anual, cargue de sus declaraciones y pedidos de servicio | ✅ |
 | 3+ | Factura electrónica DIAN, RNDC | |

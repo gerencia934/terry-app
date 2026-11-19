@@ -223,8 +223,8 @@ DeclaracionesServidor (lista con filtros y «Cargar más»)
 - Al completar una declaración convertida de la fase 1, deja de estar marcada como tal.
 - La auditoría guarda qué columnas cambiaron (antes y después), cuántas sedes y disposiciones quedaron y el precio.
 
-La fase C (CSV y deshacer un cargue) está en §10. Falta el cargue desde el portal del cliente, cuando exista el portal, y
-adjuntar la FDS como archivo; hoy es un enlace.
+La fase C (CSV, deshacer un cargue y el cargue desde el portal del cliente) está en §10. Falta adjuntar la FDS como
+archivo; hoy es un enlace.
 
 ## 9. Reglas de cumplimiento de las respuestas de la gerencia (19-11-2026)
 
@@ -324,4 +324,14 @@ Las preguntas están en `docs/PREGUNTAS_GERENCIA.md`. Esto quedó en el sistema,
     (`trg_cargue_revertido`).
 - La auditoría guarda el lote deshecho y la anulación de cada declaración.
 
-**Pendiente:** el cargue por el propio cliente desde su portal (fase 3, cuando exista el portal).
+**Cargue desde el portal del cliente** (19-11-2026; `POST portal/declaraciones/cargue/:plantilla/vista-previa · confirmar`):
+- Lo hace el administrador del cliente con la misma plantilla de la oficina, sin las columnas de NIT, métrica y precio
+  (`PLANTILLAS_PORTAL` en `packages/shared`): el NIT es el de su empresa y la tarifa la fija Terra Viva.
+- Mismas validaciones y catálogos que en la oficina. Solo sus sedes activas; quien ve algunas sedes no usa TODAS ni
+  PRINCIPAL. Un código interno que su empresa ya usa se rechaza.
+- Revisar no guarda nada. Confirmar exige aceptar la declaración de responsabilidad del generador: queda registrada
+  con quién y cuándo.
+- Todo queda **PENDIENTE**, sin tarifa: Terra Viva fija el precio y lo autoriza. El lote queda en `cargues_masivos`
+  con el cliente y se deshace desde la oficina (`importacion.revertir`).
+- La base lo exige también: en una sesión del portal, una declaración solo se crea pendiente e inactiva, no se cambia
+  después y no se le crean tarifas (migración `20261127000000_portal_escritura`).
