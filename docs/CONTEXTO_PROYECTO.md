@@ -72,8 +72,8 @@ Las 7 preguntas de la fase A están respondidas. Ver la tabla en `docs/declaraci
 - **Categorías:** las 5 actuales quedan confirmadas.
 - **Migración «abierta»:** convierte datos de la fase 1 si los hay.
 
-Falta registrar la fecha de vencimiento real de cada permiso de la CAS. Hoy no tienen fecha, y la regla de cobertura los
-toma como vigentes mientras su estado sea VIGENTE.
+Los permisos de la CAS, sus vigencias y sus obligaciones reales (código OB-xx) quedaron cargados con las respuestas de la
+gerencia (fila RG). Un permiso sin fecha de vencimiento cuenta como vigente mientras su estado sea VIGENTE.
 
 ## Fuentes del usuario
 
@@ -87,7 +87,8 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
 
 ## Pendientes generales
 
-- Fase 1b: conectar a la API las pantallas restantes y la app del conductor sin señal.
-- Obligaciones reales de cada acto de la CAS: hoy están marcadas «VERIFICAR».
-- Formatos PDF oficiales de manifiesto y certificado.
+- Fase 1c: conectar a la API lo que aún es de ejemplo: clientes, tarifas, inspecciones (vista de oficina), inventario,
+  permisos, indicadores y ajustes (`docs/ARQUITECTURA.md` §6).
+- Certificados: campos del Anexo VI del Decreto 0766 de 2026 y códigos D/R (`docs/declaraciones/MODELO_DATOS.md` §9).
+- Portal del cliente (fase 3): cargue de sus propias declaraciones y consulta de certificados.
 - Docker no se probó en el entorno de Claude: el usuario lo levanta en su equipo.

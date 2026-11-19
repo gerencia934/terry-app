@@ -64,7 +64,7 @@ Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Condu
 - Reglas en la base: tolerancia de báscula ±2 % con explicación obligatoria (CHECK), ruta sin
   inspección aprobada no inicia (trigger), ítem de solicitud solo con declaración autorizada (trigger).
 - `prisma/seed.mjs`: idempotente. Empresa (NIT 901.089.780-8), roles, permisos ambientales de la CAS
-  (obligaciones de ejemplo marcadas «VERIFICAR»), catálogos, zonas, etapas, elementos de inspección,
+  (con sus obligaciones reales, código OB-xx), gestores aliados, textos legales, catálogos, zonas, etapas, elementos de inspección,
   flota y usuario administrador.
 
 ## 5. Web (`apps/web`)
