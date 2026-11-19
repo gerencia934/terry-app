@@ -245,6 +245,17 @@ Las preguntas están en `docs/PREGUNTAS_GERENCIA.md`. Esto quedó en el sistema,
   - que no excluya el tipo de residuo (`excluye_tipos_residuo`; por ejemplo, Las Bateas no recibe hospitalarios).
 
   Si la vigencia «no consta», la disposición no queda cubierta.
+
+  Los gestores y sus licencias se verificaron el 19-11-2026 contra el Drive (carpetas «1. LICENCIAS DE USO COMUN» y
+  «2. LICENCIAS DE USO NO COMUN»). De ahí salieron cinco tratamientos que hacen los aliados:
+  - `TAR`: aguas residuales en la PTAR de un aliado;
+  - `BIOA`: biorremediación de suelos, lodos y cortes con hidrocarburos;
+  - `AUT`: autoclave de infecciosos;
+  - `AUS`: recuperación de aceites usados e hidrocarburos;
+  - `ESC`: escombrera de un aliado.
+
+  Los aliados cuya vigencia no se pudo confirmar quedan sin vigencia, a propósito: no cubren hasta que alguien la
+  registre. Un aliado nuevo o una licencia propia nueva se registran desde Permisos, con su PDF.
 - **Inactivas:**
   - aprovechamiento propio y reciclaje (el objeto social no es una autorización ambiental);
   - lavado y reúso;

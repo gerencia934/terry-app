@@ -2,11 +2,12 @@
 // cumplimiento estricto. Cada cumplimiento queda con su soporte en un historial que no se borra, y la vigencia de la
 // licencia de cada aliado decide si sus disposiciones se pueden autorizar (misma regla de la base de datos).
 import { useState, type FormEvent } from 'react';
-import { AlertTriangle, CalendarClock, Check, ExternalLink, FileText, History, Loader2, Pencil, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Check, ExternalLink, FileText, History, Loader2, Pencil, Plus, ShieldCheck, Upload } from 'lucide-react';
 import { ResponsiveTable, type Column } from '../components/data';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, Sheet, Tabs, useToast, type Tone } from '../components/ui';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { hoyCo, useApi } from '../lib/servidor';
+import { urlAbsoluta } from '../lib/trabajos';
 import { useRouter } from '../lib/router';
 import { cx, diasEntre, fmtFecha } from '../lib/format';
 
@@ -25,7 +26,44 @@ interface Aliado {
   disposicionesGestionadas: { disposicion: { codigo: string; nombre: string; activo: boolean } }[];
   vigencia: { estado: 'SIN_LICENCIA' | 'INDEFINIDA' | 'SIN_VIGENCIA' | 'VENCIDA' | 'POR_VENCER' | 'VIGENTE'; cubre: boolean; dias?: number };
 }
-type Panel = { tipo: 'cumplir'; o: Obligacion; acto: string } | { tipo: 'historial'; o: Obligacion; acto: string } | { tipo: 'permiso'; p: Permiso } | { tipo: 'aliado'; a: Aliado };
+type Panel = { tipo: 'cumplir'; o: Obligacion; acto: string } | { tipo: 'historial'; o: Obligacion; acto: string } | { tipo: 'permiso'; p: Permiso } | { tipo: 'aliado'; a: Aliado }
+  | { tipo: 'nuevoPermiso' } | { tipo: 'nuevoAliado' };
+interface DisposicionCat { id: string; codigo: string; nombre: string; propia: boolean }
+
+/** Abre el PDF guardado con su enlace firmado (5 minutos); si es un enlace externo, ese enlace. */
+async function verDocumento(ruta: string) {
+  const w = window.open('', '_blank');
+  try { const e = await api<{ url: string }>(ruta); if (w) w.location.href = urlAbsoluta(e.url); else window.open(urlAbsoluta(e.url), '_blank'); }
+  catch (x) { w?.close(); throw x; }
+}
+async function subirPdf(ruta: string, archivo: File) { const form = new FormData(); form.append('archivo', archivo); await api(ruta, { form }); }
+
+/** Elegir el PDF del acto o de la licencia (se sube al guardar). */
+function ElegirPdf({ id, archivo, onChange, actual }: { id: string; archivo: File | null; onChange: (f: File | null) => void; actual?: string | null }) {
+  return (
+    <Field label="PDF del documento" id={id} hint={actual ? 'Ya tiene un documento; si elige otro, lo reemplaza (el anterior queda en la auditoría).' : 'El acto o la licencia escaneada, máximo 15 MB.'}>
+      <label htmlFor={id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2.5 text-[13px] hover:bg-surface-2">
+        <Upload size={15} className="shrink-0 text-muted" /><span className="truncate">{archivo ? archivo.name : 'Elegir el PDF…'}</span>
+      </label>
+      <input id={id} type="file" accept="application/pdf" className="hidden" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
+    </Field>
+  );
+}
+/** Tratamientos que ampara un acto o que hace un gestor. */
+function ElegirDisposiciones({ opciones, elegidas, onChange }: { opciones: DisposicionCat[]; elegidas: string[]; onChange: (c: string[]) => void }) {
+  return (
+    <fieldset className="flex flex-col gap-1.5">
+      <legend className="mb-1 text-[13px] font-medium">Tratamientos que ampara</legend>
+      <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-lg border border-line p-2">{opciones.map((d) => (
+        <label key={d.codigo} className="flex items-start gap-2 rounded-md px-1.5 py-1 text-[13px] hover:bg-surface-2">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={elegidas.includes(d.codigo)}
+            onChange={(e) => onChange(e.target.checked ? [...elegidas, d.codigo] : elegidas.filter((c) => c !== d.codigo))} />
+          <span><span className="num mr-1 text-muted">{d.codigo}</span>{d.nombre}</span>
+        </label>))}
+      </div>
+    </fieldset>
+  );
+}
 
 const ESTADO_PERMISO: Record<string, [string, Tone]> = { VIGENTE: ['Vigente', 'ok'], POR_VENCER: ['Por vencer', 'warn'], VENCIDO: ['Vencido', 'bad'], EN_TRAMITE: ['En trámite', 'info'] };
 const LICENCIA: Record<Aliado['vigencia']['estado'], [string, Tone]> = {
@@ -72,7 +110,11 @@ export function PermisosServidor() {
   return (
     <>
       <PageHeader eyebrow="Cumplimiento" title="Permisos ambientales"
-        subtitle="Actos que amparan los tratamientos de Los Pinos, sus obligaciones con fecha y los gestores aliados con su licencia. Una declaración solo se autoriza si su disposición está cubierta hoy." />
+        subtitle="Actos que amparan los tratamientos de Los Pinos, sus obligaciones con fecha y los gestores aliados con su licencia. Una declaración solo se autoriza si su disposición está cubierta hoy."
+        actions={puede ? <>
+          <Button onClick={() => setPanel({ tipo: 'nuevoPermiso' })}><Plus size={16} /> Permiso o licencia propia</Button>
+          <Button onClick={() => { setVista('aliados'); setPanel({ tipo: 'nuevoAliado' }); }}><Plus size={16} /> Gestor aliado</Button>
+        </> : undefined} />
       {permisos.datos && (
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Card><p className="text-[12px] text-muted">Permisos</p><p className="num font-display text-2xl font-semibold">{permisos.datos.length}</p></Card>
@@ -123,7 +165,7 @@ export function PermisosServidor() {
                   {!p.obligaciones.length && <p className="text-[13px] text-muted">Sin obligaciones registradas.</p>}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {p.documentoUrl && <a className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] hover:bg-surface-2" href={p.documentoUrl} target="_blank" rel="noreferrer"><FileText size={14} /> Ver el acto</a>}
+                  {p.documentoUrl && <Button size="sm" onClick={() => verDocumento(`/permisos-ambientales/${p.id}/documento`).catch(() => undefined)}><FileText size={14} /> Ver el acto</Button>}
                   {puede && <Button size="sm" variant="ghost" onClick={() => setPanel({ tipo: 'permiso', p })}><Pencil size={13} /> Vigencia y documento</Button>}
                 </div>
               </Card>
@@ -164,11 +206,14 @@ export function PermisosServidor() {
         </>
       ))}
 
-      <Sheet open={!!panel} onClose={() => setPanel(null)} title={!panel ? '' : panel.tipo === 'cumplir' ? 'Registrar cumplimiento' : panel.tipo === 'historial' ? 'Historial de cumplimiento' : panel.tipo === 'permiso' ? 'Vigencia del permiso' : 'Licencia del gestor aliado'}>
+      <Sheet open={!!panel} onClose={() => setPanel(null)} title={!panel ? '' : panel.tipo === 'cumplir' ? 'Registrar cumplimiento' : panel.tipo === 'historial' ? 'Historial de cumplimiento' : panel.tipo === 'permiso' ? 'Vigencia y documento del permiso'
+        : panel.tipo === 'nuevoPermiso' ? 'Permiso o licencia propia' : panel.tipo === 'nuevoAliado' ? 'Gestor aliado nuevo' : 'Licencia del gestor aliado'}>
         {panel?.tipo === 'cumplir' && <FormCumplir o={panel.o} acto={panel.acto} listo={listo} />}
         {panel?.tipo === 'historial' && <HistorialObligacion o={panel.o} acto={panel.acto} />}
         {panel?.tipo === 'permiso' && <FormPermiso p={panel.p} listo={listo} />}
         {panel?.tipo === 'aliado' && <FormAliado x={panel.a} listo={listo} />}
+        {panel?.tipo === 'nuevoPermiso' && <FormNuevoPermiso listo={listo} />}
+        {panel?.tipo === 'nuevoAliado' && <FormNuevoAliado listo={listo} />}
       </Sheet>
     </>
   );
@@ -225,11 +270,18 @@ function HistorialObligacion({ o, acto }: { o: Obligacion; acto: string }) {
 
 function FormPermiso({ p, listo }: { p: Permiso; listo: () => void }) {
   const toast = useToast();
-  const [v, setV] = useState({ expedicion: p.expedicion?.slice(0, 10) ?? '', vence: p.vence?.slice(0, 10) ?? '', estado: p.estado, documentoUrl: p.documentoUrl ?? '' });
+  const guardado = !!p.documentoUrl && !/^https?:/.test(p.documentoUrl);
+  const [v, setV] = useState({ expedicion: p.expedicion?.slice(0, 10) ?? '', vence: p.vence?.slice(0, 10) ?? '', estado: p.estado, documentoUrl: guardado ? '' : p.documentoUrl ?? '' });
+  const [archivo, setArchivo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
   const guardar = async (e: FormEvent) => {
     e.preventDefault(); setEnviando(true);
-    try { await api(`/permisos-ambientales/${p.id}`, { metodo: 'PATCH', cuerpo: v }); toast('Permiso actualizado.'); listo(); }
+    try {
+      const { documentoUrl, ...resto } = v;
+      await api(`/permisos-ambientales/${p.id}`, { metodo: 'PATCH', cuerpo: { ...resto, ...(guardado && !documentoUrl ? {} : { documentoUrl }) } });
+      if (archivo) await subirPdf(`/permisos-ambientales/${p.id}/documento`, archivo);
+      toast(archivo ? 'Permiso actualizado, con su PDF.' : 'Permiso actualizado.'); listo();
+    }
     catch (err) { toast(mensajeError(err, 'No se pudo guardar.'), 'warn'); }
     setEnviando(false);
   };
@@ -241,7 +293,8 @@ function FormPermiso({ p, listo }: { p: Permiso; listo: () => void }) {
         <Field label="Vence" id="pp-v" hint="Vacío si el acto no fija término."><Input id="pp-v" type="date" value={v.vence} onChange={(e) => setV((x) => ({ ...x, vence: e.target.value }))} /></Field>
       </div>
       <Field label="Estado" id="pp-s"><Select id="pp-s" value={v.estado} onChange={(e) => setV((x) => ({ ...x, estado: e.target.value }))}>{Object.entries(ESTADO_PERMISO).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
-      <Field label="Enlace al acto administrativo" id="pp-d"><Input id="pp-d" type="url" value={v.documentoUrl} onChange={(e) => setV((x) => ({ ...x, documentoUrl: e.target.value }))} placeholder="https://" /></Field>
+      <ElegirPdf id="pp-pdf" archivo={archivo} onChange={setArchivo} actual={p.documentoUrl} />
+      {!guardado && <Field label="O un enlace al acto (si está publicado)" id="pp-d"><Input id="pp-d" type="url" value={v.documentoUrl} onChange={(e) => setV((x) => ({ ...x, documentoUrl: e.target.value }))} placeholder="https://" /></Field>}
       <p className="text-[12px] text-muted">Ampara sus disposiciones mientras esté «vigente» o «por vencer» y no haya pasado la fecha de vencimiento. «En trámite» o «vencido» no amparan: no se autorizan declaraciones con esas disposiciones.</p>
       <div className="flex justify-end border-t border-line pt-3"><Button type="submit" variant="primary" disabled={enviando}>{enviando && <Loader2 size={16} className="animate-spin" />}Guardar</Button></div>
     </form>
@@ -250,13 +303,18 @@ function FormPermiso({ p, listo }: { p: Permiso; listo: () => void }) {
 
 function FormAliado({ x, listo }: { x: Aliado; listo: () => void }) {
   const toast = useToast();
-  const tipos = useApi<{ tiposResiduo: { codigo: string; nombre: string }[] }>('/declaraciones/catalogos');
-  const [v, setV] = useState({ licencia: x.licencia ?? '', licenciaAutoridad: x.licenciaAutoridad ?? '', licenciaIndefinida: x.licenciaIndefinida, licenciaVence: x.licenciaVence?.slice(0, 10) ?? '', licenciaUrl: x.licenciaUrl ?? '', excluyeTiposResiduo: x.excluyeTiposResiduo });
+  const tipos = useApi<{ tiposResiduo: { codigo: string; nombre: string }[]; disposiciones: DisposicionCat[] }>('/declaraciones/catalogos');
+  const guardado = !!x.licenciaUrl && !/^https?:/.test(x.licenciaUrl);
+  const [v, setV] = useState({ razonSocial: x.razonSocial, municipio: x.municipio ?? '', licencia: x.licencia ?? '', licenciaAutoridad: x.licenciaAutoridad ?? '', licenciaIndefinida: x.licenciaIndefinida,
+    licenciaVence: x.licenciaVence?.slice(0, 10) ?? '', licenciaUrl: guardado ? '' : x.licenciaUrl ?? '', excluyeTiposResiduo: x.excluyeTiposResiduo, disposiciones: x.disposicionesGestionadas.map((d) => d.disposicion.codigo) });
+  const [archivo, setArchivo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
   const guardar = async (e: FormEvent) => {
     e.preventDefault(); setEnviando(true);
     try {
-      const r = await api<{ vigencia: Aliado['vigencia'] }>(`/gestores-aliados/${x.id}`, { metodo: 'PATCH', cuerpo: { ...v, licenciaVence: v.licenciaIndefinida ? '' : v.licenciaVence } });
+      const { licenciaUrl, ...resto } = v;
+      const r = await api<{ vigencia: Aliado['vigencia'] }>(`/gestores-aliados/${x.id}`, { metodo: 'PATCH', cuerpo: { ...resto, ...(guardado && !licenciaUrl ? {} : { licenciaUrl }), licenciaVence: v.licenciaIndefinida ? '' : v.licenciaVence } });
+      if (archivo) await subirPdf(`/gestores-aliados/${x.id}/licencia`, archivo);
       toast(r.vigencia.cubre ? `Licencia guardada: ${x.razonSocial} cubre sus disposiciones.` : `Licencia guardada, pero ${x.razonSocial} todavía no cubre: falta una vigencia actual.`, r.vigencia.cubre ? undefined : 'warn');
       listo();
     } catch (err) { toast(mensajeError(err, 'No se pudo guardar.'), 'warn'); }
@@ -264,13 +322,19 @@ function FormAliado({ x, listo }: { x: Aliado; listo: () => void }) {
   };
   return (
     <form onSubmit={guardar} className="flex flex-col gap-4">
-      <div><p className="font-medium">{x.razonSocial}</p><p className="text-[13px] text-muted">NIT {x.nit} · gestiona {x.disposicionesGestionadas.map((d) => d.disposicion.nombre.toLowerCase()).join(', ')}</p></div>
+      <p className="text-[13px] text-muted">NIT {x.nit}{x.licenciaUrl && <> · <button type="button" className="font-medium text-brand underline" onClick={() => verDocumento(`/gestores-aliados/${x.id}/licencia`).catch(() => undefined)}>ver la licencia</button></>}</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Razón social" id="ga-r"><Input id="ga-r" value={v.razonSocial} maxLength={200} onChange={(e) => setV((s) => ({ ...s, razonSocial: e.target.value }))} /></Field>
+        <Field label="Municipio de la planta" id="ga-m"><Input id="ga-m" value={v.municipio} maxLength={80} onChange={(e) => setV((s) => ({ ...s, municipio: e.target.value }))} /></Field>
+      </div>
+      <ElegirDisposiciones opciones={(tipos.datos?.disposiciones ?? []).filter((d) => !d.propia)} elegidas={v.disposiciones} onChange={(c) => setV((s) => ({ ...s, disposiciones: c }))} />
       <Field label="Licencia (acto, número y fecha)" id="ga-l"><Input id="ga-l" value={v.licencia} maxLength={300} onChange={(e) => setV((s) => ({ ...s, licencia: e.target.value }))} /></Field>
       <Field label="Autoridad que la expidió" id="ga-a"><Input id="ga-a" value={v.licenciaAutoridad} maxLength={80} onChange={(e) => setV((s) => ({ ...s, licenciaAutoridad: e.target.value }))} placeholder="CDMB, Corpocesar, CAR…" /></Field>
       <label className="flex items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.licenciaIndefinida} onChange={(e) => setV((s) => ({ ...s, licenciaIndefinida: e.target.checked, licenciaVence: e.target.checked ? '' : s.licenciaVence }))} />
         <span>Licencia sin término (vida útil del proyecto)</span></label>
       {!v.licenciaIndefinida && <Field label="Vence" id="ga-v" hint="Sin esta fecha (o «sin término») el gestor no cubre: no se autorizan declaraciones de lo que gestiona."><Input id="ga-v" type="date" value={v.licenciaVence} onChange={(e) => setV((s) => ({ ...s, licenciaVence: e.target.value }))} /></Field>}
-      <Field label="Enlace a la licencia" id="ga-u"><Input id="ga-u" type="url" value={v.licenciaUrl} onChange={(e) => setV((s) => ({ ...s, licenciaUrl: e.target.value }))} placeholder="https://" /></Field>
+      <ElegirPdf id="ga-pdf" archivo={archivo} onChange={setArchivo} actual={x.licenciaUrl} />
+      {!guardado && <Field label="O un enlace a la licencia (si está publicada)" id="ga-u"><Input id="ga-u" type="url" value={v.licenciaUrl} onChange={(e) => setV((s) => ({ ...s, licenciaUrl: e.target.value }))} placeholder="https://" /></Field>}
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1 text-[13px] font-medium">Tipos de residuo que no recibe</legend>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">{(tipos.datos?.tiposResiduo ?? []).map((t) => (
@@ -279,6 +343,81 @@ function FormAliado({ x, listo }: { x: Aliado; listo: () => void }) {
         </div>
       </fieldset>
       <div className="flex justify-end border-t border-line pt-3"><Button type="submit" variant="primary" disabled={enviando}>{enviando && <Loader2 size={16} className="animate-spin" />}Guardar licencia</Button></div>
+    </form>
+  );
+}
+
+/**
+ * Permiso o licencia propia nuevo: una renovación, una modificación o una licencia nueva de Los Pinos (p. ej. la de celda
+ * de seguridad, autoclave y biorremediación). Ampara los tratamientos que se marquen mientras esté vigente.
+ */
+function FormNuevoPermiso({ listo }: { listo: () => void }) {
+  const toast = useToast();
+  const cat = useApi<{ disposiciones: DisposicionCat[] }>('/declaraciones/catalogos');
+  const [v, setV] = useState({ acto: '', autoridad: 'CAS', alcance: '', expedicion: '', vence: '', estado: 'VIGENTE', disposiciones: [] as string[] });
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const set = (k: keyof typeof v) => (e: { target: { value: string } }) => setV((s) => ({ ...s, [k]: e.target.value }));
+  const guardar = async (e: FormEvent) => {
+    e.preventDefault(); setEnviando(true);
+    try {
+      const p = await api<{ id: string }>('/permisos-ambientales', { cuerpo: v });
+      if (archivo) await subirPdf(`/permisos-ambientales/${p.id}/documento`, archivo);
+      toast(`Registrado «${v.acto}»${v.disposiciones.length ? `: ampara ${v.disposiciones.join(', ')} mientras esté vigente` : ''}.`, 'ok'); listo();
+    } catch (err) { toast(mensajeError(err, 'No se pudo registrar.'), 'warn'); }
+    setEnviando(false);
+  };
+  return (
+    <form onSubmit={guardar} className="flex flex-col gap-4">
+      <p className="text-[13px] text-muted">Para una licencia o permiso nuevo de Terra Viva: una renovación, una modificación o una licencia nueva (por ejemplo, la de celda de seguridad, autoclave y biorremediación). Los certificados lo citan en las líneas de los tratamientos que ampare, mientras esté vigente.</p>
+      <Field label="Acto (tipo, número y año)" id="np-a"><Input id="np-a" value={v.acto} onChange={set('acto')} maxLength={60} required placeholder="Resolución DGL No. 000123 de 2027" /></Field>
+      <Field label="Autoridad que lo expidió" id="np-au"><Input id="np-au" value={v.autoridad} onChange={set('autoridad')} maxLength={80} required placeholder="CAS, ANLA, CDMB…" /></Field>
+      <Field label="Qué autoriza" id="np-al"><textarea id="np-al" value={v.alcance} onChange={set('alcance')} maxLength={4000} required className="min-h-[90px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm" /></Field>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Field label="Expedición" id="np-e"><Input id="np-e" type="date" value={v.expedicion} onChange={set('expedicion')} /></Field>
+        <Field label="Vence" id="np-v" hint="Vacío si no fija término."><Input id="np-v" type="date" value={v.vence} onChange={set('vence')} /></Field>
+        <Field label="Estado" id="np-s"><Select id="np-s" value={v.estado} onChange={set('estado')}>{Object.entries(ESTADO_PERMISO).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
+      </div>
+      <ElegirDisposiciones opciones={cat.datos?.disposiciones ?? []} elegidas={v.disposiciones} onChange={(c) => setV((s) => ({ ...s, disposiciones: c }))} />
+      <ElegirPdf id="np-pdf" archivo={archivo} onChange={setArchivo} />
+      <div className="flex justify-end border-t border-line pt-3"><Button type="submit" variant="primary" disabled={enviando}>{enviando && <Loader2 size={16} className="animate-spin" />}Registrar</Button></div>
+    </form>
+  );
+}
+
+/** Gestor aliado nuevo: la planta de un tercero, su licencia (con su PDF) y los tratamientos que hace. */
+function FormNuevoAliado({ listo }: { listo: () => void }) {
+  const toast = useToast();
+  const cat = useApi<{ disposiciones: DisposicionCat[] }>('/declaraciones/catalogos');
+  const [v, setV] = useState({ nit: '', razonSocial: '', municipio: '', licencia: '', licenciaAutoridad: '', licenciaIndefinida: false, licenciaVence: '', alcance: '', disposiciones: [] as string[] });
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const set = (k: 'nit' | 'razonSocial' | 'municipio' | 'licencia' | 'licenciaAutoridad' | 'licenciaVence' | 'alcance') => (e: { target: { value: string } }) => setV((s) => ({ ...s, [k]: e.target.value }));
+  const guardar = async (e: FormEvent) => {
+    e.preventDefault(); setEnviando(true);
+    try {
+      const r = await api<{ id: string; vigencia: Aliado['vigencia'] }>('/gestores-aliados', { cuerpo: { ...v, licenciaVence: v.licenciaIndefinida ? '' : v.licenciaVence } });
+      if (archivo) await subirPdf(`/gestores-aliados/${r.id}/licencia`, archivo);
+      toast(r.vigencia.cubre ? `${v.razonSocial} quedó registrado y cubre lo que gestiona.` : `${v.razonSocial} quedó registrado, pero aún no cubre: falta una vigencia actual.`, r.vigencia.cubre ? 'ok' : 'warn'); listo();
+    } catch (err) { toast(mensajeError(err, 'No se pudo registrar.'), 'warn'); }
+    setEnviando(false);
+  };
+  return (
+    <form onSubmit={guardar} className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="NIT" id="na-n"><Input id="na-n" value={v.nit} onChange={set('nit')} maxLength={15} required placeholder="900123456-7" /></Field>
+        <Field label="Municipio de la planta" id="na-m"><Input id="na-m" value={v.municipio} onChange={set('municipio')} maxLength={80} /></Field>
+      </div>
+      <Field label="Razón social" id="na-r"><Input id="na-r" value={v.razonSocial} onChange={set('razonSocial')} maxLength={200} required /></Field>
+      <Field label="Licencia (acto, número, fecha y modificaciones)" id="na-l"><Input id="na-l" value={v.licencia} onChange={set('licencia')} maxLength={300} required /></Field>
+      <Field label="Autoridad que la expidió" id="na-a"><Input id="na-a" value={v.licenciaAutoridad} onChange={set('licenciaAutoridad')} maxLength={80} required placeholder="CDMB, Corpocesar, ANLA…" /></Field>
+      <label className="flex items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.licenciaIndefinida} onChange={(e) => setV((s) => ({ ...s, licenciaIndefinida: e.target.checked, licenciaVence: e.target.checked ? '' : s.licenciaVence }))} />
+        <span>Licencia sin término (vida útil del proyecto)</span></label>
+      {!v.licenciaIndefinida && <Field label="Vence" id="na-v" hint="Sin esta fecha (o «sin término») el gestor no cubre."><Input id="na-v" type="date" value={v.licenciaVence} onChange={set('licenciaVence')} /></Field>}
+      <ElegirDisposiciones opciones={(cat.datos?.disposiciones ?? []).filter((d) => !d.propia)} elegidas={v.disposiciones} onChange={(c) => setV((s) => ({ ...s, disposiciones: c }))} />
+      <Field label="Qué recibe y qué no (opcional)" id="na-al"><textarea id="na-al" value={v.alcance} onChange={set('alcance')} maxLength={4000} className="min-h-[70px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm" /></Field>
+      <ElegirPdf id="na-pdf" archivo={archivo} onChange={setArchivo} />
+      <div className="flex justify-end border-t border-line pt-3"><Button type="submit" variant="primary" disabled={enviando}>{enviando && <Loader2 size={16} className="animate-spin" />}Registrar gestor</Button></div>
     </form>
   );
 }

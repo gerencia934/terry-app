@@ -121,11 +121,14 @@ async function main() {
     let p = await db.proveedor.findFirst({ where: { empresaId: E, nit: g.nit } });
     const vigencia = { licenciaVence: g.vence ? new Date(g.vence) : null, licenciaIndefinida: !!g.indefinida };
     if (!p) p = await db.proveedor.create({ data: { empresaId: E, nit: g.nit, razonSocial: g.razonSocial, municipio: g.municipio ?? null, esDestino: true, esPropio: false,
-      licencia: g.licencia, licenciaAutoridad: g.autoridad, alcance: g.alcance, excluyeTiposResiduo: g.excluyeTiposResiduo ?? [], ...vigencia } });
+      licencia: g.licencia, licenciaAutoridad: g.autoridad, alcance: g.alcance, excluyeTiposResiduo: g.excluyeTiposResiduo ?? [], ...vigencia,
+      soporteComercial: g.soporteComercial ?? null, soporteComercialFecha: g.soporteComercialFecha ? new Date(g.soporteComercialFecha) : null } });
     else p = await db.proveedor.update({ where: { id: p.id }, data: {
       licencia: p.licencia || g.licencia, licenciaAutoridad: p.licenciaAutoridad || g.autoridad, alcance: p.alcance || g.alcance,
       excluyeTiposResiduo: p.excluyeTiposResiduo.length ? p.excluyeTiposResiduo : g.excluyeTiposResiduo ?? [],
       ...(p.licenciaVence || p.licenciaIndefinida ? {} : vigencia),
+      municipio: p.municipio || g.municipio || null, soporteComercial: p.soporteComercial || g.soporteComercial || null,
+      soporteComercialFecha: p.soporteComercialFecha ?? (g.soporteComercialFecha ? new Date(g.soporteComercialFecha) : null),
     } });
     for (const codigo of g.disposiciones) {
       const d = await db.disposicion.findUniqueOrThrow({ where: { empresaId_codigo: { empresaId: E, codigo } } });
@@ -170,9 +173,9 @@ async function main() {
   conf.representanteLegal ??= '';
   conf.notaBascula ??= '';
   // Contacto del certificado y de la constancia de RCD (sin teléfonos ni correos: se escriben en Ajustes)
-  conf.contacto = { direccion: 'Parque de Saneamiento Ambiental Los Pinos, vereda Villa de Leyva', municipio: 'Sabana de Torres (Santander)', telefono: '', correo: '', ...(conf.contacto ?? {}) };
+  conf.contacto = { direccion: 'Parque de Saneamiento Ambiental Los Pinos, km 7,5 vía antigua Aprisa, vereda Villa de Leyva', municipio: 'Sabana de Torres (Santander)', telefono: '', correo: '', ...(conf.contacto ?? {}) };
   // Número único de gestor de RCD (Anexo II): por defecto, el acto de inscripción ante la CAS; se cambia en Ajustes
-  conf.rcd = { numeroGestor: 'Res. SAO No. 00235-24 (CAS)', ...(conf.rcd ?? {}) };
+  conf.rcd = { numeroGestor: 'Resolución SAO No. 00235-24 de 2024 (CAS)', ...(conf.rcd ?? {}) };
   conf.bascula ??= { identificacion: '', certificado: '', fecha: '', laboratorio: '', vigenteHasta: '' };
   const previas = Array.isArray(conf.certificaciones) ? conf.certificaciones : [];
   conf.certificaciones = [

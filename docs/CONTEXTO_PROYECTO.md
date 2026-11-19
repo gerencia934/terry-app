@@ -107,8 +107,11 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - ✅ certificados sujetos al pago: con una factura vencida y sin pagar el cliente lo ve en el portal, pero lo
     descarga al pagar o cuando la oficina lo libera (días de gracia en Ajustes).
 
-  88 pruebas de reglas y 390 e2e OK. Sigue: licencias de los gestores aliados (carpetas «uso común» y «uso no común» del
-  Drive) y textos legales soportados en los permisos.
+  88 pruebas de reglas y 390 e2e OK.
+- ✅ Licencias de los gestores aliados verificadas contra el Drive (carpetas «uso común» y «uso no común»), con cinco
+  tratamientos nuevos de aliados (TAR, BIOA, AUT, AUS, ESC). Los textos legales del certificado se apoyan en los permisos
+  registrados (`{permiso:COD}`, `{permisos}`), y desde Permisos se registra un aliado nuevo o una licencia propia nueva
+  con su PDF. Teléfono y correo de la planta: solo en la base (el repositorio es público). 88 pruebas de reglas y 396 e2e.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

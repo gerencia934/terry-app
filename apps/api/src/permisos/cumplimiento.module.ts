@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { EstadoPermiso, UnidadMedida } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
+import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, type Actor } from '../common/http';
 
 const dias = (f: Date) => Math.ceil((f.getTime() - Date.now()) / 86_400_000);
@@ -17,7 +19,28 @@ const Cumplimiento = z.object({
 const EditarPermiso = z.object({
   expedicion: fechaOpc, vence: fechaOpc, estado: z.nativeEnum(EstadoPermiso).optional(), documentoUrl: urlOpc, alcance: z.string().trim().min(10).max(4000).optional(),
 });
+/** Códigos de disposición (tratamientos) que ampara un acto o que hace un gestor. */
+const Codigos = z.array(z.string().trim().toUpperCase().min(1).max(20)).max(30);
+/** Permiso o licencia propia nuevo: renovación, modificación o una licencia nueva (p. ej. celda de seguridad o autoclave). */
+const CrearPermiso = z.object({
+  acto: z.string().trim().min(5, 'Escriba el acto: tipo, número y año (p. ej. «Resolución DGL No. 000632 de 2023»).').max(60),
+  autoridad: z.string().trim().min(2).max(80), alcance: z.string().trim().min(10, 'Describa qué autoriza (mínimo 10 caracteres).').max(4000),
+  expedicion: fechaOpc, vence: fechaOpc, estado: z.nativeEnum(EstadoPermiso).default('VIGENTE'), disposiciones: Codigos.default([]),
+});
+/** Gestor aliado nuevo (planta de un tercero) con su licencia y lo que gestiona. */
+const CrearAliado = z.object({
+  nit: z.string().trim().regex(/^\d{6,10}(-\d)?$/, 'NIT sin puntos, con o sin dígito de verificación (900123456-7).'),
+  razonSocial: z.string().trim().min(3).max(200), municipio: textoOpc(80),
+  licencia: z.string().trim().min(5, 'Escriba el acto que lo ampara: número, fecha y modificaciones.').max(300), licenciaAutoridad: z.string().trim().min(2).max(80),
+  licenciaIndefinida: z.boolean().default(false), licenciaVence: fechaOpc, alcance: textoOpc(4000),
+  excluyeTiposResiduo: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(20).default([]),
+  disposiciones: Codigos.min(1, 'Elija al menos un tratamiento que haga este gestor.'),
+  soporteComercial: textoOpc(200), soporteComercialFecha: fechaOpc,
+}).refine((b) => !(b.licenciaIndefinida && b.licenciaVence), { message: 'Una licencia indefinida no lleva fecha de vencimiento.', path: ['licenciaVence'] })
+  .refine((b) => b.licenciaIndefinida || !!b.licenciaVence, { message: 'Indique hasta cuándo vale la licencia, o márquela «sin término» (vida útil del proyecto).', path: ['licenciaVence'] });
 const EditarAliado = z.object({
+  razonSocial: z.string().trim().min(3).max(200).optional(), municipio: textoOpc(80), disposiciones: Codigos.min(1, 'Elija al menos un tratamiento.').optional(),
+  soporteComercial: textoOpc(200), soporteComercialFecha: fechaOpc,
   licencia: textoOpc(300), licenciaAutoridad: textoOpc(80), licenciaIndefinida: z.boolean().optional(), licenciaVence: fechaOpc, licenciaUrl: urlOpc,
   alcance: textoOpc(4000), excluyeTiposResiduo: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(20).optional(),
 }).refine((b) => !(b.licenciaIndefinida && b.licenciaVence), { message: 'Una licencia indefinida no lleva fecha de vencimiento.', path: ['licenciaVence'] });
@@ -40,7 +63,68 @@ export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operaci
 
 @Injectable()
 class CumplimientoService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos) {}
+
+  /** Disposiciones de la empresa por código (para ligar un acto o un gestor a lo que ampara). */
+  private async disposicionesPorCodigo(a: Actor, codigos: string[], soloDeAliados = false) {
+    const ds = await this.db.disposicion.findMany({ where: { empresaId: a.empresaId, codigo: { in: codigos } } });
+    const faltan = codigos.filter((c) => !ds.some((d) => d.codigo === c));
+    if (faltan.length) throw new BadRequestException({ mensaje: `Tratamientos que no existen: ${faltan.join(', ')}.` });
+    const propias = soloDeAliados ? ds.filter((d) => d.propia) : [];
+    if (propias.length) throw new BadRequestException({ mensaje: `${propias.map((d) => d.codigo).join(', ')} lo hace Terra Viva en Los Pinos: un gestor aliado no lo ampara (regístrelo como permiso propio).` });
+    return ds;
+  }
+
+  /** Permiso o licencia propia nuevo (renovación, modificación o una licencia nueva, como la de celda de seguridad, autoclave y biorremediación). */
+  async crearPermiso(a: Actor, b: z.infer<typeof CrearPermiso>) {
+    if (b.expedicion && b.vence && b.vence < b.expedicion) throw new BadRequestException({ mensaje: 'El vencimiento no puede ser anterior a la expedición.' });
+    if (await this.db.permisoAmbiental.findFirst({ where: { empresaId: a.empresaId, acto: b.acto } })) throw new BadRequestException({ mensaje: `Ya está registrado «${b.acto}».` });
+    const ds = await this.disposicionesPorCodigo(a, b.disposiciones);
+    const { disposiciones: _d, ...datos } = b;
+    const p = await this.db.permisoAmbiental.create({ data: { ...datos, empresaId: a.empresaId, disposiciones: { create: ds.map((d) => ({ disposicionId: d.id })) } } });
+    await this.audit.registrar(a, 'permiso_ambiental', p.id, 'CREAR', undefined, { ...datos, disposiciones: b.disposiciones });
+    return p;
+  }
+
+  /** PDF del acto (permiso propio) o de la licencia (gestor aliado): se guarda en el almacenamiento y se ve con enlace firmado. */
+  async subirDocumento(a: Actor, tipo: 'permiso' | 'aliado', id: string, archivo?: Express.Multer.File) {
+    if (!archivo) throw new BadRequestException({ mensaje: 'Adjunte el PDF.' });
+    const x = tipo === 'permiso' ? await this.db.permisoAmbiental.findFirst({ where: { id, empresaId: a.empresaId } }) : await this.db.proveedor.findFirst({ where: { id, empresaId: a.empresaId, esPropio: false } });
+    if (!x) throw new NotFoundException({ mensaje: tipo === 'permiso' ? 'Permiso no encontrado.' : 'Gestor no encontrado.' });
+    const g = await this.archivos.guardar(a.empresaId, tipo === 'permiso' ? 'permisos' : 'licencias', archivo.buffer, ['pdf']);
+    const antes = tipo === 'permiso' ? (x as { documentoUrl: string | null }).documentoUrl : (x as { licenciaUrl: string | null }).licenciaUrl;
+    if (tipo === 'permiso') await this.db.permisoAmbiental.update({ where: { id }, data: { documentoUrl: g.clave } });
+    else await this.db.proveedor.update({ where: { id }, data: { licenciaUrl: g.clave } });
+    await this.audit.registrar(a, tipo === 'permiso' ? 'permiso_ambiental' : 'proveedor', id, 'DOCUMENTO', { documento: antes }, { documento: g.clave, bytes: g.bytes });
+    return { documento: g.clave };
+  }
+
+  /** Ver el PDF: si está guardado, enlace firmado de 5 minutos; si es un enlace externo, ese enlace. */
+  async enlaceDocumento(a: Actor, tipo: 'permiso' | 'aliado', id: string) {
+    const x = tipo === 'permiso' ? await this.db.permisoAmbiental.findFirst({ where: { id, empresaId: a.empresaId } }) : await this.db.proveedor.findFirst({ where: { id, empresaId: a.empresaId, esPropio: false } });
+    const doc = !x ? null : tipo === 'permiso' ? (x as { documentoUrl: string | null }).documentoUrl : (x as { licenciaUrl: string | null }).licenciaUrl;
+    if (!doc) throw new NotFoundException({ mensaje: 'No tiene el documento registrado.' });
+    if (/^https?:\/\//.test(doc)) return { url: doc, vence: null };
+    return this.archivos.enlace(doc, a.empresaId, { nombre: `${tipo === 'permiso' ? (x as { acto: string }).acto : `licencia ${(x as { razonSocial: string }).razonSocial}`}.pdf` });
+  }
+
+  /** Gestor aliado nuevo con su licencia (si la licencia no está vigente, no cubre: no se autorizan sus disposiciones). */
+  async crearAliado(a: Actor, b: z.infer<typeof CrearAliado>) {
+    const nit = b.nit.split('-')[0];
+    if (await this.db.proveedor.findFirst({ where: { empresaId: a.empresaId, OR: [{ nit }, { nit: b.nit }] } })) throw new BadRequestException({ mensaje: `Ya existe un gestor o proveedor con el NIT ${b.nit}.` });
+    if (b.excluyeTiposResiduo.length) await this.validarTipos(a, b.excluyeTiposResiduo);
+    const ds = await this.disposicionesPorCodigo(a, b.disposiciones, true);
+    const { disposiciones: _d, ...datos } = b;
+    const p = await this.db.proveedor.create({ data: { ...datos, empresaId: a.empresaId, esDestino: true, esPropio: false, disposicionesGestionadas: { create: ds.map((d) => ({ disposicionId: d.id })) } } });
+    await this.audit.registrar(a, 'proveedor', p.id, 'CREAR', undefined, { ...datos, disposiciones: b.disposiciones });
+    return { ...p, vigencia: estadoLicencia(p) };
+  }
+
+  private async validarTipos(a: Actor, codigos: string[]) {
+    const validos = new Set((await this.db.tipoResiduo.findMany({ where: { empresaId: a.empresaId }, select: { codigo: true } })).map((t) => t.codigo.toUpperCase()));
+    const malos = codigos.filter((c) => !validos.has(c));
+    if (malos.length) throw new BadRequestException({ mensaje: `Tipos de residuo que no existen: ${malos.join(', ')}.` });
+  }
 
   /** Permisos con sus obligaciones (las de fecha más próxima primero) y el último cumplimiento de cada una. */
   permisos(a: Actor) {
@@ -87,8 +171,18 @@ class CumplimientoService {
       if (malos.length) throw new BadRequestException({ mensaje: `Tipos de residuo que no existen: ${malos.join(', ')}.` });
     }
     // Indefinida y fecha se excluyen: elegir una borra la otra
-    const datos = { ...b, ...(b.licenciaIndefinida ? { licenciaVence: null } : {}), ...(b.licenciaVence ? { licenciaIndefinida: false } : {}) };
-    const r = await this.db.proveedor.update({ where: { id }, data: datos });
+    const { disposiciones, ...resto } = b;
+    const datos = { ...resto, ...(b.licenciaIndefinida ? { licenciaVence: null } : {}), ...(b.licenciaVence ? { licenciaIndefinida: false } : {}) };
+    const ds = disposiciones ? await this.disposicionesPorCodigo(a, disposiciones, true) : null;
+    const antes = ds ? (await this.db.disposicionGestor.findMany({ where: { proveedorId: id }, include: { disposicion: { select: { codigo: true } } } })).map((x) => x.disposicion.codigo) : null;
+    const r = await this.db.$transaction(async (tx) => {
+      if (ds) {
+        await tx.disposicionGestor.deleteMany({ where: { proveedorId: id, disposicionId: { notIn: ds.map((d) => d.id) } } });
+        await tx.disposicionGestor.createMany({ data: ds.map((d) => ({ disposicionId: d.id, proveedorId: id })), skipDuplicates: true });
+      }
+      return tx.proveedor.update({ where: { id }, data: datos });
+    });
+    if (ds) await this.audit.registrar(a, 'proveedor', id, 'DISPOSICIONES', { disposiciones: antes }, { disposiciones });
     await this.audit.registrar(a, 'proveedor', id, 'LICENCIA',
       { licencia: p.licencia, licenciaAutoridad: p.licenciaAutoridad, licenciaVence: p.licenciaVence, licenciaIndefinida: p.licenciaIndefinida, excluyeTiposResiduo: p.excluyeTiposResiduo }, datos);
     return { ...r, vigencia: estadoLicencia(r) };
@@ -223,6 +317,8 @@ class CumplimientoService {
   elementosChequeo(a: Actor) { return this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ grupo: 'asc' }, { nombre: 'asc' }] }); }
 }
 
+const pdf = FileInterceptor('archivo', { limits: { fileSize: 15 * 1024 * 1024, files: 1 } });
+
 @Controller()
 class CumplimientoController {
   constructor(private readonly s: CumplimientoService, private readonly db: PrismaService) {}
@@ -230,7 +326,15 @@ class CumplimientoController {
   @Permiso('permisos.gestionar') @Patch('permisos-ambientales/:id') editarPermiso(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarPermiso)) b: z.infer<typeof EditarPermiso>) { return this.s.editarPermiso(a, id, b); }
   @Get('obligaciones/:id/cumplimientos') historial(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.historial(a, id); }
   @Permiso('permisos.gestionar') @Post('obligaciones/:id/cumplimientos') cumplir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Cumplimiento)) b: z.infer<typeof Cumplimiento>) { return this.s.cumplirObligacion(a, id, b); }
+  @Permiso('permisos.gestionar') @Post('permisos-ambientales') crearPermiso(@ActorActual() a: Actor, @Body(new Zod(CrearPermiso)) b: z.infer<typeof CrearPermiso>) { return this.s.crearPermiso(a, b); }
+  @Permiso('permisos.gestionar') @Post('permisos-ambientales/:id/documento') @UseInterceptors(pdf)
+  subirActo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @UploadedFile() f?: Express.Multer.File) { return this.s.subirDocumento(a, 'permiso', id, f); }
+  @Get('permisos-ambientales/:id/documento') verActo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlaceDocumento(a, 'permiso', id); }
   @Get('gestores-aliados') aliados(@ActorActual() a: Actor) { return this.s.aliados(a); }
+  @Permiso('permisos.gestionar') @Post('gestores-aliados') crearAliado(@ActorActual() a: Actor, @Body(new Zod(CrearAliado)) b: z.infer<typeof CrearAliado>) { return this.s.crearAliado(a, b); }
+  @Permiso('permisos.gestionar') @Post('gestores-aliados/:id/licencia') @UseInterceptors(pdf)
+  subirLicencia(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @UploadedFile() f?: Express.Multer.File) { return this.s.subirDocumento(a, 'aliado', id, f); }
+  @Get('gestores-aliados/:id/licencia') verLicencia(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlaceDocumento(a, 'aliado', id); }
   @Permiso('permisos.gestionar') @Patch('gestores-aliados/:id') editarAliado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarAliado)) b: z.infer<typeof EditarAliado>) { return this.s.editarAliado(a, id, b); }
   @Get('alertas') alertas(@ActorActual() a: Actor) { return this.s.alertas(a); }
   @Get('catalogos') catalogo(@ActorActual() a: Actor, @Query(new Zod(z.object({ tipo: z.string().optional() }))) q: { tipo?: string }) { return this.s.catalogo(a, q.tipo); }

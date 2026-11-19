@@ -146,7 +146,7 @@ prueba('repetir la asignación no duplica: las omite y dice por qué', r.status 
 // Formulario de 8 secciones (POST /declaraciones)
 const cat = (await llamar('GET', '/declaraciones/catalogos', { token: T })).json;
 const idDe = (lista, codigo) => lista.find((x) => x.codigo === codigo)?.id;
-prueba('catálogos del formulario: solo las disposiciones activas (sin aprovechamiento propio, lavado ni coprocesamiento)', cat.lineas?.length === 15 && cat.disposiciones?.length === 10 && !idDe(cat.disposiciones, 'APR') && cat.metricasDensidad?.length === 5, String(cat.disposiciones?.length));
+prueba('catálogos del formulario: solo las disposiciones activas (sin aprovechamiento propio, lavado ni coprocesamiento)', cat.lineas?.length === 15 && cat.disposiciones?.length === 15 && !idDe(cat.disposiciones, 'APR') && cat.metricasDensidad?.length === 5, String(cat.disposiciones?.length));
 const cliente = await db.cliente.findFirst({ where: { nit: NIT } });
 const formulario = {
   tipo: 'RESIDUO', clienteId: cliente.id, alcanceSedes: 'TODAS', nombre: 'Aceite usado de motor', codigoInterno: 'AU-01',
@@ -175,6 +175,8 @@ r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerp
 prueba('una sede nueva se suma sola a las declaraciones con alcance TODAS', r.status === 201 && (await db.declaracionSucursal.count({ where: { declaracionId: aceite.id } })) === 3, JSON.stringify(r.json));
 r = await llamar('POST', `/clientes/${cliente.id}/sucursales`, { token: T, cuerpo: { nombre: 'Sede rara', municipioDane: '99999' } });
 prueba('municipio que no está en DIVIPOLA → 400', r.status === 400);
+// Simula un gestor aliado sin vigencia registrada (en los datos reales, la licencia de Sandesol rige por la vida útil del proyecto)
+await db.proveedor.updateMany({ where: { nit: '804001490-7' }, data: { licenciaIndefinida: false, licenciaVence: null } });
 r = await llamar('POST', '/declaraciones', { token: T, cuerpo: { ...formulario, codigoInterno: 'AU-02', fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf', disposiciones: [{ disposicionId: idDe(cat.disposiciones, 'INCH') }] } });
 const incineracion = r.json;
 r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
@@ -543,6 +545,36 @@ r = await llamar('PATCH', `/gestores-aliados/${sandesol.id}`, { token: thseq, cu
 prueba('al registrar la vigencia de su licencia, Sandesol queda cubriendo', r.status === 200 && r.json.vigencia.cubre === true && r.json.vigencia.estado === 'VIGENTE', JSON.stringify(r.json).slice(0, 200));
 r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
 prueba('…y la declaración de incineración que antes se rechazaba ahora se autoriza', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
+// Licencias nuevas (respuesta de la gerencia del 19-11-2026: dejar espacio para subir la de un aliado nuevo o una propia)
+const PDF_LIC = Buffer.from('%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF\n');
+const conPdf = () => { const fo = new FormData(); fo.append('archivo', new Blob([PDF_LIC]), 'licencia.pdf'); return fo; };
+const aliadoNuevo = { nit: '901999888-1', razonSocial: 'Planta Aliada Nueva S.A.S. E.S.P.', municipio: 'Girón', licencia: 'Res. 0123 del 05-03-2026', licenciaAutoridad: 'CDMB',
+  licenciaVence: fechaEn(700), disposiciones: ['INCH'] };
+const [sinVigencia, conPropia] = await Promise.all([
+  llamar('POST', '/gestores-aliados', { token: thseq, cuerpo: { ...aliadoNuevo, licenciaVence: undefined } }),
+  llamar('POST', '/gestores-aliados', { token: thseq, cuerpo: { ...aliadoNuevo, disposiciones: ['ASP'] } }),
+]);
+r = await llamar('POST', '/gestores-aliados', { token: thseq, cuerpo: aliadoNuevo });
+const nuevoAliado = r.json;
+prueba('gestor aliado nuevo con su licencia y lo que gestiona (sin vigencia no se registra; lo de Los Pinos no lo ampara un aliado)', r.status === 201 && nuevoAliado.vigencia?.cubre === true
+  && sinVigencia.status === 400 && conPropia.status === 400 && /Los Pinos/.test(conPropia.json.mensaje), JSON.stringify([r.status, sinVigencia.status, conPropia.status, r.json.vigencia]));
+r = await llamar('POST', '/gestores-aliados', { token: thseq, cuerpo: aliadoNuevo });
+prueba('…no se repite el NIT', r.status === 400 && /Ya existe/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', `/gestores-aliados/${nuevoAliado.id}/licencia`, { token: thseq, form: conPdf() });
+const verLicencia = await llamar('GET', `/gestores-aliados/${nuevoAliado.id}/licencia`, { token: tcom });
+const pdfLicencia = await fetch(API + verLicencia.json.url);
+prueba('…se sube el PDF de su licencia y se ve con enlace firmado', r.status === 201 && verLicencia.status === 200 && pdfLicencia.status === 200
+  && Buffer.from(await pdfLicencia.arrayBuffer()).subarray(0, 4).toString() === '%PDF', `${r.status} ${verLicencia.status} ${pdfLicencia.status}`);
+r = await llamar('PATCH', `/gestores-aliados/${nuevoAliado.id}`, { token: thseq, cuerpo: { disposiciones: ['INCH', 'POS'] } });
+const gestiona = (await db.disposicionGestor.findMany({ where: { proveedorId: nuevoAliado.id }, include: { disposicion: true } })).map((x) => x.disposicion.codigo).sort();
+prueba('…y se cambia lo que gestiona', r.status === 200 && JSON.stringify(gestiona) === JSON.stringify(['INCH', 'POS']), JSON.stringify(gestiona));
+r = await llamar('POST', '/permisos-ambientales', { token: thseq, cuerpo: { acto: 'Resolución DGL No. 000999 de 2027', autoridad: 'CAS', estado: 'EN_TRAMITE',
+  alcance: 'Licencia de prueba: celda de seguridad y autoclave (en trámite)', disposiciones: ['DF'] } });
+const permisoNuevo = r.json;
+const subirActo = await llamar('POST', `/permisos-ambientales/${permisoNuevo.id}/documento`, { token: thseq, form: conPdf() });
+const sinPermisoCrear = await llamar('POST', '/permisos-ambientales', { token: tcom, cuerpo: { acto: 'Otro acto de prueba', autoridad: 'CAS', alcance: 'Algo que no se debe crear' } });
+prueba('permiso o licencia propia nuevo, con su PDF (solo con «permisos.gestionar»)', r.status === 201 && subirActo.status === 201 && sinPermisoCrear.status === 403
+  && (await db.permisoDisposicion.count({ where: { permisoId: permisoNuevo.id } })) === 1, `${r.status} ${subirActo.status} ${sinPermisoCrear.status}`);
 
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });
@@ -801,6 +833,9 @@ prueba('crear el acta del periodo con las líneas aprobadas (número PSAP{año}-
 const actaB = r.json;
 r = await llamar('POST', `/actas/${actaB.id}/emitir`, { token: T8 });
 prueba('emitir: copia fija con soporte legal (Res. DGL 000632 de 2023) y PDF', r.status === 201 && r.json.estado === 'EMITIDA' && r.json.pdfUrl && JSON.stringify(r.json.contenido).includes('000632 de 2023'), JSON.stringify(r.json).slice(0, 300));
+const textoDe = (cod) => r.json.contenido?.textosLegales?.find((t) => t.codigo === cod)?.texto ?? '';
+prueba('…los textos legales se soportan en los permisos registrados (sin marcadores sin llenar)', /se soporta en: .*000632 de 2023 \(CAS\)/.test(textoDe('CERTIFICACION'))
+  && !JSON.stringify(r.json.contenido?.textosLegales ?? []).match(/\{permiso|sin permiso vigente/), textoDe('CERTIFICACION').slice(-200));
 const codigo = r.json.codigoVerificacion;
 prueba('el QR lleva a la página pública de verificación', r.json.urlVerificacion?.endsWith(`/#verificar/${codigo}`), r.json.urlVerificacion);
 const pdf = await descargar(`/actas/${actaB.id}/pdf`, T8);

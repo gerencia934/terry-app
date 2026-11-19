@@ -182,7 +182,7 @@ export function EmpresaServidor() {
 
       <div className="mt-4">
         <Card title="Textos legales del certificado" action={edita && !editando && <Button size="sm" onClick={() => setEditando({ nuevo: true, codigo: '', titulo: '', texto: '', disposiciones: [], orden: 20, revisado: false })}><Plus size={14} /> Texto nuevo</Button>}>
-          <p className="mb-3 text-[13px] text-muted">Cada párrafo sale solo si el certificado tiene residuos con alguna de sus disposiciones (sin disposiciones: sale siempre). Editar crea una versión nueva; cada certificado guarda la versión que usó.</p>
+          <p className="mb-3 text-[13px] text-muted">Cada párrafo sale solo si el certificado tiene residuos con alguna de sus disposiciones (sin disposiciones: sale siempre). Editar crea una versión nueva; cada certificado guarda la versión que usó. Para que el texto se apoye en los permisos registrados (y salga sola una renovación o una licencia nueva) use <code className="num">{"{permiso:CÓDIGO}"}</code> (el permiso propio vigente de ese tratamiento, p. ej. <code className="num">{"{permiso:ASP}"}</code>) o <code className="num">{"{permisos}"}</code> (todo lo que ampara el certificado).</p>
           {sinRevisar > 0 && <p className="mb-3 rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">{sinRevisar} {sinRevisar === 1 ? 'texto es inicial' : 'textos son iniciales'}: revíselos con el área jurídica, o reemplácelos por el texto propio de Terra Viva, antes de emitir certificados reales.</p>}
           {editando && (
             <div className="mb-4 flex flex-col gap-3 rounded-xl border border-brand/40 bg-brand-soft/20 p-4">

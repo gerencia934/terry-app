@@ -120,6 +120,13 @@ export const DISPOSICIONES: DisposicionCatalogo[] = [
   { codigo: 'DF', nombre: 'Disposición final en celda de seguridad', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
   { codigo: 'DES', nombre: 'Desensamble y aprovechamiento de RAEE', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
   { codigo: 'POS', nombre: 'Posconsumo', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado o sistema de posconsumo' },
+  // Tratamientos de gestores aliados según sus licencias (carpetas «uso común» y «uso no común» del Drive, 19-11-2026)
+  { codigo: 'TAR', nombre: 'Tratamiento de aguas residuales en la PTAR de un gestor aliado', requierePermiso: true, propia: false, soporteLegal: 'Licencia o permiso de vertimientos del gestor aliado' },
+  { codigo: 'BIOA', nombre: 'Biorremediación de suelos, lodos y cortes con hidrocarburos (gestor aliado)', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
+  { codigo: 'AUT', nombre: 'Desactivación de alta eficiencia (autoclave) de residuos infecciosos', requierePermiso: true, propia: false, soporteLegal: 'Licencia del gestor aliado' },
+  { codigo: 'AUS', nombre: 'Recuperación o aprovechamiento de aceites usados e hidrocarburos', requierePermiso: true, propia: false, soporteLegal: 'Licencia o plan de manejo del gestor aliado' },
+  { codigo: 'ESC', nombre: 'Disposición de RCD en la escombrera autorizada de un gestor aliado', requierePermiso: true, propia: false, admitePeligrosos: false, hidrocarburos: 'NO_ADMITE',
+    soporteLegal: 'Autorización de la escombrera o inscripción del gestor de RCD aliado' },
   // Inactivas: ningún acto las ampara (decisión de la gerencia, 19-11-2026)
   { codigo: 'APR', nombre: 'Aprovechamiento propio', requierePermiso: true, propia: true, activo: false,
     soporteLegal: 'Sin acto que lo ampare: el objeto social no es una autorización ambiental (inscripción, Res. 1342 de 2020, sin acto)' },
@@ -237,22 +244,50 @@ export const PERMISOS_CAS: PermisoCatalogo[] = [
 export interface GestorAliado {
   nit: string; razonSocial: string; municipio?: string; disposiciones: string[];
   licencia: string; autoridad: string; vence?: string; indefinida?: boolean; alcance: string; excluyeTiposResiduo?: string[];
+  /** Último soporte de la relación comercial (certificación, contrato o convenio) y su fecha. */
+  soporteComercial?: string; soporteComercialFecha?: string;
 }
 export const GESTORES_ALIADOS: GestorAliado[] = [
-  { nit: '805001538-5', razonSocial: 'Veolia Servicios Industriales Colombia S.A.S. E.S.P. (CIGE Las Bateas)', municipio: 'Aguachica', disposiciones: ['DF'],
-    licencia: 'Res. 858 del 10-06-2011, modificada por la Res. 877 del 21-07-2015; cesión parcial por la Res. 1741 del 26-12-2018', autoridad: 'Corpocesar',
-    vence: '2027-01-03', alcance: 'Celda de seguridad para RESPEL industriales. No recibe hospitalarios, explosivos ni patógenos (Res. 1741)', excluyeTiposResiduo: ['HOSP'] },
+  // ---- Uso común (carpeta «1. LICENCIAS DE USO COMUN») ----
+  { nit: '805001538-5', razonSocial: 'Veolia Servicios Industriales Colombia S.A.S. E.S.P. (CIGE Las Bateas)', municipio: 'Aguachica', disposiciones: ['DF', 'BIOA'],
+    licencia: 'Res. 858 del 10-06-2011 (Corpocesar), modificada por la Res. 0877 del 21-07-2015; cesión parcial a Tecniamsa (hoy Veolia SI) de la celda de seguridad y la planta de biorremediación por la Res. 1741 del 26-12-2018', autoridad: 'Corpocesar',
+    vence: '2027-01-03', alcance: 'Celda de seguridad para RESPEL industriales (autorizada hasta el 03-01-2027, Res. 0877 y 1741) y planta de biorremediación de residuos petroleros. No recibe hospitalarios, explosivos ni patógenos (Res. 1741)',
+    excluyeTiposResiduo: ['HOSP'], soporteComercial: 'Certificación comercial', soporteComercialFecha: '2026-03-31' },
   { nit: '901483038-1', razonSocial: 'Centro de Gestión Sostenible S.A.S. E.S.P. (CGS)', municipio: 'Mosquera', disposiciones: ['DF'],
-    licencia: 'Res. 20217000362 de 2021, cesión de la licencia otorgada por la Res. 0869 del 09-09-2004 y sus modificaciones', autoridad: 'CAR Cundinamarca',
-    indefinida: true, alcance: 'Celda de seguridad para residuos peligrosos y no peligrosos. Vigente por la vida útil del proyecto' },
+    licencia: 'Res. DGEN 20217000362 del 26-08-2021 (CAR), cesión parcial a CGS de la licencia otorgada por la Res. 0869 del 09-09-2004, modificada por las Res. 2966 del 20-10-2006 y 1561 del 24-05-2010', autoridad: 'CAR Cundinamarca',
+    indefinida: true, alcance: 'Celda de seguridad (predio Belbal, Mosquera) para los RESPEL del art. 1 de la Res. 2966 de 2006 y lodos con características domésticas y especiales. Vida útil del proyecto. Su licencia de 2024 (CGS2, Res. DJUR 50247000048) es de otro predio y aún no se usa',
+    soporteComercial: 'Certificación comercial', soporteComercialFecha: '2024-12-13' },
   { nit: '900293868-7', razonSocial: 'Veolia Aseo Santander y Cesar S.A. E.S.P. (Parque Tecnológico Ambiental San Silvestre)', municipio: 'Barrancabermeja', disposiciones: ['RS'],
-    licencia: 'Res. DGL 1121 del 27-11-2014, otorgada a Rediba S.A. E.S.P. y cedida por la Res. 000063 del 25-02-2021', autoridad: 'CAS',
-    alcance: 'Relleno sanitario (celda ordinaria). Vigencia: no consta' },
-  { nit: '804001490-7', razonSocial: 'Sandesol S.A. E.S.P.', disposiciones: ['INCH', 'POS'],
-    licencia: 'Res. 0144 del 09-02-2000, modificada por la Res. 1194 de 2004 (industriales especiales); Res. 0477 de 2012 (autoclaves); Res. 0851 de 2017 (posconsumo)', autoridad: 'CDMB',
-    alcance: 'Incineración de hospitalarios e industriales, autoclave y posconsumo. Destino de los hospitalarios. Vigencia: no consta' },
+    licencia: 'Res. DGL 1121 del 27-11-2014 (CAS), otorgada a Rediba S.A. E.S.P. y cedida a Veolia Aseo Santander y Cesar S.A. E.S.P. por la Res. DGL 000063 del 25-02-2021', autoridad: 'CAS',
+    indefinida: true, alcance: 'Relleno sanitario de residuos ordinarios. Vida útil del sitio proyectada a 30 años (Res. 1121, art. 2)',
+    soporteComercial: 'Contrato DF-002-2024', soporteComercialFecha: '2024-01-15' },
+  { nit: '804001490-7', razonSocial: 'Sandesol S.A. E.S.P.', municipio: 'Bucaramanga', disposiciones: ['INCH', 'POS', 'AUT', 'AUS'],
+    licencia: 'Res. 0144 del 09-02-2000 (CDMB), modificada por las Res. 1194 del 13-12-2004 (industriales especiales), 0477 del 17-04-2012 (desactivación de alta eficiencia) y 0851 del 09-10-2017 (excedentes industriales, posconsumo e incineración)', autoridad: 'CDMB',
+    indefinida: true, alcance: 'Incineración de hospitalarios, industriales especiales y peligrosos; desactivación de alta eficiencia de infecciosos; excedentes industriales y posconsumo (RAEE, luminarias, pilas, envases de plaguicidas, aceites lubricantes usados, medicamentos). No incinera PVC, Y18, Y34 ni Y35, ni plásticos sin caracterización. Vida útil del proyecto (Res. 0144, art. 10)',
+    soporteComercial: 'Certificación comercial', soporteComercialFecha: '2026-02-24' },
+  { nit: '800105650-1', razonSocial: 'Empresa de Servicios Públicos de Aguachica E.S.P. (ESPA)', municipio: 'Aguachica', disposiciones: ['TAR'],
+    licencia: 'Res. 095 del 28-05-1996 (Corpocesar): licencia ambiental del municipio de Aguachica para construir y operar sus plantas de tratamiento de aguas residuales, que opera la ESPA', autoridad: 'Corpocesar',
+    indefinida: true, alcance: 'Tratamiento de aguas residuales domésticas en las PTAR de Aguachica. La licencia no menciona de forma expresa la recepción de aguas de terceros (baños portátiles, pozos sépticos): confírmelo con la ESPA',
+    soporteComercial: 'Certificación comercial', soporteComercialFecha: '2023-01-11' },
+  { nit: '900607351-1', razonSocial: 'Soluxionar S.A.S.', municipio: 'Sabana de Torres', disposiciones: ['BIOA', 'TAR'],
+    licencia: 'Res. DGL 00000101 del 03-02-2014 (CAS): almacenamiento, tratamiento, recuperación y disposición final de RESPEL en el predio Sion, con permiso de vertimientos', autoridad: 'CAS',
+    indefinida: true, alcance: 'Tratamiento y recuperación de RESPEL (biorremediación) y de aguas, por 30 años prorrogables. El contrato con Terra Viva rigió del 03-04-2023 al 02-04-2024: confirme que la relación sigue',
+    soporteComercial: 'Contrato PR-001-2023', soporteComercialFecha: '2023-04-03' },
+  { nit: '804002433-1', razonSocial: 'Descont S.A.S. E.S.P.', municipio: 'Girón', disposiciones: ['AUT'],
+    licencia: 'Res. 0426 del 21-05-1999 (CDMB), modificada por las Res. 0667 del 03-08-2004, 0134 del 02-02-2005 (esterilización en autoclave) y 1179 del 27-10-2006 (residuos con mercurio)', autoridad: 'CDMB',
+    indefinida: true, alcance: 'Desactivación de hospitalarios en autoclave y gestión de residuos con mercurio. No incinera en sus instalaciones (Res. 0426). Vida útil del proyecto',
+    soporteComercial: 'Contrato', soporteComercialFecha: '2025-04-21' },
+  // Sin vigencia registrada a propósito: no cubren hasta que se confirme (plan de manejo y sistema posconsumo sin término claro)
+  { nit: '804015104-1', razonSocial: 'Crudesan S.A.', municipio: 'Bucaramanga', disposiciones: ['AUS'],
+    licencia: 'Plan de manejo ambiental aprobado por la Res. 0163 del 03-03-2003 (CDMB) y cedido por la Res. 0077 del 20-01-2006; autorización del Ministerio de Minas y Energía, Res. 124047 del 29-03-2006', autoridad: 'CDMB',
+    alcance: 'Recuperación de aceites usados y crudos con residuos aceitosos. Es un plan de manejo, no una licencia: confirme su vigencia (y el soporte comercial) antes de usarlo' },
+  { nit: '900699445-6', razonSocial: 'Corporación Posconsumo de Iluminación (LÚMINA)', municipio: 'Bogotá D.C.', disposiciones: ['POS'],
+    licencia: 'Res. ANLA 01134 del 30-09-2016, que modifica la Res. 307 del 07-05-2012 (sistema colectivo de recolección selectiva y gestión ambiental de residuos de bombillas)', autoridad: 'ANLA',
+    alcance: 'Sistema posconsumo de bombillas (no es una planta). Confirme la vigencia del sistema y el soporte comercial antes de usarlo' },
+  // ---- Uso no común (carpeta «2. LICENCIAS DE USO NO COMUN») ----
   { nit: '900812833-8', razonSocial: 'Social RAEE S.A.S.', disposiciones: ['DES'],
     licencia: 'Res. 000756 del 14-09-2016 (LA-0008-2015)', autoridad: 'CDMB', indefinida: true, alcance: 'Desensamble de RAEE. Vigente por la vida útil del proyecto' },
+  //@@NO_COMUN@@
 ];
 
 /**
@@ -260,6 +295,9 @@ export const GESTORES_ALIADOS: GestorAliado[] = [
  * Cada uno sale si el certificado tiene residuos con alguna de sus disposiciones (vacío = siempre) y, si `soloPeligrosos`,
  * solo cuando hay al menos un residuo peligroso. Cada cambio en Ajustes › Datos de la empresa crea una versión nueva.
  * GESTOR_ALIADO se llena por cada aliado con {razon_social}, {nit}, {operacion}, {licencia}, {autoridad} y {certificado}.
+ * Todos admiten {emisor}, {nit_emisor} y {actividades}, y se soportan en los permisos registrados (respuesta de la gerencia del
+ * 19-11-2026): {permiso:COD} es el acto propio vigente que ampara el tratamiento COD (p. ej. {permiso:ASP}, {permiso:TRA}) y
+ * {permisos}, todo lo que ampara el certificado. Así una renovación o una licencia nueva sale sola, sin editar el texto.
  */
 export interface TextoLegalCatalogo {
   codigo: string; titulo: string; texto: string; disposiciones: string[]; orden: number;
@@ -268,21 +306,21 @@ export interface TextoLegalCatalogo {
 export const TEXTOS_LEGALES: TextoLegalCatalogo[] = [
   // Modelo oficial del certificado de Terra Viva (PSAP2026-296): es el párrafo de entrada. {emisor}, {nit_emisor} y
   // {actividades} los llena el certificado (las actividades dependen de si Terra Viva recogió o solo recibió).
-  { codigo: 'CERTIFICACION', orden: 0, disposiciones: [], revisado: false, titulo: 'Certificación',
-    texto: '{emisor}, NIT {nit_emisor}, certifica que recibió a conformidad y realizó la gestión integral ({actividades}) de los residuos relacionados a continuación, bajo estrictos estándares de seguridad y en cumplimiento de la normativa ambiental vigente. Las cantidades son las recibidas y conciliadas con el generador, y cada línea indica la licencia o el permiso que ampara su tratamiento y disposición final.' },
+  { codigo: 'CERTIFICACION', orden: 0, disposiciones: [], revisado: true, titulo: 'Certificación',
+    texto: '{emisor}, NIT {nit_emisor}, certifica que recibió a conformidad y realizó la gestión integral ({actividades}) de los residuos relacionados a continuación, bajo estrictos estándares de seguridad y en cumplimiento de la normativa ambiental vigente. Las cantidades son las recibidas y conciliadas con el generador. Cada línea indica la licencia o el permiso ambiental que ampara su tratamiento y disposición final, vigente a la fecha del servicio; en conjunto, este certificado se soporta en: {permisos}.' },
   { codigo: 'RESPONSABILIDAD_RESPEL', orden: 1, disposiciones: [], soloPeligrosos: true, revisado: true, titulo: 'Responsabilidad del generador de residuos peligrosos',
     texto: 'Conforme a la Ley 1252 de 2008 y al Decreto 1076 de 2015, la responsabilidad integral del generador sobre sus residuos peligrosos subsiste hasta que sean aprovechados como insumo o dispuestos con carácter definitivo (artículo 2.2.6.1.3.3). El generador debe conservar este certificado (artículo 2.2.6.1.3.1).' },
-  { codigo: 'TRANSPORTE_RESPEL', orden: 2, disposiciones: [], soloPeligrosos: true, revisado: false, titulo: 'Transporte de residuos peligrosos',
-    texto: 'El transporte de los residuos peligrosos relacionados lo realizó TERRA VIVA S.A.S. E.S.P. conforme al Decreto 1079 de 2015 (transporte terrestre automotor de mercancías peligrosas) y a su Plan de Contingencia para el transporte de hidrocarburos, derivados y sustancias nocivas, presentado a la CAS y declarado recibido mediante el Auto SAA No. 0244-20 del 29 de septiembre de 2020, actualizado con el radicado CAS 80.30.17312.2024, y al plan de contingencia registrado ante la Corporación Autónoma Regional para la Defensa de la Meseta de Bucaramanga (CDMB), expediente TH 0013-2021 (SINCA 33950).' },
-  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], revisado: false, titulo: 'Tratamiento y vertimiento a suelo',
-    texto: 'Las aguas residuales domésticas (ARD) y no domésticas (ARnD) sin características de peligrosidad relacionadas se recibieron y trataron en la Planta de Tratamiento de Aguas Residuales «Los Pinos», en el Parque de Saneamiento Ambiental Los Pinos (vereda Villa de Leyva, Sabana de Torres). El efluente tratado se dispuso al suelo por evaporación, dispersión o riego, al amparo del permiso de vertimiento a suelo otorgado por la Corporación Autónoma Regional de Santander (CAS) mediante la Resolución DGL No. 000632 del 15 de agosto de 2023 (Expediente 210.60.00032.2023), cuyo alcance precisó el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023. Ningún efluente de la planta se vierte a fuentes hídricas superficiales.' },
+  { codigo: 'TRANSPORTE_RESPEL', orden: 2, disposiciones: [], soloPeligrosos: true, revisado: true, titulo: 'Transporte de residuos peligrosos',
+    texto: 'El transporte de los residuos peligrosos relacionados lo realizó {emisor} conforme al Decreto 1079 de 2015 (transporte terrestre automotor de mercancías peligrosas) y a sus planes de contingencia para el transporte de hidrocarburos, derivados y sustancias nocivas, registrados ante las autoridades ambientales de su operación: {permiso:TRA}.' },
+  { codigo: 'VERTIMIENTO_SUELO', orden: 10, disposiciones: ['ASP'], revisado: true, titulo: 'Tratamiento y vertimiento a suelo',
+    texto: 'Las aguas residuales domésticas (ARD) y no domésticas (ARnD) sin características de peligrosidad relacionadas se recibieron y trataron en la planta de tratamiento de aguas residuales «Los Pinos», en el Parque de Saneamiento Ambiental Los Pinos (vereda Villa de Leyva, Sabana de Torres, Santander). El agua tratada se dispuso únicamente al suelo, por evaporación forzada o riego dentro del polígono autorizado, al amparo del permiso de vertimiento a suelo {permiso:ASP}, con un caudal de descarga estimado de 3,65 L/s (Expediente CAS 210.60.00032.2023). Ese permiso no autoriza vertimientos a cuerpos de agua superficiales.' },
   { codigo: 'BIORREMEDIACION', orden: 11, disposiciones: ['BIO'], revisado: true, titulo: 'Biorremediación',
     texto: 'Los lodos no peligrosos y los cortes de perforación base agua relacionados se trataron por biorremediación (landfarming) en la celda de operación de landfarming de la planta «Los Pinos», unidad de tratamiento aprobada en el artículo quinto de la Resolución DGL No. 000632 del 15 de agosto de 2023 de la CAS, dentro del alcance de su artículo sexto, precisado por el Oficio SAO No. 1762-2023 del 26 de diciembre de 2023.' },
   { codigo: 'RCD', orden: 12, disposiciones: ['RCD'], revisado: true, titulo: 'Residuos de construcción y demolición',
     texto: 'Los residuos de construcción y demolición (RCD) relacionados, recibidos sin mezcla con residuos ordinarios ni peligrosos, se gestionaron en el sitio de disposición final de RCD «Los Pinos» por TERRA VIVA S.A.S. E.S.P., gestor de RCD inscrito ante la CAS mediante la Resolución SAO No. 00235-24 de agosto de 2024, con licencia de funcionamiento de la Secretaría de Planeación de Sabana de Torres del 28 de abril de 2025, conforme a la Resolución 0472 de 2017 del Ministerio de Ambiente y Desarrollo Sostenible, modificada por la Resolución 1257 de 2021.' },
   { codigo: 'ACU', orden: 13, disposiciones: ['ACU'], revisado: true, titulo: 'Aceite de cocina usado',
     texto: 'El aceite de cocina usado (ACU) relacionado fue recolectado y gestionado por TERRA VIVA S.A.S. E.S.P., gestor de ACU inscrito ante la CAS (Oficio SAA No. 0311/21 del 19 de abril de 2021), conforme a la Resolución 316 de 2018 del Ministerio de Ambiente y Desarrollo Sostenible.' },
-  { codigo: 'GESTOR_ALIADO', orden: 14, disposiciones: ['INCH', 'RS', 'DF', 'DES', 'POS', 'COP', 'INCO'], revisado: true, titulo: 'Gestores aliados',
+  { codigo: 'GESTOR_ALIADO', orden: 14, disposiciones: ['INCH', 'RS', 'DF', 'DES', 'POS', 'COP', 'INCO', 'TAR', 'BIOA', 'AUT', 'AUS', 'ESC'], revisado: true, titulo: 'Gestores aliados',
     texto: 'TERRA VIVA S.A.S. E.S.P. realizó la recolección y el transporte de los residuos relacionados en las líneas marcadas «gestor aliado» y los entregó, en la fecha indicada, a {razon_social}, NIT {nit}, para su {operacion}, al amparo de {licencia}, expedido por {autoridad} y vigente a la fecha de entrega. El tratamiento y la disposición final de esos residuos constan en el certificado que expide dicho gestor (N.° {certificado}).' },
   { codigo: 'LICENCIA_LOS_PINOS', orden: 20, disposiciones: [], activo: false, revisado: true, titulo: 'Licencia ambiental de Los Pinos',
     texto: 'Los residuos relacionados se gestionaron en el Parque de Saneamiento Ambiental Los Pinos al amparo de la licencia ambiental otorgada por la CAS mediante la Resolución {resolucion} del {fecha}, actividad {actividad}.' },

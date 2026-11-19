@@ -280,12 +280,22 @@ class ActasService {
       if (f.aliado.certificado) x.certificados.add(f.aliado.certificado);
       aliados.set(f.aliado.nit, x);
     }
-    const llenar = (texto: string, v: Record<string, string>) => texto.replace(/\{(\w+)\}/g, (m, k: string) => v[k] ?? m);
+    // {permiso:COD}: el acto propio vigente que ampara ese tratamiento (o el plan de transporte, TRA) a la fecha del último
+    // servicio; así una renovación o una licencia nueva sale sola en los textos. {permisos}: todo lo que ampara este certificado.
+    const llenar = (texto: string, v: Record<string, string>) => texto.replace(/\{([\w:]+)\}/g, (m, k: string) => v[k] ?? (k.startsWith('permiso:') ? '[sin permiso vigente registrado]' : m));
+    const ultimoServicio = lineas.reduce((f, l) => (l.conciliacion.manifiesto.fechaServicio > f ? l.conciliacion.manifiesto.fechaServicio : f), new Date(0));
+    const propios = await this.db.permisoAmbiental.findMany({ where: { empresaId: a.empresaId }, orderBy: { acto: 'asc' }, include: { disposiciones: { include: { disposicion: { select: { codigo: true } } } } } });
+    const porDisposicion = new Map<string, string[]>();
+    for (const p of propios.filter((x) => (x.vence ? x.vence >= ultimoServicio : ['VIGENTE', 'POR_VENCER'].includes(x.estado)))) {
+      for (const d of p.disposiciones) porDisposicion.set(`permiso:${d.disposicion.codigo}`, [...(porDisposicion.get(`permiso:${d.disposicion.codigo}`) ?? []), `${p.acto} (${p.autoridad})`]);
+    }
+    const permisosTextos = Object.fromEntries([...porDisposicion].map(([k, xs]) => [k, xs.length > 1 ? `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}` : xs[0]]));
+    const amparan = [...new Set(filas.flatMap((x) => x.soporte))];
     // Lo que hizo Terra Viva: recogió y transportó (manifiesto de cargue) o recibió en planta (descargue de un tercero)
     const recogio = filas.some((x) => x.recogido), recibio = filas.some((x) => !x.recogido);
     const final = acta.tipo === 'APROVECHAMIENTO' ? 'aprovechamiento' : 'tratamiento y disposición final';
     const actividades = recogio && recibio ? `recolección, transporte o recepción en planta, ${final}` : recogio ? `recolección, transporte, ${final}` : `recepción en planta, ${final}`;
-    const generales = { emisor: empresa.razonSocial, nit_emisor: empresa.nit, actividades };
+    const generales: Record<string, string> = { emisor: empresa.razonSocial, nit_emisor: empresa.nit, actividades, ...permisosTextos, permisos: amparan.join('; ') };
     const transportoPeligrosos = filas.some((x) => x.peligroso && x.recogido);
     const textos = (await this.db.textoLegal.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ orden: 'asc' }, { codigo: 'asc' }] }))
       .filter((t) => (!t.disposiciones.length || t.disposiciones.some((x) => presentes.has(x))) && (!t.soloPeligrosos || hayPeligrosos)
