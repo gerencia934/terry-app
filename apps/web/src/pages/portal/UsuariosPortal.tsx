@@ -2,7 +2,7 @@
 // oficina de Terra Viva desde la ficha del cliente (/clientes/:id/usuarios-portal), que da el primer acceso.
 // Nadie escribe contraseñas por otro: el usuario nuevo recibe una invitación. Nada se borra: un usuario se inactiva.
 import { useState, type FormEvent } from 'react';
-import { Loader2, Mail, MapPin, Plus, ShieldCheck, UserRound } from 'lucide-react';
+import { Loader2, Mail, MapPin, Plus, ShieldCheck, ShieldOff, UserRound } from 'lucide-react';
 import { Badge, Button, Field, Input, PageHeader, Sheet, useToast } from '../../components/ui';
 import { api, ErrorApi } from '../../lib/api';
 import { fechaHoraCo, useApi } from '../../lib/servidor';
@@ -12,6 +12,8 @@ import { PERFIL, usePortal, type SedePortal } from './PortalApp';
 export interface UsuarioPortal {
   id: string; nombre: string; email: string; documento: string; telefono: string | null; activo: boolean; perfilPortal: 'ADMIN' | 'CONSULTA';
   ultimoLogin: string | null; datosAceptadosEn: string | null; sedesPortal: { sucursal: { id: string; codigo: string | null; nombre: string } }[];
+  /** Desde cuándo tiene activa la verificación en dos pasos (null: sin activar; en el portal es opcional). */
+  totpActivoDesde?: string | null;
 }
 const CAMPOS: Record<string, string> = { email: 'Correo', nombre: 'Nombre', documento: 'Documento', telefono: 'Teléfono', sucursalIds: 'Sedes' };
 function mensajeError(e: unknown, def: string) {
@@ -51,7 +53,7 @@ export function ListaUsuariosPortal({ lista, abrir, vacio }: { lista: ReturnType
           <button onClick={() => abrir?.(u)} disabled={!abrir} className={cx('flex w-full items-start gap-3 rounded-xl border p-3 text-left text-[13px]', u.activo ? 'border-line' : 'border-dashed border-line opacity-70', abrir && 'hover:bg-surface-2')}>
             <span className={cx('rounded-full p-2', u.perfilPortal === 'ADMIN' ? 'bg-brand-soft text-brand-ink' : 'bg-surface-2 text-muted')}>{u.perfilPortal === 'ADMIN' ? <ShieldCheck size={16} /> : <UserRound size={16} />}</span>
             <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-1.5"><span className="font-medium">{u.nombre}</span><Badge tone={u.perfilPortal === 'ADMIN' ? 'brand' : 'neutral'}>{PERFIL[u.perfilPortal]}</Badge>{!u.activo && <Badge>Inactivo</Badge>}</span>
+              <span className="flex flex-wrap items-center gap-1.5"><span className="font-medium">{u.nombre}</span><Badge tone={u.perfilPortal === 'ADMIN' ? 'brand' : 'neutral'}>{PERFIL[u.perfilPortal]}</Badge>{!u.activo && <Badge>Inactivo</Badge>}{u.totpActivoDesde && <Badge tone="info">Verificación en dos pasos</Badge>}</span>
               <span className="block truncate text-muted">{u.email}</span>
               <span className="block text-[12px] text-subtle">
                 {u.sedesPortal.length ? `Sedes: ${u.sedesPortal.map((s) => s.sucursal.nombre).join(', ')}` : 'Todas las sedes'} · {u.ultimoLogin ? `último ingreso ${fechaHoraCo(u.ultimoLogin)}` : 'aún no ha ingresado'}
@@ -101,9 +103,16 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
     try { await api(`${base}/${u!.id}/invitacion`, { metodo: 'POST' }); toast(`Invitación enviada de nuevo a ${u!.email}.`); }
     catch (x) { toast(mensajeError(x, 'No se pudo enviar.'), 'warn'); }
   };
+  // Celular perdido y sin códigos de respaldo: la restablece otro administrador (nadie la suya) y se cierran sus sesiones
+  const [restablecer2fa, setRestablecer2fa] = useState(false);
+  const puede2fa = !!u?.totpActivoDesde && !yo;
+  const restablecer = async () => {
+    try { await api(`${base}/${u!.id}/2fa/restablecer`, { cuerpo: {} }); toast(`Se restableció la verificación en dos pasos de ${u!.nombre} y se cerraron sus sesiones.`, 'ok'); listo(); }
+    catch (x) { toast(mensajeError(x, 'No se pudo restablecer.'), 'warn'); }
+  };
   return (
     <form onSubmit={guardar} className="flex flex-col gap-4">
-      {u ? <p className="text-[13px] text-muted">Correo <span className="font-medium text-fg">{u.email}</span>: es su usuario para ingresar y no cambia.{u.datosAceptadosEn ? ` Aceptó la política de datos el ${fechaHoraCo(u.datosAceptadosEn)}.` : ''}</p>
+      {u ? <p className="text-[13px] text-muted">Correo <span className="font-medium text-fg">{u.email}</span>: es su usuario para ingresar y no cambia.{u.datosAceptadosEn ? ` Aceptó la política de datos el ${fechaHoraCo(u.datosAceptadosEn)}.` : ''}{u.totpActivoDesde ? ` Verificación en dos pasos activa desde el ${fechaHoraCo(u.totpActivoDesde)}.` : ''}</p>
         : <Field label="Correo" id="up-e" hint="Le llega la invitación para crear su contraseña."><Input id="up-e" type="email" value={v.email} onChange={set('email')} maxLength={150} required autoComplete="off" /></Field>}
       <Field label="Nombre completo" id="up-n"><Input id="up-n" value={v.nombre} onChange={set('nombre')} minLength={3} maxLength={150} required /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -143,7 +152,21 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
           <span><span className="font-medium">Usuario activo</span><br /><span className="text-muted">{yo ? 'Nadie se inactiva a sí mismo.' : 'Inactivo no se borra: no puede ingresar y sus sesiones se cierran de inmediato.'}</span></span>
         </label>
       )}
-      {u?.activo && <div><Button type="button" size="sm" variant="ghost" onClick={reenviar}><Mail size={14} /> Reenviar invitación</Button></div>}
+      {(u?.activo || puede2fa) && (
+        <div className="flex flex-wrap gap-2">
+          {u?.activo && <Button type="button" size="sm" variant="ghost" onClick={reenviar}><Mail size={14} /> Reenviar invitación</Button>}
+          {puede2fa && !restablecer2fa && <Button type="button" size="sm" variant="ghost" onClick={() => setRestablecer2fa(true)}><ShieldOff size={14} /> Restablecer verificación en dos pasos</Button>}
+        </div>
+      )}
+      {puede2fa && restablecer2fa && (
+        <div className="flex flex-col gap-2 rounded-lg border border-warn/40 bg-warn/10 p-3 text-[13px]" role="alert">
+          <p>Úselo solo si {u!.nombre} perdió el celular y sus códigos de respaldo. Se cierran sus sesiones y podrá entrar solo con su contraseña; si quiere, la activa de nuevo. Le llegará un correo avisándole.</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRestablecer2fa(false)}>Cancelar</Button>
+            <Button type="button" size="sm" variant="danger" onClick={restablecer}>Sí, restablecer</Button>
+          </div>
+        </div>
+      )}
       <div className="flex justify-end border-t border-line pt-3">
         <Button type="submit" variant={u?.activo && !v.activo ? 'danger' : 'primary'} disabled={enviando || sinSedes}>
           {enviando && <Loader2 size={16} className="animate-spin" />}{u ? (u.activo && !v.activo ? 'Inactivar usuario' : 'Guardar cambios') : 'Enviar invitación'}

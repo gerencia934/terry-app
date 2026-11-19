@@ -339,6 +339,11 @@ model Usuario {
   datosPoliticaVersion String?       @map("datos_politica_version") @db.VarChar(20)
   datosAceptadosEn     DateTime?     @map("datos_aceptados_en") @db.Timestamptz
   datosAceptadosIp     String?       @map("datos_aceptados_ip") @db.VarChar(64)
+  // Verificación en dos pasos (TOTP): secreto cifrado, el pendiente mientras se configura y el último paso usado
+  totpSecreto          String?       @map("totp_secreto")
+  totpPendiente        String?       @map("totp_pendiente")
+  totpActivoDesde      DateTime?     @map("totp_activo_desde") @db.Timestamptz
+  totpUltimoPaso       Int?          @map("totp_ultimo_paso")
   createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz
   // Portal de clientes: usuario de un cliente, con su perfil (ver migración 20261126000000_portal_clientes).
   // Sin sedes en usuario_sucursales, ve todas las del cliente.
@@ -349,6 +354,7 @@ model Usuario {
   rol                     Rol                      @relation(fields: [rolId], references: [id])
   clientePortal           Cliente?                 @relation("UsuarioPortal", fields: [clienteId], references: [id], onDelete: Restrict)
   sedesPortal             UsuarioSucursal[]
+  codigosRespaldo         CodigoRespaldo[]
   arl                     EntidadSeguridadSocial?  @relation("UsuarioArl", fields: [arlId], references: [id])
   eps                     EntidadSeguridadSocial?  @relation("UsuarioEps", fields: [epsId], references: [id])
   rutasConductor          Ruta[]                   @relation("RutaConductor")
@@ -533,6 +539,20 @@ model Zona {
 }
 
 /// Sedes que puede ver un usuario del portal (sin filas: todas las de su cliente).
+/// Códigos de respaldo de la verificación en dos pasos: de un solo uso, guardados como huella SHA-256
+model CodigoRespaldo {
+  id         String    @id @default(uuid()) @db.Uuid
+  usuarioId  String    @map("usuario_id") @db.Uuid
+  codigoHash String    @map("codigo_hash") @db.Char(64)
+  usadoEn    DateTime? @map("usado_en") @db.Timestamptz
+  creadoEn   DateTime  @default(now()) @map("creado_en") @db.Timestamptz
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId], map: "ix_codigos_respaldo_usuario")
+  @@map("codigos_respaldo")
+}
+
 model UsuarioSucursal {
   usuarioId  String   @map("usuario_id") @db.Uuid
   sucursalId String   @map("sucursal_id") @db.Uuid

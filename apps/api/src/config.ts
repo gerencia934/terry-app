@@ -27,6 +27,9 @@ const Esquema = z.object({
   LIMITE_PETICIONES_MIN: z.coerce.number().int().min(10).default(300),
   // Techo por IP en ingreso / recuperar contraseña, sumando todos los correos (contra el rociado de contraseñas)
   LIMITE_INGRESOS_IP_MIN: z.coerce.number().int().min(5).default(60),
+  // Verificación en dos pasos: clave para cifrar los secretos TOTP y la huella de los códigos de respaldo. Si falta, se
+  // deriva de JWT_SECRET (cambiar cualquiera de las dos obliga a configurar de nuevo la verificación en dos pasos).
+  CLAVE_2FA: z.string().trim().refine((v) => v === '' || v.length >= 32, 'CLAVE_2FA: mínimo 32 caracteres').default(''),
 });
 export type Config = z.infer<typeof Esquema>;
 

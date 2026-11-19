@@ -2,8 +2,9 @@
 // lo suyo (declaraciones, solicitudes, manifiestos, certificados e informes). Doble barrera en el servidor: el API filtra
 // por el cliente del token y la base (RLS) lo vuelve a filtrar. Aquí nada depende de datos que mande el navegador.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Award, BarChart3, FileStack, FileText, Home, Loader2, MapPin, Menu, Moon, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
+import { Award, BarChart3, FileStack, FileText, Home, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
 import { Logo, useTheme } from '../../components/AppShell';
+import { VentanaDobleFactor } from '../../components/DobleFactor';
 import { Proteccion } from '../../components/Proteccion';
 import { Button } from '../../components/ui';
 import { salir, salirDeTodos } from '../../lib/api';
@@ -75,6 +76,7 @@ function Marco({ children }: { children: ReactNode }) {
   const { dark, toggle } = useTheme();
   const [menu, setMenu] = useState(false);
   const [cuenta, setCuenta] = useState(false);
+  const [ver2fa, setVer2fa] = useState(false);
   useEffect(() => { setMenu(false); setCuenta(false); }, [route]);
   const items = MENU.filter((m) => !m.soloAdmin || yo.perfil === 'ADMIN');
   const actual = items.find((i) => i.route === route);
@@ -132,6 +134,7 @@ function Marco({ children }: { children: ReactNode }) {
                       <p className="truncate">{yo.usuario.email}</p>
                       <p>{PERFIL[yo.perfil]} · {yo.cliente.razonSocial}</p>
                     </div>
+                    <button onClick={() => { setCuenta(false); setVer2fa(true); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2"><ShieldCheck size={15} className="text-brand" />Verificación en dos pasos</button>
                     <button onClick={() => cerrar(false)} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión</button>
                     <button onClick={() => cerrar(true)} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión en todos los dispositivos</button>
                   </div>
@@ -142,6 +145,8 @@ function Marco({ children }: { children: ReactNode }) {
         </header>
         <main className="safe-x mx-auto max-w-[1300px] py-5 pb-24 lg:py-7">{children}</main>
       </div>
+
+      <VentanaDobleFactor open={ver2fa} onClose={() => setVer2fa(false)} />
 
       {menu && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menú">

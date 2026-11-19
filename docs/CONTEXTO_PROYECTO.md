@@ -97,4 +97,7 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   (API + RLS), enlace firmado de 5 minutos, usuarios del cliente (administrador y consulta, sedes opcionales) e informe
   anual en Excel. Con el visto bueno del usuario («Sí, sigue») el administrador del cliente también carga sus
   declaraciones (quedan en revisión), pide servicios (quedan «por confirmar») y cancela los que nadie ha confirmado.
+- Verificación en dos pasos (requisitos de producción §4): ✅ el 19-11-2026. App de autenticación (TOTP) con códigos de
+  respaldo; obligatoria para el personal en producción (o antes, con el interruptor de Ajustes › Empresa) y opcional
+  en el portal; la restablece otro administrador. 85 pruebas de reglas y 376 e2e OK.
 - Docker no se probó en el entorno de Claude: el usuario lo levanta en su equipo.

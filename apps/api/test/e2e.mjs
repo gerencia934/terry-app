@@ -1,6 +1,7 @@
 // Prueba de punta a punta del API contra una base de datos real.
 // Requiere el API corriendo (API_URL) y la base sembrada con prisma/seed.mjs.
 //   API_URL=http://localhost:3000/api/v1 ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/e2e.mjs
+import { createHmac } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import { PrismaClient } from '@prisma/client';
 import shared from '@terraviva/shared';
@@ -1237,6 +1238,188 @@ const pedido2 = r.json;
 await llamar('PATCH', `/solicitudes/${pedido2.id}/aprobacion`, { token: T8, cuerpo: { aprobacion: 'APROBADA' } });
 r = await llamar('POST', `/portal/solicitudes/${pedido2.id}/cancelar`, { token: tPA, cuerpo: { motivo: 'Cambio de planes' } });
 prueba('…pero si Terra Viva ya lo confirmó, no lo cancela desde el portal', r.status === 400 && /confirm/.test(r.json.mensaje), JSON.stringify(r.json));
+
+console.log('\n10. Verificación en dos pasos (requisitos de producción §4)');
+// Códigos de una app de autenticación (RFC 6238, como Google Authenticator): HMAC-SHA1 de pasos de 30 segundos
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const bytesB32 = (s) => {
+  const out = []; let bits = 0, valor = 0;
+  for (const ch of s.replace(/[\s=]/g, '').toUpperCase()) { valor = ((valor << 5) | B32.indexOf(ch)) & 0xffff; bits += 5; if (bits >= 8) { out.push((valor >>> (bits - 8)) & 0xff); bits -= 8; } }
+  return Buffer.from(out);
+};
+const totp = (secreto, paso) => {
+  const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(paso));
+  const h = createHmac('sha1', bytesB32(secreto)).update(b).digest(); const o = h[h.length - 1] & 0x0f;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
+};
+const pasoAhora = () => Math.floor(Date.now() / 30_000);
+const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+/** El celular: cada código sirve una sola vez y el servidor acepta el paso anterior, el actual y el siguiente. */
+const appAutenticacion = (secreto) => {
+  let ultimo = -Infinity;
+  return async () => {
+    if (Date.now() % 30_000 > 26_000) await esperar(30_000 - (Date.now() % 30_000) + 300); // lejos del cambio de paso
+    const paso = Math.max(pasoAhora() - 1, ultimo + 1);
+    while (paso > pasoAhora() + 1) await esperar(1000);
+    ultimo = paso;
+    return totp(secreto, paso);
+  };
+};
+const claveDe = (inicio) => (inicio?.secreto ?? '').replace(/\s/g, '');
+/** Un código que hoy no es válido para esa clave (ningún paso cercano lo produce). */
+const codigoErrado = (secreto) => {
+  const cerca = [-2, -1, 0, 1, 2].map((d) => totp(secreto, pasoAhora() + d));
+  let n = 0; while (cerca.includes(String(n).padStart(6, '0'))) n++;
+  return String(n).padStart(6, '0');
+};
+const CLAVE_DOS = 'DosPasos2026!';
+const dos = await db.usuario.upsert({ where: { email: 'dos.pasos.e2e@terravivasas.com' }, update: {},
+  create: { empresaId: cliente.empresaId, rolId: rolComercial.id, nombre: 'Dos Pasos E2E', documento: '8', email: 'dos.pasos.e2e@terravivasas.com', passwordHash: await hashFijo(CLAVE_DOS) } });
+const entrarDos = async () => (await llamar('POST', '/auth/login', { cuerpo: { email: dos.email, clave: CLAVE_DOS } })).json;
+let sDos = await aceptarDatos(await entrarDos());
+prueba('sin activarla (y sin exigirla) se entra solo con la contraseña', !!sDos.accessToken && sDos.usuario?.dobleFactor?.activo === false && sDos.usuario.requiereConfigurar2fa === false,
+  JSON.stringify(sDos.usuario ?? sDos).slice(0, 200));
+r = await llamar('POST', '/auth/2fa/confirmar', { token: sDos.accessToken, cuerpo: { codigo: '123456' } });
+prueba('activarla: confirmar sin haber leído el código QR → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', '/auth/2fa/iniciar', { token: sDos.accessToken, cuerpo: {} });
+const secretoDos = claveDe(r.json);
+prueba('…empezar entrega la clave (de a 4 letras), el enlace otpauth y el código QR', r.status === 200 && /^[A-Z2-7]{32}$/.test(secretoDos) && /^([A-Z2-7]{4} ){7}[A-Z2-7]{4}$/.test(r.json.secreto)
+  && r.json.uri?.startsWith('otpauth://totp/TERRY-GO') && r.json.uri.includes(`secret=${secretoDos}`) && r.json.qr?.startsWith('data:image/png;base64,'), JSON.stringify(r.json).slice(0, 160));
+let filaDos = await db.usuario.findUnique({ where: { id: dos.id } });
+prueba('…la clave queda pendiente y cifrada en la base (no la de la app): todavía no está activa', !!filaDos.totpPendiente && !filaDos.totpPendiente.includes(secretoDos) && filaDos.totpSecreto === null);
+r = await llamar('POST', '/auth/2fa/confirmar', { token: sDos.accessToken, cuerpo: { codigo: codigoErrado(secretoDos) } });
+prueba('…un código errado no la activa → 400', r.status === 400 && /no coincide/.test(r.json.mensaje), JSON.stringify(r.json));
+const appDos = appAutenticacion(secretoDos);
+const c1 = await appDos();
+r = await llamar('POST', '/auth/2fa/confirmar', { token: sDos.accessToken, cuerpo: { codigo: c1 } });
+const activacion = r.json;
+prueba('…con el código de la app queda activa: 10 códigos de respaldo y una sesión nueva', r.status === 200 && activacion.codigosRespaldo?.length === 10
+  && activacion.codigosRespaldo.every((c) => /^[A-Z2-7]{4}-[A-Z2-7]{4}$/.test(c)) && new Set(activacion.codigosRespaldo).size === 10
+  && !!activacion.sesion?.accessToken && activacion.sesion.usuario.dobleFactor?.activo === true, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', '/auth/yo', { token: sDos.accessToken });
+prueba('…y cierra las demás sesiones (también la que la activó)', r.status === 401, String(r.status));
+filaDos = await db.usuario.findUnique({ where: { id: dos.id } });
+const huellas = await db.codigoRespaldo.findMany({ where: { usuarioId: dos.id } });
+prueba('…en la base: la clave cifrada y los códigos de respaldo solo como huella (sha256)', !!filaDos.totpSecreto && !filaDos.totpSecreto.includes(secretoDos) && filaDos.totpPendiente === null
+  && !!filaDos.totpActivoDesde && huellas.length === 10 && huellas.every((h) => /^[0-9a-f]{64}$/.test(h.codigoHash) && h.usadoEn === null));
+r = await llamar('POST', '/auth/2fa/iniciar', { token: activacion.sesion.accessToken, cuerpo: {} });
+prueba('…ya activa, no se empieza otra (la clave no se cambia sin desactivarla)', r.status === 400, JSON.stringify(r.json));
+
+// Ingreso en dos pasos
+let x = await entrarDos();
+const desafio = x.desafio;
+prueba('ingreso: con la verificación activa, la contraseña sola no entrega sesión sino un desafío', x.requiere2fa === true && !!desafio && !x.accessToken, JSON.stringify(x).slice(0, 160));
+r = await llamar('GET', '/auth/yo', { token: desafio });
+prueba('…el desafío no sirve como sesión → 401', r.status === 401);
+r = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio, codigo: codigoErrado(secretoDos) } });
+prueba('…un código errado → 401 (y queda en la auditoría)', r.status === 401
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'usuario', entidadId: dos.id, accion: '2FA_FALLIDO' } })), JSON.stringify(r.json));
+const c2 = await appDos();
+r = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio, codigo: c2 } });
+const sesionDos = r.json;
+prueba('…con el código de la app entra', r.status === 200 && !!sesionDos.accessToken && sesionDos.usuario?.dobleFactor?.activo === true, JSON.stringify(r.json).slice(0, 160));
+const rep1 = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio, codigo: c2 } });
+const rep2 = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio, codigo: c1 } });
+prueba('…el mismo código no sirve dos veces aunque siga vigente, ni uno anterior', rep1.status === 401 && rep2.status === 401, `${rep1.status} ${rep2.status}`);
+r = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio: desafio.slice(0, -4) + (desafio.endsWith('AAAA') ? 'BBBB' : 'AAAA'), codigo: '123456' } });
+prueba('…un desafío alterado no sirve → 401', r.status === 401 && /venció/.test(r.json.mensaje), JSON.stringify(r.json));
+const respaldo = activacion.codigosRespaldo[0];
+r = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio, codigo: respaldo.toLowerCase().replace('-', ' ') } });
+prueba('sin el celular: entra con un código de respaldo (sin importar mayúsculas ni espacios)', r.status === 200 && !!r.json.accessToken, JSON.stringify(r.json).slice(0, 160));
+r = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio, codigo: respaldo } });
+prueba('…y ese código de respaldo ya no sirve otra vez', r.status === 401, String(r.status));
+const ingresos = await db.auditoria.findMany({ where: { entidad: 'usuario', entidadId: dos.id, accion: 'LOGIN' }, orderBy: { id: 'desc' }, take: 2 });
+prueba('…la auditoría dice cómo entró cada vez (código de la app o de respaldo)', ingresos[0]?.despues?.dobleFactor === 'RESPALDO' && ingresos[1]?.despues?.dobleFactor === 'TOTP',
+  JSON.stringify(ingresos.map((i) => i.despues)));
+const tDos = sesionDos.accessToken;
+r = await llamar('GET', '/auth/yo', { token: tDos });
+prueba('/auth/yo: activa, desde cuándo, si es obligatoria y cuántos códigos de respaldo le quedan', r.status === 200 && r.json.dobleFactor?.activo === true && !!r.json.dobleFactor.desde
+  && r.json.dobleFactor.obligatorio === false && r.json.dobleFactor.codigosRestantes === 9, JSON.stringify(r.json.dobleFactor));
+r = await llamar('POST', '/auth/2fa/codigos', { token: tDos, cuerpo: { codigo: activacion.codigosRespaldo[1] } });
+prueba('códigos de respaldo nuevos: piden el código de la app, no uno de respaldo → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', '/auth/2fa/codigos', { token: tDos, cuerpo: { codigo: await appDos() } });
+const nuevosRespaldo = r.json.codigosRespaldo ?? [];
+x = await entrarDos();
+const viejo = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio: x.desafio, codigo: activacion.codigosRespaldo[1] } });
+const nuevo = await llamar('POST', '/auth/2fa/verificar', { cuerpo: { desafio: x.desafio, codigo: nuevosRespaldo[0] ?? 'AAAA-AAAA' } });
+prueba('…con el código de la app entrega 10 nuevos y los anteriores dejan de servir', r.status === 200 && nuevosRespaldo.length === 10 && viejo.status === 401 && nuevo.status === 200,
+  `${r.status} ${nuevosRespaldo.length} ${viejo.status} ${nuevo.status}`);
+
+// Celular perdido y sin códigos de respaldo: la restablece un administrador
+const propio = await llamar('POST', `/usuarios/${idAdmin}/2fa/restablecer`, { token: T8 });
+const sinPermiso = await llamar('POST', `/usuarios/${dos.id}/2fa/restablecer`, { token: tDos });
+prueba('restablecerla: nadie la suya, ni sin el permiso «configuracion.editar»', propio.status === 400 && /propia/.test(propio.json.mensaje) && sinPermiso.status === 403,
+  `${propio.status} ${sinPermiso.status}`);
+r = await llamar('POST', `/usuarios/${dos.id}/2fa/restablecer`, { token: T8 });
+const yoTrasReset = await llamar('GET', '/auth/yo', { token: tDos });
+filaDos = await db.usuario.findUnique({ where: { id: dos.id } });
+prueba('…el administrador la restablece: se borran la clave y los códigos, y se cierran sus sesiones', r.status === 200 && yoTrasReset.status === 401
+  && filaDos.totpSecreto === null && filaDos.totpActivoDesde === null && (await db.codigoRespaldo.count({ where: { usuarioId: dos.id } })) === 0
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'usuario', entidadId: dos.id, accion: 'RESTABLECER_2FA', usuarioId: idAdmin } })), `${r.status} ${yoTrasReset.status}`);
+sDos = await entrarDos();
+prueba('…y vuelve a entrar solo con la contraseña (aquí no es obligatoria)', !!sDos.accessToken && sDos.usuario?.requiereConfigurar2fa === false, JSON.stringify(sDos).slice(0, 160));
+// Desactivarla cuando no es obligatoria
+r = await llamar('POST', '/auth/2fa/iniciar', { token: sDos.accessToken, cuerpo: {} });
+const secretoDos2 = claveDe(r.json);
+r = await llamar('POST', '/auth/2fa/confirmar', { token: sDos.accessToken, cuerpo: { codigo: await appAutenticacion(secretoDos2)() } });
+const reactivada = r.json;
+const desactivarMal = await llamar('POST', '/auth/2fa/desactivar', { token: reactivada.sesion?.accessToken, cuerpo: { codigo: codigoErrado(secretoDos2) } });
+r = await llamar('POST', '/auth/2fa/desactivar', { token: reactivada.sesion?.accessToken, cuerpo: { codigo: reactivada.codigosRespaldo?.[0] ?? 'AAAA-AAAA' } });
+filaDos = await db.usuario.findUnique({ where: { id: dos.id } });
+prueba('desactivarla (si no es obligatoria) pide un código válido; sirve uno de respaldo', reactivada.codigosRespaldo?.length === 10 && desactivarMal.status === 400 && r.status === 204
+  && filaDos.totpSecreto === null && (await db.codigoRespaldo.count({ where: { usuarioId: dos.id } })) === 0, `${desactivarMal.status} ${r.status}`);
+
+// La empresa la exige a todo el personal (en producción se exige siempre)
+const confAntes = (await llamar('GET', '/empresa', { token: T8 })).json.configuracion ?? {};
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { dobleFactorObligatorio: true } });
+prueba('la empresa la exige a todo el personal (lo demás de la configuración queda igual)', r.status === 200 && r.json.configuracion?.dobleFactorObligatorio === true
+  && Object.entries(confAntes).filter(([k]) => k !== 'dobleFactorObligatorio').every(([k, v]) => JSON.stringify(r.json.configuracion[k]) === JSON.stringify(v)), JSON.stringify(r.json).slice(0, 200));
+sDos = await entrarDos();
+const bloqueado = await llamar('GET', '/declaraciones', { token: sDos.accessToken });
+const yoPendiente = await llamar('GET', '/auth/yo', { token: sDos.accessToken });
+prueba('…quien no la tiene entra, pero solo para configurarla: lo demás responde 403 CONFIGURAR_2FA', sDos.usuario?.requiereConfigurar2fa === true && bloqueado.status === 403
+  && bloqueado.json.codigo === 'CONFIGURAR_2FA' && yoPendiente.status === 200 && yoPendiente.json.dobleFactor?.obligatorio === true, `${bloqueado.status} ${JSON.stringify(bloqueado.json)}`);
+r = await llamar('POST', '/auth/2fa/iniciar', { token: sDos.accessToken, cuerpo: {} });
+const secretoDos3 = claveDe(r.json);
+r = await llamar('POST', '/auth/2fa/confirmar', { token: sDos.accessToken, cuerpo: { codigo: await appAutenticacion(secretoDos3)() } });
+const obligada = r.json;
+const despues2fa = await llamar('GET', '/declaraciones', { token: obligada.sesion?.accessToken });
+prueba('…al configurarla recibe una sesión sin la restricción y sigue trabajando', r.status === 200 && obligada.sesion?.usuario?.requiereConfigurar2fa === false && despues2fa.status === 200,
+  `${r.status} ${despues2fa.status}`);
+r = await llamar('POST', '/auth/2fa/desactivar', { token: obligada.sesion?.accessToken, cuerpo: { codigo: obligada.codigosRespaldo?.[0] ?? 'AAAA-AAAA' } });
+prueba('…y siendo obligatoria no se puede desactivar', r.status === 400 && /obligatoria/.test(r.json.mensaje), JSON.stringify(r.json));
+
+// Portal de clientes: es opcional; la restablece su administrador (o la oficina)
+const sSede = await entrarPortal('sede.admin@cliente-a.test', 'SedeA2026!');
+prueba('…a los usuarios del portal no se les exige (para ellos es opcional)', !!sSede.accessToken && sSede.usuario?.requiereConfigurar2fa === false && sSede.usuario.dobleFactor?.obligatorio === false,
+  JSON.stringify(sSede.usuario ?? sSede).slice(0, 200));
+r = await llamar('POST', '/auth/2fa/iniciar', { token: sSede.accessToken, cuerpo: {} });
+const secretoSede = claveDe(r.json);
+r = await llamar('POST', '/auth/2fa/confirmar', { token: sSede.accessToken, cuerpo: { codigo: await appAutenticacion(secretoSede)() } });
+const sede2fa = r.json;
+let listaPortal = await llamar('GET', '/portal/usuarios', { token: tPA });
+prueba('portal: el usuario del cliente la activa si quiere, y su administrador lo ve', r.status === 200 && !!sede2fa.sesion?.accessToken
+  && !!listaPortal.json.find?.((u) => u.id === adminSede.id)?.totpActivoDesde, JSON.stringify(r.json).slice(0, 160));
+const porConsulta = await llamar('POST', `/portal/usuarios/${adminSede.id}/2fa/restablecer`, { token: tPB });
+const porOtroCliente = await llamar('POST', `/portal/usuarios/${adminSede.id}/2fa/restablecer`, { token: tAdminB });
+const porSiMismo = await llamar('POST', `/portal/usuarios/${adminSede.id}/2fa/restablecer`, { token: sede2fa.sesion?.accessToken });
+prueba('…no la restablece un perfil de consulta, ni otro cliente, ni cada quien la suya', porConsulta.status === 403 && porOtroCliente.status === 404 && porSiMismo.status === 400,
+  `${porConsulta.status} ${porOtroCliente.status} ${porSiMismo.status}`);
+r = await llamar('POST', `/portal/usuarios/${adminSede.id}/2fa/restablecer`, { token: tPA });
+const yoSede = await llamar('GET', '/auth/yo', { token: sede2fa.sesion?.accessToken });
+listaPortal = await llamar('GET', `/clientes/${clienteA.id}/usuarios-portal`, { token: T8 });
+prueba('…su administrador la restablece: se cierran sus sesiones y la oficina lo ve sin verificación', r.status === 201 && yoSede.status === 401
+  && listaPortal.json.find?.((u) => u.id === adminSede.id)?.totpActivoDesde === null, `${r.status} ${yoSede.status}`);
+r = await llamar('POST', `/clientes/${clienteA.id}/usuarios-portal/${adminSede.id}/2fa/restablecer`, { token: T8 });
+prueba('…la oficina también puede (y si no hay nada que restablecer, lo dice)', r.status === 400 && /no tiene configurada/.test(r.json.mensaje), JSON.stringify(r.json));
+
+// Restablecida siendo obligatoria: la configura de nuevo al entrar. Al final deja de exigirse para el resto de la prueba.
+r = await llamar('POST', `/usuarios/${dos.id}/2fa/restablecer`, { token: T8 });
+sDos = await entrarDos();
+prueba('si la restablecen siendo obligatoria, al entrar la configura de nuevo', r.status === 200 && sDos.usuario?.requiereConfigurar2fa === true, JSON.stringify(sDos).slice(0, 160));
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { dobleFactorObligatorio: false } });
+sDos = await entrarDos();
+prueba('…y al dejar de exigirla se vuelve a entrar solo con la contraseña', r.status === 200 && !!sDos.accessToken && sDos.usuario?.requiereConfigurar2fa === false, JSON.stringify(sDos).slice(0, 160));
 
 // Límite de peticiones (al final: deja la IP de la prueba sin poder ingresar durante un minuto).
 // El ingreso cuenta por correo y por IP: una oficina sale a internet por una sola IP y no debe bloquearse entera.

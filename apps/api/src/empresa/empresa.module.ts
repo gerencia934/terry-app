@@ -24,6 +24,8 @@ const Configuracion = z.object({
   }).partial().optional(),
   // Gestor de RCD: número único que le asignó la autoridad ambiental (Anexo II de la Res. 1257 de 2021)
   rcd: z.object({ numeroGestor: z.string().trim().max(60) }).partial().optional(),
+  // Exigir la verificación en dos pasos al personal (en producción se exige siempre)
+  dobleFactorObligatorio: z.boolean().optional(),
   // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   bascula: z.object({
     identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,

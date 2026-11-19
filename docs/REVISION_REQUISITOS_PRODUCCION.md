@@ -3,9 +3,9 @@
 Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase-3-operacion`. Para cada requisito dice si
 **ya se cumple (✅)**, **se cumple en parte (⚠️)** o **falta (❌)**, y cómo se ajusta. Al final está el orden propuesto.
 
-> **Actualización del 19-11-2026:** ya están hechos los ajustes 1, 4, 5, 7 y 9 de la lista de abajo, más el cierre de
-> sesión en todos los dispositivos, el aviso de ingreso nuevo y el límite de peticiones por usuario. Detalle y
-> pendientes en la sección 9.
+> **Actualización del 19-11-2026:** ya están hechos los ajustes 1, 4, 5, 6 (verificación en dos pasos), 7, 8 (portal de
+> clientes con RLS) y 9 de la lista de abajo, más el cierre de sesión en todos los dispositivos, el aviso de ingreso
+> nuevo y el límite de peticiones por usuario. Detalle y pendientes en la sección 9.
 
 ## Resumen para la gerencia
 
@@ -77,14 +77,14 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 | Requisito | Estado | Ajuste |
 |---|---|---|
 | argon2id, bloqueo por intentos, recuperación de un solo uso | ✅ | — |
-| 2FA (TOTP) obligatorio para internos, opcional para clientes | ❌ | TOTP con códigos de respaldo; obligatorio para el personal |
-| Sesiones revocables y cierre en todos los dispositivos | ⚠️ Son revocables y el token de renovación rota, pero falta el botón «cerrar en todos los dispositivos» | Se agregan el endpoint y el botón |
-| Aviso por correo de ingreso nuevo | ❌ | Correo cuando el ingreso viene de una IP o navegador nuevo |
+| 2FA (TOTP) obligatorio para internos, opcional para clientes | ✅ TOTP (Google o Microsoft Authenticator, Authy) con 10 códigos de respaldo. Obligatorio para el personal en producción (y antes, si la empresa lo activa en Ajustes); opcional en el portal. Ver §9 | — |
+| Sesiones revocables y cierre en todos los dispositivos | ✅ Ver §9 | — |
+| Aviso por correo de ingreso nuevo | ✅ Ver §9 | — |
 | Cloudflare, HSTS y base sin acceso público | ❌ (infraestructura) | En el despliegue |
 | Permisos por rol | ✅ | — |
-| Exportaciones solo para roles autorizados y registradas | ⚠️ Exigen sesión, pero no un permiso propio ni quedan en la auditoría | Permiso «exportar» y registro de cada exportación |
+| Exportaciones solo para roles autorizados y registradas | ✅ Permiso propio y registro de cada exportación (§9) | — |
 | Secretos en el gestor del proveedor | ⚠️ Hoy en `.env` local (bien para desarrollo) | En producción, gestor de secretos |
-| Pull requests con pruebas en GitHub Actions, Dependabot, CodeQL | ❌ | Se agregan los flujos de trabajo al repositorio |
+| Pull requests con pruebas en GitHub Actions, Dependabot, CodeQL | ✅ Flujos en `.github/` (§9) | — |
 | Rama `main` protegida y 2FA en GitHub | ❌ | Lo configura el dueño de la cuenta en GitHub |
 | Registro de errores, alertas y monitoreo | ❌ | Sentry opcional por variable de entorno; alertas por picos de ingresos fallidos, descargas masivas y errores 5xx |
 | Prueba de penetración y prueba de carga (400 usuarios, p95 < 1 s) | ❌ | Guion k6 en el repositorio para correr en `staging`; la prueba de penetración la contrata la gerencia |
@@ -144,8 +144,8 @@ si Siigo o Wialon fallan, la operación sigue.
    - copias;
    - S3 con URL firmada;
    - cola de trabajos;
-   - RLS;
-   - 2FA;
+   - RLS (hecha para el portal de clientes el 19-11-2026; falta la de empresa para el personal);
+   - 2FA (hecha el 19-11-2026);
    - monitoreo.
 5. **Siguientes pasos:**
    - portal de clientes (hecho el 19-11-2026: consulta, descarga, cargue de declaraciones y pedidos);
@@ -170,6 +170,7 @@ base.
 | Hash y QR | SHA-256 del PDF emitido o cargado. El QR público muestra solo número, fecha, emisor y validez |
 | Sesiones | «Cerrar sesión en todos los dispositivos» en el menú de la cuenta. Correo de aviso al ingresar desde un equipo o IP nuevos |
 | Ley 1581 | Pantalla de aceptación en el primer ingreso y cada vez que cambia la versión. Queda registrada la fecha, la IP y la versión. Sin aceptar, el API no deja hacer nada más |
+| Verificación en dos pasos | Código de 6 dígitos de una app de autenticación (TOTP, cada 30 segundos) además de la contraseña. Se activa leyendo un código QR y entrega 10 códigos de respaldo de un solo uso (para cuando no se tiene el celular). Cada código sirve una sola vez; cinco errados bloquean la cuenta 15 minutos. La clave se guarda cifrada (AES-256-GCM) y los códigos de respaldo, solo como huella. **Obligatoria para el personal** en producción, y antes si la empresa lo activa en Ajustes › Empresa: mientras no la configure, el API solo le deja configurarla (403 `CONFIGURAR_2FA`). Opcional en el portal de clientes. Si alguien pierde el celular y los códigos, la restablece otro administrador (nadie la suya): se cierran sus sesiones y le llega un correo. En el portal la restablece el administrador del cliente o la oficina |
 | Límite de peticiones | Ahora cuenta por usuario cuando hay sesión. Antes contaba por IP: con 300 por minuto, una oficina que sale a internet por una sola IP se habría bloqueado entera en hora pico. En el ingreso, 10 intentos por correo y un techo de 60 por IP. Todo es configurable |
 | GitHub | Pruebas automáticas en cada cambio, CodeQL y Dependabot (`.github/`) |
 | Prueba de carga | Guion k6 de 400 usuarios, con su guía (`apps/api/test/carga/LEAME.md`). Se corre en staging |

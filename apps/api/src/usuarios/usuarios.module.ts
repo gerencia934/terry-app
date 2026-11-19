@@ -28,7 +28,7 @@ const Editar = Datos.partial().extend({ activo: z.boolean().optional(), desbloqu
 /** Lo que se devuelve de un usuario: nunca la contraseña ni los datos de sesión. */
 const seguro = {
   id: true, nombre: true, documento: true, email: true, telefono: true, activo: true, esConductor: true, esAuxiliar: true, licenciaCat: true, licenciaVence: true,
-  cursoMpVence: true, ultimoLogin: true, createdAt: true, bloqueadoHasta: true, datosAceptadosEn: true, rol: { select: { id: true, nombre: true } },
+  cursoMpVence: true, ultimoLogin: true, createdAt: true, bloqueadoHasta: true, datosAceptadosEn: true, totpActivoDesde: true, rol: { select: { id: true, nombre: true } },
 } satisfies Prisma.UsuarioSelect;
 const esAdministrador = (permisos: string[]) => permisos.includes('*') || permisos.includes('configuracion.editar');
 

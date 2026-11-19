@@ -1,7 +1,7 @@
 // Datos de la empresa para los documentos: firma y certificaciones del certificado, nota de calibración de la báscula,
 // numeración (TV / PSAP, para continuar la serie del sistema anterior) y textos legales del certificado con versiones.
 import { useEffect, useState } from 'react';
-import { History, Plus, Save, Trash2, X } from 'lucide-react';
+import { History, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha } from '../../lib/format';
@@ -15,6 +15,8 @@ interface Config {
   contacto?: { direccion?: string; municipio?: string; telefono?: string; correo?: string };
   /** Número único de gestor de RCD que asignó la autoridad ambiental (Anexo II de la Res. 1257 de 2021). */
   rcd?: { numeroGestor?: string };
+  /** Exigir la verificación en dos pasos a todo el personal (en producción se exige siempre). */
+  dobleFactorObligatorio?: boolean;
 }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
@@ -38,6 +40,17 @@ export function EmpresaServidor() {
   const guardarConfig = async () => {
     try { d.setDatos(await api<DatosEmpresa>('/empresa/configuracion', { metodo: 'PATCH', cuerpo: { ...c, certificaciones: (c.certificaciones ?? []).filter((x) => x.norma.trim()) } })); toast('Datos del certificado guardados.'); }
     catch (e) { toast(msg(e), 'warn'); }
+  };
+  // Solo esta clave (el servidor la mezcla con el resto) y sin recargar el formulario: no se pierde lo que esté editando arriba
+  const [guardando2fa, setGuardando2fa] = useState(false);
+  const exigir2fa = async (valor: boolean) => {
+    setGuardando2fa(true);
+    try {
+      await api('/empresa/configuracion', { metodo: 'PATCH', cuerpo: { dobleFactorObligatorio: valor } });
+      setC((s) => ({ ...s, dobleFactorObligatorio: valor }));
+      toast(valor ? 'Desde su próximo ingreso, todo el personal debe usar la verificación en dos pasos.' : 'La verificación en dos pasos vuelve a ser opcional en este servidor.', 'ok');
+    } catch (e) { toast(msg(e), 'warn'); }
+    setGuardando2fa(false);
   };
   const guardarConsecutivo = async (doc: string) => {
     const x = num[doc]; const orig = d.datos?.consecutivos.find((y) => y.documento === doc);
@@ -123,6 +136,17 @@ export function EmpresaServidor() {
               );
             })}
           </div>
+        </Card>
+
+        <Card title="Seguridad del ingreso">
+          <label className={cx('flex items-start gap-3 rounded-xl border border-line p-3 text-[13px]', (!edita || guardando2fa) && 'opacity-60')}>
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" disabled={!edita || guardando2fa || !d.datos}
+              checked={!!c.dobleFactorObligatorio} onChange={(e) => exigir2fa(e.target.checked)} />
+            <span>
+              <span className="flex items-center gap-1.5 font-medium"><ShieldCheck size={15} className="text-brand" />Exigir la verificación en dos pasos a todo el personal</span>
+              <span className="mt-1 block text-muted">Además de la contraseña, cada persona de Terra Viva escribe un código de su celular que cambia cada 30 segundos. Quien no la tenga, la configura en su próximo ingreso. En el sistema definitivo se exige siempre; aquí puede empezar a exigirla desde ya. A los usuarios del portal de clientes no se les exige: la activan si quieren.</span>
+            </span>
+          </label>
         </Card>
       </div>
 

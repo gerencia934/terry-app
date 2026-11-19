@@ -9,6 +9,7 @@ import { useRouter, type RouteName } from '../lib/router';
 import { cx } from '../lib/format';
 import { useAlertas } from '../lib/alertas';
 import { MODO_REAL, salir, salirDeTodos, sesionActual } from '../lib/api';
+import { VentanaDobleFactor } from './DobleFactor';
 import logoDark from '../assets/logo-dark.webp';
 import logoLight from '../assets/logo-light.webp';
 
@@ -105,6 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const cerrarSesion = async () => { await salir(); go('login'); };
   const cerrarTodas = async () => { await salirDeTodos(); go('login'); };
   const [menuUsuario, setMenuUsuario] = useState(false);
+  const [ver2fa, setVer2fa] = useState(false);
   useEffect(() => { setMenuUsuario(false); }, [route]);
 
   const Lateral = (
@@ -166,6 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {menuUsuario && (
                   <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-line bg-surface p-1.5 shadow-xl" onKeyDown={(e) => { if (e.key === 'Escape') setMenuUsuario(false); }}>
                     {usuario && <p className="px-3 py-2 text-[12px] text-muted">{usuario.nombre}<br />{usuario.rol}</p>}
+                    {MODO_REAL && <button onClick={() => { setMenuUsuario(false); setVer2fa(true); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2"><ShieldCheck size={15} className="text-brand" />Verificación en dos pasos</button>}
                     <button onClick={cerrarSesion} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión</button>
                     {MODO_REAL && <button onClick={cerrarTodas} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión en todos los dispositivos</button>}
                   </div>
@@ -181,6 +184,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+
+      {MODO_REAL && <VentanaDobleFactor open={ver2fa} onClose={() => setVer2fa(false)} />}
 
       {drawer && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menú">

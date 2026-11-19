@@ -4,7 +4,7 @@ import { Button, Field, Input } from '../components/ui';
 import { Logo } from '../components/AppShell';
 import { useRouter } from '../lib/router';
 import { EMPRESA } from '../data/mock';
-import { MODO_REAL, api, ingresar, ErrorApi } from '../lib/api';
+import { MODO_REAL, api, ingresar, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
 import terry from '../assets/terry.webp';
 
 function AuthLayout({ children }: { children: ReactNode }) {
@@ -43,16 +43,47 @@ export function Login() {
   const [clave, setClave] = useState(MODO_REAL ? '' : 'demostracion');
   const [err, setErr] = useState('');
   const [enviando, setEnviando] = useState(false);
+  // Segundo paso (verificación en dos pasos): el desafío que entregó el servidor y el código de la app
+  const [desafio, setDesafio] = useState('');
+  const [codigo, setCodigo] = useState('');
+  const entrar = (s: Sesion) => go(s.usuario.cliente ? 'portal' : s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'campo' : 'inicio');
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setErr('Escriba su correo completo, por ejemplo nombre@terravivasas.com.');
     if (!clave) return setErr('Escriba su contraseña.');
     if (!MODO_REAL) return go('inicio');
     setEnviando(true);
-    try { const s = await ingresar(email, clave); go(s.usuario.cliente ? 'portal' : s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'campo' : 'inicio'); }
-    catch (e) { setErr(e instanceof ErrorApi ? e.message : 'No se pudo ingresar.'); }
+    try {
+      const r = await ingresar(email, clave);
+      if ('requiere2fa' in r) { setDesafio(r.desafio); setCodigo(''); } else entrar(r);
+    } catch (e) { setErr(e instanceof ErrorApi ? e.message : 'No se pudo ingresar.'); }
     finally { setEnviando(false); }
   };
+  const verificar = async (e: FormEvent) => {
+    e.preventDefault(); setErr('');
+    if (!codigo.trim()) return setErr('Escriba el código.');
+    setEnviando(true);
+    try { entrar(await verificarDobleFactor(desafio, codigo.trim())); }
+    catch (e) {
+      setErr(e instanceof ErrorApi ? e.message : 'No se pudo verificar el código.');
+      if (e instanceof ErrorApi && /venció/.test(e.message)) setDesafio('');
+    } finally { setEnviando(false); }
+  };
+  if (desafio) return (
+    <AuthLayout>
+      <Logo className="h-12" />
+      <h2 className="mt-8 flex items-center gap-2 text-2xl font-bold text-brand-strong"><ShieldCheck className="text-brand" /> Verificación en dos pasos</h2>
+      <p className="mt-1 text-muted">Abra su app de autenticación y escriba el código de 6 dígitos de TERRY-GO. Si no tiene el celular, use uno de sus códigos de respaldo.</p>
+      <form onSubmit={verificar} className="mt-6 flex flex-col gap-4" noValidate>
+        <Field label="Código" id="login-2fa"><Input id="login-2fa" autoFocus inputMode="text" autoComplete="one-time-code" maxLength={12} value={codigo}
+          onChange={(e) => setCodigo(e.target.value)} placeholder="123456 o ABCD-EFGH" className="text-center font-mono text-lg tracking-[0.3em]" /></Field>
+        {err && <p className="rounded-lg bg-bad/10 px-3 py-2 text-[13px] text-bad" role="alert">{err}</p>}
+        <Button variant="primary" size="lg" type="submit" disabled={enviando}>{enviando ? 'Verificando…' : 'Entrar'}</Button>
+        <button type="button" onClick={() => { setDesafio(''); setErr(''); }} className="inline-flex items-center justify-center gap-1.5 text-[13px] font-medium text-muted hover:text-fg"><ArrowLeft size={15} /> Volver</button>
+      </form>
+      <p className="mt-6 text-[12px] text-subtle">¿Perdió el celular y los códigos de respaldo? Pídale al administrador que restablezca su verificación en dos pasos.</p>
+    </AuthLayout>
+  );
   return (
     <AuthLayout>
       <Logo className="h-12" />

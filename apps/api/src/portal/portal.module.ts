@@ -418,7 +418,7 @@ export class PortalService {
   async usuarios(a: Actor, clienteId: string) {
     const consulta = async (db: Tx | PrismaService) => {
       const filas = await db.usuario.findMany({ where: { clienteId, empresaId: a.empresaId }, orderBy: [{ activo: 'desc' }, { nombre: 'asc' }], select: {
-        id: true, nombre: true, email: true, documento: true, telefono: true, activo: true, perfilPortal: true, ultimoLogin: true, datosAceptadosEn: true,
+        id: true, nombre: true, email: true, documento: true, telefono: true, activo: true, perfilPortal: true, ultimoLogin: true, datosAceptadosEn: true, totpActivoDesde: true,
         sedesPortal: { select: { sucursal: { select: { id: true, codigo: true, nombre: true } } } },
       } });
       const mias = a.clienteId ? await this.sedes(db, a) : [];
@@ -497,8 +497,8 @@ export class PortalService {
     return a.clienteId ? this.conCliente(a, editar) : this.db.$transaction(editar);
   }
 
-  async reenviarInvitacion(a: Actor, clienteId: string, id: string) {
-    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal envía invitaciones.' });
+  /** Usuario del portal de ese cliente que quien pide puede gestionar (el administrador del portal, solo dentro de sus sedes). */
+  private async usuarioGestionable(a: Actor, clienteId: string, id: string) {
     const buscar = async (db: Tx | PrismaService) => {
       const u = await db.usuario.findFirst({ where: { id, clienteId, empresaId: a.empresaId }, select: { id: true, activo: true, sedesPortal: { select: { sucursalId: true } } } });
       if (u && a.clienteId && u.id !== a.id && !this.dentroDeSusSedes(await this.sedes(db, a), u.sedesPortal.map((s) => s.sucursalId))) return null;
@@ -506,9 +506,22 @@ export class PortalService {
     };
     const u = a.clienteId ? await this.conCliente(a, buscar) : await buscar(this.db);
     if (!u) throw new NotFoundException({ mensaje: 'Usuario no encontrado.' });
+    return u;
+  }
+
+  async reenviarInvitacion(a: Actor, clienteId: string, id: string) {
+    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal envía invitaciones.' });
+    const u = await this.usuarioGestionable(a, clienteId, id);
     if (!u.activo) throw new BadRequestException({ mensaje: 'El usuario está inactivo: actívelo antes de enviarle la invitación.' });
     await this.auth.invitar(u.id);
     await this.audit.registrar(a, 'usuario', id, 'INVITACION_PORTAL');
+  }
+
+  /** Verificación en dos pasos de un usuario del portal que perdió el celular y sus códigos: la restablece su administrador o la oficina. */
+  async restablecer2fa(a: Actor, clienteId: string, id: string) {
+    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal la restablece.' });
+    const u = await this.usuarioGestionable(a, clienteId, id);
+    return this.auth.restablecer2fa(a, u.id);
   }
 }
 
@@ -545,6 +558,7 @@ class PortalController {
   @Post('usuarios') crearUsuario(@ActorActual() a: Actor, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, a.clienteId!, b); }
   @Patch('usuarios/:id') editarUsuario(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarUsuario)) b: z.infer<typeof EditarUsuario>) { return this.s.editarUsuario(a, a.clienteId!, id, b); }
   @Post('usuarios/:id/invitacion') reenviar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviarInvitacion(a, a.clienteId!, id); }
+  @Post('usuarios/:id/2fa/restablecer') restablecer2fa(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.restablecer2fa(a, a.clienteId!, id); }
 }
 
 /**
@@ -558,6 +572,7 @@ class UsuariosPortalOficinaController {
   @Permiso('clientes.editar') @Post() crear(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, c, b); }
   @Permiso('clientes.editar') @Patch(':id') editar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarUsuario)) b: z.infer<typeof EditarUsuario>) { return this.s.editarUsuario(a, c, id, b); }
   @Permiso('clientes.editar') @Post(':id/invitacion') reenviar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviarInvitacion(a, c, id); }
+  @Permiso('clientes.editar') @Post(':id/2fa/restablecer') restablecer2fa(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string) { return this.s.restablecer2fa(a, c, id); }
 }
 
 /** Descarga con enlace firmado: pública, porque la firma (5 minutos) ya prueba que se verificó el permiso. */

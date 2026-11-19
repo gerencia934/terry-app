@@ -262,6 +262,13 @@ const [cambioSol, cambioMf, cambioUsuario] = await comoCliente(async (tx) => [
 prueba('portal: no cambia solicitudes ya confirmadas, ni manifiestos, ni usuarios de Terra Viva', cambioSol.count === 0 && cambioMf.count === 0 && cambioUsuario.count === 0,
   JSON.stringify([cambioSol.count, cambioMf.count, cambioUsuario.count]));
 
+console.log('\n11. Verificación en dos pasos: coherente en la base');
+const conDosPasos = await db.usuario.create({ data: { empresaId: E, rolId: admin.rolId, nombre: 'Dos pasos reglas', documento: '7' + sufijo, email: `dos.pasos.${sufijo}@reglas.test`, passwordHash: 'x' } });
+await rechaza('no queda «activa desde» sin la clave guardada', () => db.usuario.update({ where: { id: conDosPasos.id }, data: { totpActivoDesde: new Date() } }), /chk_totp_activo/);
+await rechaza('…ni la clave guardada sin la fecha en que se activó', () => db.usuario.update({ where: { id: conDosPasos.id }, data: { totpSecreto: 'iv.tag.datos' } }), /chk_totp_activo/);
+const activa = await db.usuario.update({ where: { id: conDosPasos.id }, data: { totpSecreto: 'iv.tag.datos', totpActivoDesde: new Date(), codigosRespaldo: { create: [{ codigoHash: 'a'.repeat(64) }] } }, include: { codigosRespaldo: true } });
+prueba('activa: clave y fecha juntas, con sus códigos de respaldo', !!activa.totpActivoDesde && activa.codigosRespaldo.length === 1 && activa.codigosRespaldo[0].usadoEn === null);
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

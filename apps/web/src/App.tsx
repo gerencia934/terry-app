@@ -5,6 +5,7 @@ import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
 import { MODO_REAL, useSesion } from './lib/api';
 import AceptarDatos from './pages/AceptarDatos';
+import { ConfigurarDobleFactor } from './pages/DobleFactor';
 import { Login, Recuperar, Restablecer } from './pages/Auth';
 import Inicio from './pages/Inicio';
 import Declaraciones from './pages/Declaraciones';
@@ -55,6 +56,8 @@ function Screen() {
   if (MODO_REAL && !sesion) return <Login />;
   // Ley 1581: antes de usar el sistema (oficina o app del conductor) se acepta la política de datos personales
   if (MODO_REAL && sesion?.usuario.requiereAceptarDatos) return <AceptarDatos />;
+  // Requisitos de producción §4: el personal configura la verificación en dos pasos antes de usar el sistema
+  if (MODO_REAL && sesion?.usuario.requiereConfigurar2fa) return <ConfigurarDobleFactor />;
   // Portal de clientes: el usuario de un cliente solo ve su portal (cualquier otra ruta lo lleva al inicio del portal),
   // y el personal de Terra Viva no entra al portal. El servidor lo exige igual: esto solo evita pantallas vacías.
   if (MODO_REAL && sesion?.usuario.cliente) return <PortalApp />;

@@ -12,8 +12,12 @@ export interface Sesion {
     /** Ley 1581: falta aceptar la versión vigente de la política de tratamiento de datos. */
     requiereAceptarDatos?: boolean; politicaDatos?: { version: string; url: string | null };
     /** Usuario del portal de clientes: su empresa y su perfil (administrador o consulta). La oficina no lo trae. */
-    cliente?: { id: string; razonSocial: string; nit: string }; perfilPortal?: 'ADMIN' | 'CONSULTA' | null };
+    cliente?: { id: string; razonSocial: string; nit: string }; perfilPortal?: 'ADMIN' | 'CONSULTA' | null;
+    /** Verificación en dos pasos obligatoria y aún sin configurar: la app muestra la pantalla para configurarla. */
+    requiereConfigurar2fa?: boolean; dobleFactor?: { activo: boolean; obligatorio: boolean } };
 }
+/** Con la verificación en dos pasos activa, la contraseña sola no abre sesión: falta el código de la app. */
+export interface Desafio2fa { requiere2fa: true; desafio: string }
 export class ErrorApi extends Error {
   constructor(public status: number, mensaje: string, public datos?: unknown) { super(mensaje); }
 }
@@ -69,6 +73,9 @@ export async function api<T = unknown>(ruta: string, opciones: { metodo?: string
     // Sesión de antes de aceptar la política de datos: la app muestra la pantalla para aceptarla
     if (r.status === 403 && (d as { codigo?: string }).codigo === 'ACEPTAR_DATOS' && sesion && !sesion.usuario.requiereAceptarDatos)
       guardar({ ...sesion, usuario: { ...sesion.usuario, requiereAceptarDatos: true } });
+    // Verificación en dos pasos obligatoria sin configurar: la app muestra la pantalla para configurarla
+    if (r.status === 403 && (d as { codigo?: string }).codigo === 'CONFIGURAR_2FA' && sesion && !sesion.usuario.requiereConfigurar2fa)
+      guardar({ ...sesion, usuario: { ...sesion.usuario, requiereConfigurar2fa: true } });
     throw new ErrorApi(r.status, (d as { mensaje?: string }).mensaje ?? `Error ${r.status}`, d);
   }
   if (opciones.blob) return (await r.blob()) as T;
@@ -76,10 +83,20 @@ export async function api<T = unknown>(ruta: string, opciones: { metodo?: string
   return r.json() as Promise<T>;
 }
 
-export async function ingresar(email: string, clave: string) {
-  guardar(await api<Sesion>('/auth/login', { cuerpo: { email, clave } }));
+/** Primer paso del ingreso. Si la cuenta tiene verificación en dos pasos, devuelve el desafío para pedir el código. */
+export async function ingresar(email: string, clave: string): Promise<Sesion | Desafio2fa> {
+  const r = await api<Sesion | Desafio2fa>('/auth/login', { cuerpo: { email, clave } });
+  if ('requiere2fa' in r) return r;
+  guardar(r);
+  return r;
+}
+/** Segundo paso: el código de la app de autenticación (o uno de respaldo). */
+export async function verificarDobleFactor(desafio: string, codigo: string) {
+  guardar(await api<Sesion>('/auth/2fa/verificar', { cuerpo: { desafio, codigo } }));
   return sesion!;
 }
+/** Reemplaza la sesión (por ejemplo, la nueva que entrega el servidor al activar la verificación en dos pasos). */
+export const reemplazarSesion = (s: Sesion) => guardar(s);
 /** Ley 1581: acepta la versión vigente de la política de datos; el servidor entrega una sesión nueva. */
 export async function aceptarPoliticaDatos() {
   if (!sesion) return;

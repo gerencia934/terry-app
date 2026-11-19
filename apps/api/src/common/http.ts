@@ -24,6 +24,9 @@ export const SIN_DATOS = 'sinAceptarDatos';
 export const SinAceptarDatos = () => SetMetadata(SIN_DATOS, true);
 /** Exige un permiso del rol, p. ej. @Permiso('declaraciones.autorizar'). */
 export const Permiso = (codigo: string) => SetMetadata(PERMISO, codigo);
+export const SIN_2FA = 'sinDobleFactor';
+/** Ruta que se puede usar mientras el usuario configura la verificación en dos pasos obligatoria (y para salir). */
+export const SinDobleFactor = () => SetMetadata(SIN_2FA, true);
 export const PERMITE_PORTAL = 'permitePortal';
 export const SOLO_PORTAL = 'soloPortal';
 /** La ruta también la puede usar un usuario del portal de clientes (ver quién soy, aceptar la política, salir). */
