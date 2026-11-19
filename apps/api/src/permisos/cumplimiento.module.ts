@@ -1,30 +1,114 @@
-import { BadRequestException, Controller, Get, Injectable, Module, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { EstadoPermiso } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, type Actor } from '../common/http';
 
 const dias = (f: Date) => Math.ceil((f.getTime() - Date.now()) / 86_400_000);
+const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD').transform((x) => new Date(`${x}T00:00:00Z`));
+const fechaOpc = z.union([z.literal('').transform(() => null), fecha]).nullish();
+const urlOpc = z.union([z.literal('').transform(() => null), z.string().trim().url('Enlace inválido (empiece por https://)').max(500)]).nullish();
+const textoOpc = (max: number) => z.string().trim().max(max).transform((x) => x || null).nullish();
+/** Cumplimiento de una obligación: necesita algún soporte (radicado, enlace o nota). */
+const Cumplimiento = z.object({
+  cumplidaEn: fecha.optional(), radicado: textoOpc(80), soporteUrl: urlOpc, nota: textoOpc(500),
+}).refine((b) => !!(b.radicado || b.soporteUrl || (b.nota && b.nota.length >= 10)), { message: 'Indique el radicado, el enlace al soporte o una nota de al menos 10 caracteres.', path: ['radicado'] });
+const EditarPermiso = z.object({
+  expedicion: fechaOpc, vence: fechaOpc, estado: z.nativeEnum(EstadoPermiso).optional(), documentoUrl: urlOpc, alcance: z.string().trim().min(10).max(4000).optional(),
+});
+const EditarAliado = z.object({
+  licencia: textoOpc(300), licenciaAutoridad: textoOpc(80), licenciaIndefinida: z.boolean().optional(), licenciaVence: fechaOpc, licenciaUrl: urlOpc,
+  alcance: textoOpc(4000), excluyeTiposResiduo: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(20).optional(),
+}).refine((b) => !(b.licenciaIndefinida && b.licenciaVence), { message: 'Una licencia indefinida no lleva fecha de vencimiento.', path: ['licenciaVence'] });
+/** Estado de la licencia de un gestor aliado, con la misma regla de fn_aliado_vigente (la que decide la cobertura). */
+function estadoLicencia(p: { licencia: string | null; licenciaIndefinida: boolean; licenciaVence: Date | null }) {
+  if (!p.licencia?.trim()) return { estado: 'SIN_LICENCIA' as const, cubre: false };
+  if (p.licenciaIndefinida) return { estado: 'INDEFINIDA' as const, cubre: true };
+  if (!p.licenciaVence) return { estado: 'SIN_VIGENCIA' as const, cubre: false };
+  const d = Math.round((p.licenciaVence.getTime() - fechaColombia().getTime()) / 86_400_000);
+  return d < 0 ? { estado: 'VENCIDA' as const, cubre: false, dias: d } : { estado: d <= 60 ? 'POR_VENCER' as const : 'VIGENTE' as const, cubre: true, dias: d };
+}
 export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
 
 @Injectable()
 class CumplimientoService {
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria) {}
 
+  /** Permisos con sus obligaciones (las de fecha más próxima primero) y el último cumplimiento de cada una. */
   permisos(a: Actor) {
-    return this.db.permisoAmbiental.findMany({ where: { empresaId: a.empresaId }, orderBy: { acto: 'asc' }, include: { obligaciones: { orderBy: { proximaFecha: 'asc' } }, disposiciones: { include: { disposicion: { select: { codigo: true, nombre: true } } } } } });
+    return this.db.permisoAmbiental.findMany({ where: { empresaId: a.empresaId }, orderBy: [{ estado: 'asc' }, { acto: 'asc' }], include: {
+      obligaciones: { orderBy: [{ proximaFecha: { sort: 'asc', nulls: 'last' } }, { codigo: 'asc' }], include: {
+        cumplimientos: { orderBy: { cumplidaEn: 'desc' }, take: 1, include: { usuario: { select: { nombre: true } } } }, _count: { select: { cumplimientos: true } } } },
+      disposiciones: { include: { disposicion: { select: { codigo: true, nombre: true, activo: true } } } },
+    } });
   }
 
-  async cumplirObligacion(a: Actor, id: string) {
-    const o = await this.db.obligacionPermiso.findFirstOrThrow({ where: { id, permiso: { empresaId: a.empresaId } } });
-    if (!o.proximaFecha) throw new BadRequestException({ mensaje: 'Es una obligación permanente o por evento: no tiene una fecha que marcar como cumplida.' });
+  /** Vigencia, estado, documento o alcance de un permiso (al renovarlo o cuando la autoridad lo modifica). */
+  async editarPermiso(a: Actor, id: string, b: z.infer<typeof EditarPermiso>) {
+    const p = await this.db.permisoAmbiental.findFirst({ where: { id, empresaId: a.empresaId } });
+    if (!p) throw new NotFoundException({ mensaje: 'Permiso no encontrado.' });
+    const expedicion = b.expedicion !== undefined ? b.expedicion : p.expedicion, vence = b.vence !== undefined ? b.vence : p.vence;
+    if (expedicion && vence && vence < expedicion) throw new BadRequestException({ mensaje: 'El vencimiento no puede ser anterior a la expedición.' });
+    const r = await this.db.permisoAmbiental.update({ where: { id }, data: b });
+    await this.audit.registrar(a, 'permiso_ambiental', id, 'EDITAR', { expedicion: p.expedicion, vence: p.vence, estado: p.estado, documentoUrl: p.documentoUrl }, b);
+    return r;
+  }
+
+  /** Historial de cumplimiento de una obligación. */
+  async historial(a: Actor, id: string) {
+    const o = await this.db.obligacionPermiso.findFirst({ where: { id, permiso: { empresaId: a.empresaId } }, include: { permiso: { select: { acto: true } } } });
+    if (!o) throw new NotFoundException({ mensaje: 'Obligación no encontrada.' });
+    const cumplimientos = await this.db.obligacionCumplimiento.findMany({ where: { obligacionId: id }, orderBy: [{ cumplidaEn: 'desc' }, { creadoEn: 'desc' }], include: { usuario: { select: { nombre: true } } } });
+    return { obligacion: o, cumplimientos };
+  }
+
+  /** Gestores aliados con su licencia, lo que gestionan y si hoy cubren (misma regla de la base). */
+  async aliados(a: Actor) {
+    const xs = await this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esPropio: false, esDestino: true }, orderBy: { razonSocial: 'asc' },
+      include: { disposicionesGestionadas: { include: { disposicion: { select: { codigo: true, nombre: true, activo: true } } } } } });
+    return xs.map((p) => ({ ...p, vigencia: estadoLicencia(p) }));
+  }
+
+  /** Licencia de un gestor aliado: de esto depende autorizar declaraciones con sus disposiciones. */
+  async editarAliado(a: Actor, id: string, b: z.infer<typeof EditarAliado>) {
+    const p = await this.db.proveedor.findFirst({ where: { id, empresaId: a.empresaId, esPropio: false } });
+    if (!p) throw new NotFoundException({ mensaje: 'Gestor no encontrado.' });
+    if (b.excluyeTiposResiduo?.length) {
+      const validos = new Set((await this.db.tipoResiduo.findMany({ where: { empresaId: a.empresaId }, select: { codigo: true } })).map((t) => t.codigo.toUpperCase()));
+      const malos = b.excluyeTiposResiduo.filter((c) => !validos.has(c));
+      if (malos.length) throw new BadRequestException({ mensaje: `Tipos de residuo que no existen: ${malos.join(', ')}.` });
+    }
+    // Indefinida y fecha se excluyen: elegir una borra la otra
+    const datos = { ...b, ...(b.licenciaIndefinida ? { licenciaVence: null } : {}), ...(b.licenciaVence ? { licenciaIndefinida: false } : {}) };
+    const r = await this.db.proveedor.update({ where: { id }, data: datos });
+    await this.audit.registrar(a, 'proveedor', id, 'LICENCIA',
+      { licencia: p.licencia, licenciaAutoridad: p.licenciaAutoridad, licenciaVence: p.licenciaVence, licenciaIndefinida: p.licenciaIndefinida, excluyeTiposResiduo: p.excluyeTiposResiduo }, datos);
+    return { ...r, vigencia: estadoLicencia(r) };
+  }
+
+  /**
+   * Registra el cumplimiento de una obligación con su soporte (historial que no se borra). Si tiene fecha, avanza a la
+   * siguiente según la periodicidad (desde la fecha programada, no desde el día en que se cumplió); si no se repite,
+   * queda cumplida. Las obligaciones por evento o permanentes solo suman el registro.
+   */
+  async cumplirObligacion(a: Actor, id: string, b: z.infer<typeof Cumplimiento>) {
+    const o = await this.db.obligacionPermiso.findFirst({ where: { id, permiso: { empresaId: a.empresaId } } });
+    if (!o) throw new NotFoundException({ mensaje: 'Obligación no encontrada.' });
+    if (o.cumplida) throw new BadRequestException({ mensaje: 'Esta obligación ya está cumplida y no se repite.' });
+    const hoy = fechaColombia();
+    const cuando = b.cumplidaEn ?? hoy;
+    if (cuando > hoy) throw new BadRequestException({ mensaje: 'La fecha de cumplimiento no puede ser futura.' });
     const porTexto: Record<string, number> = { mensual: 1, trimestral: 3, semestral: 6, anual: 12 };
     const m = o.meses ?? porTexto[o.periodicidad.toLowerCase()];
     const f = o.proximaFecha;
-    const siguiente = m ? new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth() + m, f.getUTCDate())) : null;
-    const r = await this.db.obligacionPermiso.update({ where: { id }, data: siguiente ? { proximaFecha: siguiente, cumplida: false } : { cumplida: true } });
-    await this.audit.registrar(a, 'obligacion', id, 'CUMPLIDA', { fecha: o.proximaFecha }, { siguiente });
-    return r;
+    const siguiente = f && m ? new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth() + m, f.getUTCDate())) : null;
+    const [cumplimiento, r] = await this.db.$transaction([
+      this.db.obligacionCumplimiento.create({ data: { obligacionId: id, fechaProgramada: f, cumplidaEn: cuando, radicado: b.radicado ?? null, soporteUrl: b.soporteUrl ?? null, nota: b.nota ?? null, usuarioId: a.id } }),
+      this.db.obligacionPermiso.update({ where: { id }, data: !f ? {} : siguiente ? { proximaFecha: siguiente, cumplida: false } : { cumplida: true } }),
+    ]);
+    await this.audit.registrar(a, 'obligacion', id, 'CUMPLIDA', { fecha: f }, { cumplidaEn: cuando, radicado: b.radicado, siguiente });
+    return { obligacion: r, cumplimiento, siguiente };
   }
 
   /** Reglas de alerta. En producción las ejecuta también una tarea diaria que envía el resumen por correo. */
@@ -113,7 +197,11 @@ class CumplimientoService {
 class CumplimientoController {
   constructor(private readonly s: CumplimientoService, private readonly db: PrismaService) {}
   @Get('permisos-ambientales') permisos(@ActorActual() a: Actor) { return this.s.permisos(a); }
-  @Permiso('permisos.gestionar') @Patch('obligaciones/:id/cumplida') cumplir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.cumplirObligacion(a, id); }
+  @Permiso('permisos.gestionar') @Patch('permisos-ambientales/:id') editarPermiso(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarPermiso)) b: z.infer<typeof EditarPermiso>) { return this.s.editarPermiso(a, id, b); }
+  @Get('obligaciones/:id/cumplimientos') historial(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.historial(a, id); }
+  @Permiso('permisos.gestionar') @Post('obligaciones/:id/cumplimientos') cumplir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Cumplimiento)) b: z.infer<typeof Cumplimiento>) { return this.s.cumplirObligacion(a, id, b); }
+  @Get('gestores-aliados') aliados(@ActorActual() a: Actor) { return this.s.aliados(a); }
+  @Permiso('permisos.gestionar') @Patch('gestores-aliados/:id') editarAliado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarAliado)) b: z.infer<typeof EditarAliado>) { return this.s.editarAliado(a, id, b); }
   @Get('alertas') alertas(@ActorActual() a: Actor) { return this.s.alertas(a); }
   @Get('catalogos') catalogo(@ActorActual() a: Actor, @Query(new Zod(z.object({ tipo: z.string().optional() }))) q: { tipo?: string }) { return this.s.catalogo(a, q.tipo); }
   @Get('catalogos/residuos') residuos(@ActorActual() a: Actor) { return this.s.residuos(a); }

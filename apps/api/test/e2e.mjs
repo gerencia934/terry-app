@@ -489,6 +489,52 @@ prueba('…en la misma fecha de un precio programado, lo corrige', r.status === 
 r = await llamar('POST', '/importacion/precios/confirmar', { token: T, form: await excel('precios', [{ numero: String(lodo.numero), precio: '930', desde: fechaEn(10) }]) });
 prueba('…y si hay uno programado para después, no deja ponerlo antes → 400', r.status === 400 && /programado desde/.test(r.json.mensaje), JSON.stringify(r.json));
 
+console.log('\n3e. Permisos, obligaciones y gestores aliados (fase 1c)');
+r = await llamar('GET', '/permisos-ambientales', { token: T });
+const res632 = r.json.find?.((p) => /000632/.test(p.acto));
+const oblSemestral = res632?.obligaciones.find((o) => o.proximaFecha && o.meses === 6);
+const oblEvento = r.json.flatMap?.((p) => p.obligaciones).find((o) => !o.proximaFecha && !o.cumplida);
+prueba('permisos: con sus obligaciones (las de fecha primero) y las disposiciones que amparan', r.status === 200 && res632?.disposiciones.length > 0 && !!oblSemestral && !!oblEvento
+  && res632.obligaciones.findIndex((o) => !o.proximaFecha) > res632.obligaciones.findIndex((o) => !!o.proximaFecha), JSON.stringify(res632 ?? r.json).slice(0, 300));
+r = await llamar('POST', `/obligaciones/${oblSemestral.id}/cumplimientos`, { token: thseq, cuerpo: { nota: 'corta' } });
+prueba('registrar un cumplimiento exige soporte: radicado, enlace o nota → 400', r.status === 400 && /radicado/.test(JSON.stringify(r.json)), JSON.stringify(r.json));
+r = await llamar('POST', `/obligaciones/${oblSemestral.id}/cumplimientos`, { token: thseq, cuerpo: { radicado: 'CAS-2026-1', cumplidaEn: fechaEn(3) } });
+prueba('…y no admite una fecha futura → 400', r.status === 400 && /futura/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', `/obligaciones/${oblSemestral.id}/cumplimientos`, { token: tcom, cuerpo: { radicado: 'CAS-2026-1' } });
+prueba('…ni lo registra quien no tiene «permisos.gestionar» (Comercial) → 403', r.status === 403, String(r.status));
+const programada = new Date(oblSemestral.proximaFecha);
+const esperada = new Date(Date.UTC(programada.getUTCFullYear(), programada.getUTCMonth() + 6, programada.getUTCDate())).toISOString().slice(0, 10);
+r = await llamar('POST', `/obligaciones/${oblSemestral.id}/cumplimientos`, { token: thseq, cuerpo: { radicado: 'CAS-2026-04512', soporteUrl: 'https://drive.example.com/informe-arnd.pdf', nota: 'Informe de caracterización del segundo semestre' } });
+prueba('HSEQ registra el cumplimiento con su radicado: la próxima fecha avanza 6 meses desde la programada', r.status === 201 && r.json.siguiente?.startsWith(esperada)
+  && r.json.obligacion.proximaFecha.startsWith(esperada), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', `/obligaciones/${oblSemestral.id}/cumplimientos`, { token: T });
+prueba('…y queda en su historial (fecha programada, radicado, soporte y quién)', r.status === 200 && r.json.cumplimientos.length === 1 && r.json.cumplimientos[0].radicado === 'CAS-2026-04512'
+  && r.json.cumplimientos[0].fechaProgramada.startsWith(oblSemestral.proximaFecha.slice(0, 10)) && r.json.cumplimientos[0].usuario.nombre === 'HSEQ E2E', JSON.stringify(r.json).slice(0, 300));
+let historialFijo = false;
+try { await db.obligacionCumplimiento.deleteMany({ where: { obligacionId: oblSemestral.id } }); } catch (e) { historialFijo = /no se modifica ni se borra/.test(String(e)); }
+prueba('…historial que nadie borra ni modifica (ni escribiendo en la base)', historialFijo);
+r = await llamar('POST', `/obligaciones/${oblEvento.id}/cumplimientos`, { token: thseq, cuerpo: { nota: 'Reporte de contingencia enviado por correo a la CAS' } });
+const oblEventoDespues = await db.obligacionPermiso.findUnique({ where: { id: oblEvento.id } });
+prueba('una obligación por evento o permanente suma el registro sin fecha que avanzar', r.status === 201 && r.json.siguiente === null && oblEventoDespues.proximaFecha === null && !oblEventoDespues.cumplida, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PATCH', `/permisos-ambientales/${res632.id}`, { token: thseq, cuerpo: { expedicion: '2023-08-15', vence: '2023-01-01' } });
+prueba('permiso: el vencimiento no puede ser anterior a la expedición → 400', r.status === 400 && /anterior a la expedición/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/permisos-ambientales/${res632.id}`, { token: thseq, cuerpo: { documentoUrl: 'https://drive.example.com/res-000632-2023.pdf' } });
+const audPermiso = await db.auditoria.findFirst({ where: { entidad: 'permiso_ambiental', entidadId: res632.id, accion: 'EDITAR' } });
+prueba('…se registra el enlace al acto y queda en la auditoría', r.status === 200 && r.json.documentoUrl === 'https://drive.example.com/res-000632-2023.pdf' && !!audPermiso, JSON.stringify(r.json).slice(0, 200));
+// Gestores aliados: la vigencia de la licencia decide si se autorizan sus disposiciones
+r = await llamar('GET', '/gestores-aliados', { token: T });
+const sandesol = r.json.find?.((p) => p.nit === '804001490-7');
+prueba('gestores aliados: Sandesol (incineración) aparece sin vigencia y sin cubrir', r.status === 200 && sandesol?.vigencia.estado === 'SIN_VIGENCIA' && sandesol.vigencia.cubre === false
+  && sandesol.disposicionesGestionadas.some((d) => d.disposicion.codigo === 'INCH'), JSON.stringify(sandesol ?? r.json).slice(0, 300));
+r = await llamar('PATCH', `/gestores-aliados/${sandesol.id}`, { token: thseq, cuerpo: { licenciaIndefinida: true, licenciaVence: fechaEn(300) } });
+prueba('…una licencia indefinida no lleva fecha → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('PATCH', `/gestores-aliados/${sandesol.id}`, { token: thseq, cuerpo: { excluyeTiposResiduo: ['NOEXISTE'] } });
+prueba('…ni excluye tipos de residuo que no existen → 400', r.status === 400 && /NOEXISTE/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/gestores-aliados/${sandesol.id}`, { token: thseq, cuerpo: { licenciaVence: fechaEn(400), licenciaUrl: 'https://drive.example.com/licencia-sandesol.pdf' } });
+prueba('al registrar la vigencia de su licencia, Sandesol queda cubriendo', r.status === 200 && r.json.vigencia.cubre === true && r.json.vigencia.estado === 'VIGENTE', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PATCH', `/declaraciones/${incineracion.id}/estado`, { token: T, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…y la declaración de incineración que antes se rechazaba ahora se autoriza', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
+
 console.log('\n4. Solicitudes, rutas y preoperacional');
 const suc = await db.sucursal.findFirst({ where: { nombre: 'Planta extractora', cliente: { nit: NIT } } });
 r = await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-20', items: [{ declaracionId: agua.id, cantidadEstimada: 10 }] } });

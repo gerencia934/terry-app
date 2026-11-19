@@ -324,39 +324,40 @@ model Usuario {
   datosAceptadosIp     String?   @map("datos_aceptados_ip") @db.VarChar(64)
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  empresa                 Empresa                 @relation(fields: [empresaId], references: [id])
-  rol                     Rol                     @relation(fields: [rolId], references: [id])
-  arl                     EntidadSeguridadSocial? @relation("UsuarioArl", fields: [arlId], references: [id])
-  eps                     EntidadSeguridadSocial? @relation("UsuarioEps", fields: [epsId], references: [id])
-  rutasConductor          Ruta[]                  @relation("RutaConductor")
-  rutasAuxiliar           Ruta[]                  @relation("RutaAuxiliar")
-  preopConductor          Preoperacional[]        @relation("PreopConductor")
-  preopAuxiliar           Preoperacional[]        @relation("PreopAuxiliar")
-  manifiestos             Manifiesto[]            @relation("MfConductor")
-  manifiestosAuxiliar     Manifiesto[]            @relation("MfAuxiliar")
-  manifiestosCreados      Manifiesto[]            @relation("MfCreadoPor")
-  manifiestosRealizados   Manifiesto[]            @relation("MfRealizadoPor")
-  manifiestosAnulados     Manifiesto[]            @relation("MfAnuladoPor")
-  manifiestosRecibidos    Manifiesto[]            @relation("MfReceptor")
-  textosLegales           TextoLegal[]            @relation("TextoLegalCreadoPor")
+  empresa                 Empresa                  @relation(fields: [empresaId], references: [id])
+  rol                     Rol                      @relation(fields: [rolId], references: [id])
+  arl                     EntidadSeguridadSocial?  @relation("UsuarioArl", fields: [arlId], references: [id])
+  eps                     EntidadSeguridadSocial?  @relation("UsuarioEps", fields: [epsId], references: [id])
+  rutasConductor          Ruta[]                   @relation("RutaConductor")
+  rutasAuxiliar           Ruta[]                   @relation("RutaAuxiliar")
+  preopConductor          Preoperacional[]         @relation("PreopConductor")
+  preopAuxiliar           Preoperacional[]         @relation("PreopAuxiliar")
+  manifiestos             Manifiesto[]             @relation("MfConductor")
+  manifiestosAuxiliar     Manifiesto[]             @relation("MfAuxiliar")
+  manifiestosCreados      Manifiesto[]             @relation("MfCreadoPor")
+  manifiestosRealizados   Manifiesto[]             @relation("MfRealizadoPor")
+  manifiestosAnulados     Manifiesto[]             @relation("MfAnuladoPor")
+  manifiestosRecibidos    Manifiesto[]             @relation("MfReceptor")
+  textosLegales           TextoLegal[]             @relation("TextoLegalCreadoPor")
   evidenciasSubidas       ManifiestoEvidencia[]
-  solicitudesAprobadas    Solicitud[]             @relation("SolAprobadaPor")
+  solicitudesAprobadas    Solicitud[]              @relation("SolAprobadaPor")
   conciliacionesAprobadas Conciliacion[]
-  actasEmitidas           Acta[]                  @relation("ActaEmitidaPor")
-  actasCargadas           Acta[]                  @relation("ActaCargadaPor")
-  clientesAsesorados      Cliente[]               @relation("ClienteAsesor")
+  actasEmitidas           Acta[]                   @relation("ActaEmitidaPor")
+  actasCargadas           Acta[]                   @relation("ActaCargadaPor")
+  clientesAsesorados      Cliente[]                @relation("ClienteAsesor")
   tarifasAsignadas        Tarifa[]
   solicitudesCreadas      Solicitud[]
   resetTokens             PasswordReset[]
   sesiones                Sesion[]
-  intentosFallidos        Int                     @default(0) @map("intentos_fallidos")
-  bloqueadoHasta          DateTime?               @map("bloqueado_hasta") @db.Timestamptz
+  intentosFallidos        Int                      @default(0) @map("intentos_fallidos")
+  bloqueadoHasta          DateTime?                @map("bloqueado_hasta") @db.Timestamptz
   auditoria               Auditoria[]
-  declaracionesAprobadas  Declaracion[]           @relation("DeclAprobadaPor")
-  declaracionesAceptadas  Declaracion[]           @relation("DeclAceptadaPor")
-  declaracionesRevision   Declaracion[]           @relation("DeclRevisionPedidaPor")
-  carguesRevertidos       CargueMasivo[]          @relation("CargueRevertidoPor")
-  declaracionesCreadas    Declaracion[]           @relation("DeclCreadaPor")
+  declaracionesAprobadas  Declaracion[]            @relation("DeclAprobadaPor")
+  declaracionesAceptadas  Declaracion[]            @relation("DeclAceptadaPor")
+  declaracionesRevision   Declaracion[]            @relation("DeclRevisionPedidaPor")
+  carguesRevertidos       CargueMasivo[]           @relation("CargueRevertidoPor")
+  cumplimientos           ObligacionCumplimiento[] @relation("CumplimientoUsuario")
+  declaracionesCreadas    Declaracion[]            @relation("DeclCreadaPor")
 
   @@index([empresaId])
   @@map("usuarios")
@@ -586,19 +587,40 @@ model PermisoAmbiental {
 }
 
 model ObligacionPermiso {
-  id           String           @id @default(uuid()) @db.Uuid
-  permisoId    String           @map("permiso_id") @db.Uuid
-  descripcion  String // ICA, monitoreo de suelos, caracterización de vertimiento…
-  codigo       String?          @db.VarChar(10) // ID del Cronograma Maestro de Cumplimiento (OB-xx)
-  periodicidad String           @db.VarChar(120)
-  meses        Int?             @db.SmallInt // al cumplirla, la próxima fecha avanza estos meses (vacío = no se repite)
-  articulo     String?          @db.VarChar(120)
-  proximaFecha DateTime?        @map("proxima_fecha") @db.Date // vacía: permanente o por evento
-  responsable  String?          @db.VarChar(120)
-  cumplida     Boolean          @default(false)
-  permiso      PermisoAmbiental @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+  id            String                   @id @default(uuid()) @db.Uuid
+  permisoId     String                   @map("permiso_id") @db.Uuid
+  descripcion   String // ICA, monitoreo de suelos, caracterización de vertimiento…
+  codigo        String?                  @db.VarChar(10) // ID del Cronograma Maestro de Cumplimiento (OB-xx)
+  periodicidad  String                   @db.VarChar(120)
+  meses         Int?                     @db.SmallInt // al cumplirla, la próxima fecha avanza estos meses (vacío = no se repite)
+  articulo      String?                  @db.VarChar(120)
+  proximaFecha  DateTime?                @map("proxima_fecha") @db.Date // vacía: permanente o por evento
+  responsable   String?                  @db.VarChar(120)
+  cumplida      Boolean                  @default(false)
+  permiso       PermisoAmbiental         @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+  cumplimientos ObligacionCumplimiento[]
 
   @@map("obligaciones_permiso")
+}
+
+/// Cada vez que se cumple una obligación: fecha, radicado ante la autoridad y soporte. No se modifica ni se borra
+/// (trg_cumplimiento_inmutable). Exige algún soporte (chk_cumplimiento_soporte).
+model ObligacionCumplimiento {
+  id              String    @id @default(uuid()) @db.Uuid
+  obligacionId    String    @map("obligacion_id") @db.Uuid
+  fechaProgramada DateTime? @map("fecha_programada") @db.Date // vacía en las obligaciones por evento
+  cumplidaEn      DateTime  @map("cumplida_en") @db.Date
+  radicado        String?   @db.VarChar(80)
+  soporteUrl      String?   @map("soporte_url")
+  nota            String?   @db.VarChar(500)
+  usuarioId       String    @map("usuario_id") @db.Uuid
+  creadoEn        DateTime  @default(now()) @map("creado_en") @db.Timestamptz
+
+  obligacion ObligacionPermiso @relation(fields: [obligacionId], references: [id], onDelete: Restrict)
+  usuario    Usuario           @relation("CumplimientoUsuario", fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  @@index([obligacionId, cumplidaEn(sort: Desc)], map: "ix_cumplimiento_obligacion")
+  @@map("obligacion_cumplimientos")
 }
 
 // ---------------------------------------------------------------------

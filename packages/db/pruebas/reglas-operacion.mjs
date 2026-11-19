@@ -213,6 +213,15 @@ await rechaza('un lote con declaraciones sin anular no se deshace', () => db.car
 const loteSedes = await db.cargueMasivo.create({ data: datosLote({ plantilla: 'sucursales', tipoCargue: 'SUCURSALES', formato: 'XLSX', delimitador: null }) });
 await rechaza('solo se deshacen cargues de declaraciones', () => db.cargueMasivo.update({ where: { id: loteSedes.id }, data: { estado: 'REVERTIDO', revertidoEn: new Date(), revertidoPorId: admin.id, motivoReversion: 'Prueba de reglas: sedes' } }), /Solo se deshacen cargues de declaraciones/);
 
+console.log('\n9. Historial de cumplimiento de obligaciones (fase 1c)');
+const oblR = await db.obligacionPermiso.findFirstOrThrow({ where: { permiso: { empresaId: E } } });
+await rechaza('un cumplimiento sin radicado, enlace ni nota no se registra', () => db.obligacionCumplimiento.create({ data: { obligacionId: oblR.id, cumplidaEn: new Date(), usuarioId: admin.id } }), /chk_cumplimiento_soporte/);
+const cumR = await db.obligacionCumplimiento.create({ data: { obligacionId: oblR.id, cumplidaEn: new Date(), radicado: 'R-1', usuarioId: admin.id } });
+prueba('con el radicado sí queda registrado', !!cumR.id);
+await rechaza('…y el historial no se modifica', () => db.obligacionCumplimiento.update({ where: { id: cumR.id }, data: { radicado: 'R-2' } }), /no se modifica ni se borra/);
+await rechaza('…ni se borra', () => db.obligacionCumplimiento.delete({ where: { id: cumR.id } }), /no se modifica ni se borra/);
+await rechaza('…ni se borra la obligación que lo tiene', () => db.obligacionPermiso.delete({ where: { id: oblR.id } }), /Foreign key|violates|obligacion_cumplimientos/i);
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

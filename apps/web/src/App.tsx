@@ -26,6 +26,7 @@ import { RecepcionPlantaServidor } from './pages/torre/Recepcion';
 import { EmpresaServidor } from './pages/torre/Empresa';
 import { ClientesServidor } from './pages/ClientesServidor';
 import { TarifasServidor } from './pages/TarifasServidor';
+import { PermisosServidor } from './pages/PermisosServidor';
 import Verificar from './pages/Verificar';
 
 function Screen() {
@@ -66,7 +67,7 @@ function Screen() {
       case 'descargues': return MODO_REAL ? <RecepcionPlantaServidor /> : <Recepcion />;
       case 'inventario': return <Inventario />;
       case 'certificados': return MODO_REAL ? <ActasServidor /> : <Certificados />;
-      case 'permisos': return <Permisos />;
+      case 'permisos': return MODO_REAL ? <PermisosServidor /> : <Permisos />;
       case 'indicadores': return <Indicadores />;
       case 'informes': return <Informes />;
       case 'ajustes': return <ConfigIndex />;
