@@ -2279,6 +2279,22 @@ else {
   prueba('…con la verificación en dos pasos obligatoria exige el «otp» del portal y no la vuelve a pedir en Residuos',
     sinOtp === 403 && conOtp.status === 200 && conOtp.json.usuario.requiereConfigurar2fa === false && protegida === 200,
     JSON.stringify({ sinOtp, conOtp: [conOtp.status, conOtp.json?.usuario?.requiereConfigurar2fa], protegida, totp: !!adminU.totpSecreto }));
+  // Primera vez desde el portal de alguien sin código en Residuos: al aceptar la política, la sesión nueva sigue siendo
+  // «del portal» y no le pide configurar la verificación en dos pasos (antes se perdía la marca al reemitir la sesión)
+  const nuevoP = await db.usuario.findFirst({ where: { activo: true, clienteId: null, totpSecreto: null, email: { not: ADMIN.email }, OR: [{ bloqueadoHasta: null }, { bloqueadoHasta: { lt: new Date() } }] },
+    orderBy: { email: 'asc' }, select: { id: true, email: true, empresaId: true, datosPoliticaVersion: true } });
+  const empresaN = await db.empresa.findUnique({ where: { id: nuevoP.empresaId }, select: { configuracion: true } });
+  await db.usuario.update({ where: { id: nuevoP.id }, data: { datosPoliticaVersion: null } });
+  await db.empresa.update({ where: { id: nuevoP.empresaId }, data: { configuracion: { ...(empresaN.configuracion ?? {}), dobleFactorObligatorio: true } } });
+  const sN = await entrar(pase({ sub: nuevoP.email }), '198.51.100.19');
+  const aceptN = sN.status === 200 ? await llamar('POST', '/auth/aceptar-datos', { token: sN.json.accessToken, cuerpo: { version: sN.json.usuario.politicaDatos.version } }) : { status: 0, json: {} };
+  const sesionN = aceptN.status === 200 ? await db.sesion.findUnique({ where: { id: aceptN.json.refreshToken.split('.')[0] } }) : null;
+  await db.empresa.update({ where: { id: nuevoP.empresaId }, data: { configuracion: empresaN.configuracion ?? {} } });
+  await db.usuario.update({ where: { id: nuevoP.id }, data: { datosPoliticaVersion: nuevoP.datosPoliticaVersion } });
+  prueba('…y quien llega del portal sin código en Residuos acepta la política sin que se le pida configurarlo (la sesión nueva sigue siendo del portal)',
+    sN.status === 200 && sN.json.usuario.requiereAceptarDatos === true && sN.json.usuario.requiereConfigurar2fa === false
+      && aceptN.status === 200 && aceptN.json.usuario.requiereConfigurar2fa === false && sesionN?.viaPortal === true,
+    JSON.stringify({ sN: [sN.status, sN.json?.mensaje, sN.json?.usuario?.requiereAceptarDatos, sN.json?.usuario?.requiereConfigurar2fa], acept: [aceptN.status, aceptN.json?.mensaje, aceptN.json?.usuario?.requiereConfigurar2fa], via: sesionN?.viaPortal }));
 }
 
 await db.$disconnect();

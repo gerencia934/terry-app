@@ -287,8 +287,11 @@ export class AuthService {
     if (version !== vigente) throw new ForbiddenException({ mensaje: `La política vigente es la versión ${vigente}: recargue la página.` });
     await this.db.usuario.update({ where: { id: a.id }, data: { datosPoliticaVersion: vigente, datosAceptadosEn: new Date(), datosAceptadosIp: meta.ip?.slice(0, 64) ?? null } });
     await this.audit.registrar(a, 'usuario', a.id, 'ACEPTAR_DATOS', undefined, { version: vigente });
+    // La sesión nueva conserva su origen: si se abrió con el pase del portal, la verificación en dos pasos ya la hizo el
+    // portal y no se vuelve a pedir aquí (docs/ECOSISTEMA.md)
+    const anterior = a.sesionId ? await this.db.sesion.findUnique({ where: { id: a.sesionId }, select: { viaPortal: true } }) : null;
     if (a.sesionId) await this.db.sesion.updateMany({ where: { id: a.sesionId, revocadaEn: null }, data: { revocadaEn: new Date() } });
-    return this.emitir(a.id, meta);
+    return this.emitir(a.id, meta, anterior?.viaPortal ?? false);
   }
 
   /** Cierra la sesión en todos los dispositivos (por ejemplo, si perdió el celular). */
