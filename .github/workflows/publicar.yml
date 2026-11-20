@@ -87,9 +87,10 @@ jobs:
         if: steps.cuenta.outputs.lista == 'si'
         working-directory: despliegue/cloudflare/api
         run: |
-          # Antes de cargar las claves (la primera vez) el servidor no puede arrancar: solo se avisa
+          # Sin la base o sin la política de datos (Ley 1581) el servidor no puede arrancar: mientras falten, solo se avisa
           configurado=no
-          if npx wrangler secret list | grep -q DATABASE_URL; then configurado=si; fi
+          claves="$(npx wrangler secret list)"
+          if echo "$claves" | grep -q DATABASE_URL && echo "$claves" | grep -q POLITICA_DATOS_URL && echo "$claves" | grep -q POLITICA_DATOS_VERSION; then configurado=si; fi
           for i in $(seq 1 30); do
             if curl -sf --max-time 30 https://terra-residuos.pages.dev/api/v1/salud; then echo; exit 0; fi
             sleep 10
@@ -98,4 +99,4 @@ jobs:
             echo "::error::El servidor no respondió en terra-residuos.pages.dev/api/v1/salud: revise los registros del contenedor en Cloudflare."
             exit 1
           fi
-          echo "::warning::El servidor aún no tiene sus claves (DATABASE_URL y las demás): cárguelas y vuelva a publicar (docs/DESPLIEGUE.md)."
+          echo "::warning::El servidor aún no puede arrancar: faltan claves (DATABASE_URL o la política de datos POLITICA_DATOS_URL y POLITICA_DATOS_VERSION). Cárguelas y vuelva a publicar (docs/DESPLIEGUE.md)."
