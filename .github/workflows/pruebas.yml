@@ -103,6 +103,7 @@ jobs:
           SIIGO_USERNAME: prueba
           SIIGO_ACCESS_KEY: prueba
           SIIGO_PARTNER_ID: TERRYGO-PRUEBAS
+          SIIGO_EMPRESA_NIT: 901089780-8
           SIIGO_SINCRONIZAR: 'false'
         run: |
           nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &

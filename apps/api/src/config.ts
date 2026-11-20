@@ -39,6 +39,8 @@ const Esquema = z.object({
   // Siigo Nube: facturas y pagos de los manifiestos. Las claves van solo en el .env del API (nunca en la web ni en git).
   SIIGO_URL: z.string().trim().url().default('https://api.siigo.com'),
   SIIGO_USERNAME: z.string().trim().default(''), SIIGO_ACCESS_KEY: z.string().trim().default(''), SIIGO_PARTNER_ID: z.string().trim().default(''),
+  // NIT de la empresa dueña de la cuenta de Siigo: solo ella se sincroniza. Vacío = la única empresa de la instalación.
+  SIIGO_EMPRESA_NIT: z.string().trim().default(''),
   // Sincronización diaria (a esta hora de Colombia, una vez por día aunque haya varias copias del API)
   SIIGO_SINCRONIZAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   SIIGO_HORA: sinVacio(z.coerce.number().int().min(0).max(23).default(6)),

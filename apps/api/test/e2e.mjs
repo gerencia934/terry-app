@@ -1500,6 +1500,9 @@ const logisticaE2e = await db.usuario.create({ data: { empresaId: clienteFin.emp
   passwordHash: await hashFijo('Logistica2026!') } });
 const tLog = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: logisticaE2e.email, clave: 'Logistica2026!' } })).json)).accessToken;
 const [finCom, finLog, finHseq, finCond] = await Promise.all([tcom, tLog, thseq, tc].map((t) => llamar('GET', '/finanzas/resumen', { token: t })));
+const tOtra = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: 'admin@otra.com', clave: 'OtraClave2026!' } })).json)).accessToken;
+const finOtra = await llamar('GET', '/finanzas/siigo', { token: tOtra });
+prueba('la cuenta de Siigo es solo de su empresa: otra empresa de la instalación la ve sin configurar', finOtra.status === 200 && finOtra.json.configurado === false, JSON.stringify(finOtra.json).slice(0, 200));
 prueba('facturación: la ve Comercial (con Facturación y Gerencia); Logística, HSEQ y el conductor no → 403', finCom.status === 200 && finCom.json.siigo?.configurado === true
   && [finLog, finHseq].every((x) => x.status === 403) && [401, 403].includes(finCond.status), JSON.stringify([finCom.status, finLog.status, finHseq.status, finCond.status]));
 // Dos servicios realizados y conciliados (hace 10 y 9 días)
@@ -1597,6 +1600,7 @@ prueba('enlazar a mano una factura de Siigo del mismo cliente (la consulta por s
 await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: T8, cuerpo: { regla: 'AL_VENCER' } });
 const auditoriaFin = await db.auditoria.count({ where: { accion: { in: ['REGLA_CERTIFICADO', 'LIBRE', 'ENLAZAR_FACTURA', 'SINCRONIZAR'] } } });
 prueba('…y todo queda en la auditoría (regla, sin cobro, enlaces y sincronizaciones)', auditoriaFin >= 6, String(auditoriaFin));
+prueba('…y las facturas de Siigo quedan solo en su empresa (ninguna en la otra empresa de la instalación)', (await db.facturaSiigo.count({ where: { empresaId: { not: clienteFin.empresaId } } })) === 0);
 siigoSimulado.close();
 
 console.log('\n10. Verificación en dos pasos (requisitos de producción §4)');

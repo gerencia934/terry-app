@@ -138,7 +138,7 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
     ZIP y portal); facturación libera un certificado o marca un manifiesto sin cobro, con su motivo;
   - ✅ solo Comercial, Facturación y Gerencia ven facturas, pagos, la regla y la alerta de manifiestos sin facturar
     (permisos `finanzas.ver` y `finanzas.gestionar`); el portal y la app de campo no leen esas tablas (RLS).
-  88 pruebas de reglas y 434 e2e OK (con un Siigo simulado: las pruebas nunca tocan la cuenta real).
+  88 pruebas de reglas y 436 e2e OK (con un Siigo simulado: las pruebas nunca tocan la cuenta real).
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

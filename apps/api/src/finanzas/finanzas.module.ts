@@ -47,12 +47,32 @@ export class FinanzasService implements OnApplicationBootstrap, OnModuleDestroy 
   private readonly log = new Logger('Siigo');
   private readonly siigo: SiigoCliente;
   private reloj: NodeJS.Timeout | null = null;
+  private empresaDeSiigo: Promise<string | null> | null = null;
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly cfg: ConfigService<Config, true>) {
     this.siigo = new SiigoCliente({ url: cfg.get('SIIGO_URL', { infer: true }), usuario: cfg.get('SIIGO_USERNAME', { infer: true }),
       clave: cfg.get('SIIGO_ACCESS_KEY', { infer: true }), partner: cfg.get('SIIGO_PARTNER_ID', { infer: true }) });
   }
 
   // ---------------- Sincronización ----------------
+  /**
+   * La empresa dueña de la cuenta de Siigo: la del NIT de SIIGO_EMPRESA_NIT o, si no se indica, la única de la instalación.
+   * Con varias empresas y sin ese NIT, Siigo queda apagado: las facturas de una empresa nunca pasan a otra.
+   */
+  private empresaSiigo() {
+    this.empresaDeSiigo ??= (async () => {
+      if (!this.siigo.configurado) return null;
+      const nit = this.cfg.get('SIIGO_EMPRESA_NIT', { infer: true }).replace(/\D/g, '');
+      const empresas = await this.db.empresa.findMany({ select: { id: true, nit: true } });
+      const base = (x: string) => x.split('-')[0].replace(/\D/g, '');
+      const e = nit ? empresas.find((x) => base(x.nit) === base(this.cfg.get('SIIGO_EMPRESA_NIT', { infer: true }))) : empresas.length === 1 ? empresas[0] : undefined;
+      if (!e) this.log.warn(nit ? `SIIGO_EMPRESA_NIT (${nit}) no corresponde a ninguna empresa: Siigo queda apagado.` : 'Hay varias empresas: indique SIIGO_EMPRESA_NIT para usar Siigo.');
+      return e?.id ?? null;
+    })().catch(() => { this.empresaDeSiigo = null; return null; });
+    return this.empresaDeSiigo;
+  }
+  /** ¿Esta empresa usa la cuenta de Siigo configurada? */
+  private async conSiigo(empresaId: string) { return (await this.empresaSiigo()) === empresaId; }
+
   onApplicationBootstrap() {
     if (!this.siigo.configurado || !this.cfg.get('SIIGO_SINCRONIZAR', { infer: true })) return;
     this.reloj = setInterval(() => void this.diaria(), 10 * 60_000);
@@ -67,17 +87,17 @@ export class FinanzasService implements OnApplicationBootstrap, OnModuleDestroy 
       const hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota', hour: 'numeric', hour12: false })) % 24;
       if (hora < this.cfg.get('SIIGO_HORA', { infer: true })) return;
       const dia = fechaColombia().toISOString().slice(0, 10);
-      for (const e of await this.db.empresa.findMany({ select: { id: true } })) {
-        const [x] = await this.db.$queryRaw<{ id: string }[]>`
-          INSERT INTO sincronizaciones_siigo (empresa_id, origen, dia) VALUES (${e.id}::uuid, 'AUTOMATICA', ${dia}::date) ON CONFLICT DO NOTHING RETURNING id`;
-        if (x) await this.ejecutar(e.id, x.id);
-      }
+      const empresaId = await this.empresaSiigo();
+      if (!empresaId) return;
+      const [x] = await this.db.$queryRaw<{ id: string }[]>`
+        INSERT INTO sincronizaciones_siigo (empresa_id, origen, dia) VALUES (${empresaId}::uuid, 'AUTOMATICA', ${dia}::date) ON CONFLICT DO NOTHING RETURNING id`;
+      if (x) await this.ejecutar(empresaId, x.id);
     } catch (e) { this.log.error(`Sincronización diaria: ${(e as Error).message}`); }
   }
 
   /** Botón «Sincronizar con Siigo»: responde de inmediato y el panel muestra cuándo termina. */
   async sincronizarAhora(a: Actor) {
-    if (!this.siigo.configurado) throw new BadRequestException({ mensaje: 'Siigo no está configurado en el servidor (usuario, clave de acceso y Partner-Id).' });
+    if (!(await this.conSiigo(a.empresaId))) throw new BadRequestException({ mensaje: 'Siigo no está configurado para su empresa en el servidor (usuario, clave de acceso, Partner-Id y NIT de la empresa).' });
     const enCurso = await this.db.sincronizacionSiigo.findFirst({ where: { empresaId: a.empresaId, estado: 'EN_CURSO', iniciadaEn: { gte: new Date(Date.now() - 20 * 60_000) } } });
     if (enCurso) return enCurso;
     const s = await this.db.sincronizacionSiigo.create({ data: { empresaId: a.empresaId, origen: 'MANUAL', dia: fechaColombia(), usuarioId: a.id } });
@@ -186,7 +206,8 @@ export class FinanzasService implements OnApplicationBootstrap, OnModuleDestroy 
       this.db.sincronizacionSiigo.findFirst({ where: { empresaId: a.empresaId }, orderBy: { iniciadaEn: 'desc' }, include: { usuario: { select: { nombre: true } } } }),
       this.db.sincronizacionSiigo.findFirst({ where: { empresaId: a.empresaId, estado: 'LISTA' }, orderBy: { iniciadaEn: 'desc' }, select: { terminadaEn: true, facturas: true, enlazadas: true } }),
     ]);
-    return { configurado: this.siigo.configurado, diaria: this.siigo.configurado && this.cfg.get('SIIGO_SINCRONIZAR', { infer: true }), hora: this.cfg.get('SIIGO_HORA', { infer: true }),
+    const configurado = await this.conSiigo(a.empresaId);
+    return { configurado, diaria: configurado && this.cfg.get('SIIGO_SINCRONIZAR', { infer: true }), hora: this.cfg.get('SIIGO_HORA', { infer: true }),
       ultima: ultima ? { ...ultima, usuario: ultima.usuario?.nombre ?? null } : null, ultimaLista };
   }
 
@@ -247,7 +268,7 @@ export class FinanzasService implements OnApplicationBootstrap, OnModuleDestroy 
     const m = await this.manifiestoPropio(a, id);
     let f = await this.db.facturaSiigo.findFirst({ where: { empresaId: a.empresaId, nombre: b.factura } });
     if (!f) {
-      if (!this.siigo.configurado) throw new BadRequestException({ mensaje: `La factura ${b.factura} no está en la copia local y Siigo no está configurado.` });
+      if (!(await this.conSiigo(a.empresaId))) throw new BadRequestException({ mensaje: `La factura ${b.factura} no está en la copia local y Siigo no está configurado para su empresa.` });
       const api = await this.siigo.facturaPorNombre(b.factura).catch((e) => { throw new BadRequestException({ mensaje: e instanceof ErrorSiigo ? e.message : 'No se pudo consultar Siigo.' }); });
       if (!api) throw new NotFoundException({ mensaje: `Siigo no tiene la factura ${b.factura}.` });
       await this.aplicarUna(a.empresaId, api);
