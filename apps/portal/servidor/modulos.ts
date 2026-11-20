@@ -40,3 +40,16 @@ export async function estado(m: Modulo, consultar: typeof fetch = fetch): Promis
   return e;
 }
 export const olvidarEstados = () => memoria.clear();
+
+/**
+ * Antes de firmar un pase (vale 60 s), el módulo debe estar despierto: un servidor en contenedor que se durmió puede tardar
+ * más de un minuto en arrancar, y el pase vencería en el camino. Espera hasta 25 s por intento; la pantalla reintenta.
+ */
+export async function despertar(m: Modulo, consultar: typeof fetch = fetch, ms = 25_000): Promise<boolean> {
+  if (!m.url) return false;
+  try {
+    const r = await consultar(`${m.url}/api/v1/salud`, { signal: AbortSignal.timeout(ms), headers: { accept: 'application/json' } });
+    if (r.ok) { memoria.set(m.url, { estado: 'disponible', hasta: Date.now() + 30_000 }); return true; }
+  } catch { /* sigue dormido o caído: la pantalla vuelve a intentar */ }
+  return false;
+}

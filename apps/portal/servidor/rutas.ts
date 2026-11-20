@@ -7,7 +7,7 @@ import {
   type ClavePase, type Llaves, type TipoDesafio,
 } from './cripto.ts';
 import { dbNeon, type Db } from './db.ts';
-import { estado, IDS_MODULOS, modulos, type IdModulo } from './modulos.ts';
+import { despertar, estado, IDS_MODULOS, modulos, type IdModulo } from './modulos.ts';
 
 export interface Entorno {
   DATABASE_URL?: string;
@@ -339,6 +339,8 @@ async function pase(c: Contexto) {
     await evento(c, 'ABRIR_MODULO', s.cuenta.id, { modulo: m.id, pase: false });
     return json({ url: m.url, pase: false });
   }
+  // El pase vale 60 s: se firma solo con el módulo despierto (si se durmió, la pantalla espera y vuelve a pedirlo)
+  if (!(await despertar(m))) throw fallo(503, `${m.nombre} se está encendiendo. Puede tardar hasta un minuto…`, 'DESPERTANDO');
   const ahora = Math.floor(Date.now() / 1000);
   const token = await firmarPase(c.pase, { iss: c.portal, aud: m.id, sub: s.cuenta.email, nom: s.cuenta.nombre, amr: ['pwd', 'otp'], iat: ahora, exp: ahora + 60, jti: crypto.randomUUID() });
   await evento(c, 'ABRIR_MODULO', s.cuenta.id, { modulo: m.id, pase: true });

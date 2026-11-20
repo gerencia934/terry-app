@@ -16,6 +16,7 @@ const cliente = new pg.Client({ connectionString: URL_DB });
 const db: Db = { q: async (t, v = []) => (await cliente.query(t, v as unknown[])).rows };
 let env: Entorno;
 let publicaX = '';
+let residuosDormido = false;
 
 before(async () => {
   if (!URL_DB) throw new Error('Defina PORTAL_DB_URL (una base de pruebas: se borra al empezar).');
@@ -29,8 +30,8 @@ before(async () => {
     PORTAL_SECRETO: 'p'.repeat(64), PORTAL_CLAVE_PRIVADA: JSON.stringify({ d: jwk.d, x: jwk.x, kid: 'portal-prueba' }), PORTAL_URL: PORTAL,
     MODULOS_SSO: 'residuos', MODULO_RESIDUOS_URL: 'https://residuos.prueba', MODULO_MANTENIMIENTO_URL: 'https://mto.prueba', MODULO_CRM_URL: '', MODULO_PLANTA_URL: '',
   };
-  // Salud de los módulos simulada: Residuos responde, Mantenimiento no
-  globalThis.fetch = (async (u: string | URL | Request) => new Response('{}', { status: String(u).includes('residuos.prueba') ? 200 : 503 })) as typeof fetch;
+  // Salud de los módulos simulada: Residuos responde (salvo cuando la prueba lo «duerme»), Mantenimiento no
+  globalThis.fetch = (async (u: string | URL | Request) => new Response('{}', { status: String(u).includes('residuos.prueba') && !residuosDormido ? 200 : 503 })) as typeof fetch;
   olvidarEstados();
 });
 after(async () => { await cliente.end(); });
@@ -120,6 +121,17 @@ test('menú: módulos con estado y pase firmado para Residuos', async () => {
   assert.deepEqual(mto.json, { url: 'https://mto.prueba', pase: false }, 'sin entrada única todavía: se abre con su propia entrada');
   assert.equal((await llamar('POST', 'pase', { cookie: admin.cookie, cuerpo: { modulo: 'crm' } })).status, 409);
   assert.equal((await llamar('POST', 'pase', { cookie: admin.cookie, cuerpo: { modulo: 'residuos' }, origen: 'https://otro.sitio' })).status, 403, 'protección CSRF');
+});
+
+test('pase: con el módulo dormido no se firma (503 DESPERTANDO) y se firma cuando despierta', async () => {
+  residuosDormido = true;
+  const dormido = await llamar('POST', 'pase', { cookie: admin.cookie, cuerpo: { modulo: 'residuos' } });
+  residuosDormido = false;
+  assert.equal(dormido.status, 503);
+  assert.equal(dormido.json.codigo, 'DESPERTANDO');
+  const despierto = await llamar('POST', 'pase', { cookie: admin.cookie, cuerpo: { modulo: 'residuos' } });
+  assert.equal(despierto.status, 200);
+  assert.match(despierto.json.url, /^https:\/\/residuos\.prueba\/#sso=/);
 });
 
 test('administración: crear una cuenta con acceso solo a Residuos', async () => {

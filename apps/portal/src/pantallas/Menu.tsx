@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Factory, Handshake, Loader2, Recycle, Wrench, type LucideIcon } from 'lucide-react';
 import { Badge, Button } from '../componentes/ui';
-import { api, cx, mensajeDe, type IdModulo, type ModuloMenu, type Yo } from '../lib';
+import { api, cx, ErrorApi, mensajeDe, type IdModulo, type ModuloMenu, type Yo } from '../lib';
 import terrySaludo from '../assets/terry-saludo.webp';
 
 const ICONOS: Record<IdModulo, LucideIcon> = { residuos: Recycle, mantenimiento: Wrench, crm: Handshake, planta: Factory };
@@ -14,12 +14,24 @@ const ESTADO: Record<NonNullable<ModuloMenu['estado']>, { texto: string; tono: '
 /** Menú del portal: los módulos que permite la cuenta. Un módulo que no responde sale en gris; los demás siguen igual. */
 export function Menu({ yo }: { yo: Yo }) {
   const [abriendo, setAbriendo] = useState<IdModulo | null>(null);
+  const [despertando, setDespertando] = useState('');
   const [err, setErr] = useState('');
   const visibles = yo.modulos.filter((m) => m.acceso || m.estado === 'proximamente');
   const abrir = async (m: ModuloMenu) => {
-    setErr(''); setAbriendo(m.id);
-    try { window.location.assign((await api<{ url: string }>('pase', { modulo: m.id })).url); }
-    catch (x) { setErr(mensajeDe(x)); setAbriendo(null); }
+    setErr(''); setDespertando(''); setAbriendo(m.id);
+    // Si el módulo se durmió, el portal lo despierta antes de entregar el pase (vale 60 s): se reintenta hasta 3 minutos
+    const limite = Date.now() + 180_000;
+    for (;;) {
+      try { window.location.assign((await api<{ url: string }>('pase', { modulo: m.id })).url); return; }
+      catch (x) {
+        if (x instanceof ErrorApi && x.codigo === 'DESPERTANDO' && Date.now() < limite) {
+          setDespertando(`Despertando ${m.nombre}… La primera entrada después de un rato sin uso puede tardar hasta un minuto.`);
+          await new Promise((r) => setTimeout(r, 3000));
+          continue;
+        }
+        setDespertando(''); setErr(mensajeDe(x)); setAbriendo(null); return;
+      }
+    }
   };
   const nombre = yo.cuenta.nombre.split(' ')[0];
   return (
@@ -33,6 +45,7 @@ export function Menu({ yo }: { yo: Yo }) {
         </div>
       </section>
       {err && <p className="mt-4 rounded-lg bg-bad/10 px-3 py-2 text-[13px] text-bad" role="alert">{err}</p>}
+      {despertando && <p className="mt-4 flex items-center gap-2 rounded-lg bg-info/10 px-3 py-2 text-[13px] text-info" role="status"><Loader2 size={16} className="animate-spin" /> {despertando}</p>}
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         {visibles.map((m) => {
           const Icono = ICONOS[m.id];
