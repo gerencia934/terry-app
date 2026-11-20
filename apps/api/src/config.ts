@@ -15,7 +15,7 @@ const Esquema = z.object({
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
-  MAIL_FROM: z.string().default('TERRY-GO · Terra Viva <no-responder@terravivasas.com>'),
+  MAIL_FROM: z.string().default('Terry-App · Terra Viva <no-responder@terravivasas.com>'),
   // Ley 1581: versión vigente de la política de tratamiento de datos (al cambiarla, se pide aceptar de nuevo) y su enlace.
   // Respuesta B1 de la gerencia: sin política publicada nadie entra. En producción el servidor no arranca sin ellas; en
   // desarrollo y pruebas se usa la versión «borrador» y la pantalla de aceptación lo advierte.
@@ -59,6 +59,13 @@ const Esquema = z.object({
   // Consulta automática cada tantos segundos (30 a 300); false = solo con el botón «Actualizar» (pruebas)
   WIALON_CONSULTAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   WIALON_INTERVALO: sinVacio(z.coerce.number().int().min(30).max(300).default(60)),
+  // Notificaciones push (Web Push): llaves VAPID (se generan una vez). Sin ellas no hay avisos y la app sigue igual.
+  VAPID_PUBLICA: z.string().trim().default(''),
+  VAPID_PRIVADA: z.string().trim().default(''),
+  // Contacto que ven los servicios de push (Google, Apple, Mozilla): la página de Terra Viva, no un correo personal
+  VAPID_CONTACTO: z.string().trim().default('https://terravivasas.net'),
+  // Solo pruebas automáticas: no envía; guarda los avisos para revisarlos (GET /notificaciones/push/pruebas)
+  PUSH_PRUEBAS: sinVacio(z.enum(['true', 'false']).default('false')).transform((v) => v === 'true'),
   // Formulario del sitio web (módulo Comercial): NIT de la empresa que recibe los prospectos. Vacío = la única empresa.
   FORMULARIO_WEB_EMPRESA_NIT: z.string().trim().default(''),
   // Cola de trabajos (ZIP, Excel): esta copia del API los procesa (en producción puede haber una copia solo para eso)

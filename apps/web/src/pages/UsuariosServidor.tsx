@@ -8,6 +8,7 @@ import { api, ErrorApi, sesionActual, tienePermiso } from '../lib/api';
 import { PieLista, fechaHoraCo, hoyCo, useApi, usePaginado } from '../lib/servidor';
 import { useRouter } from '../lib/router';
 import { cx, diasEntre, fmtFecha } from '../lib/format';
+import { entregarInvitacion, type Invitacion } from '../components/EnlaceAcceso';
 
 interface Usuario {
   id: string; nombre: string; documento: string; email: string; telefono: string | null; activo: boolean; bloqueado: boolean; esConductor: boolean; esAuxiliar: boolean;
@@ -109,8 +110,12 @@ function FormUsuario({ u, roles, listo }: { u?: Usuario; roles: Roles['roles']; 
   const enviar = async (cuerpo: Record<string, unknown>, ok: string) => {
     setEnviando(true);
     try {
-      if (u) await api(`/usuarios/${u.id}`, { metodo: 'PATCH', cuerpo }); else await api('/usuarios', { metodo: 'POST', cuerpo });
-      toast(ok); listo();
+      if (u) { await api(`/usuarios/${u.id}`, { metodo: 'PATCH', cuerpo }); toast(ok); }
+      else {
+        const r = await api<{ invitacion?: Invitacion }>('/usuarios', { metodo: 'POST', cuerpo });
+        if (!entregarInvitacion(r.invitacion, String(cuerpo.nombre ?? ''), String(cuerpo.email ?? ''))) toast(ok);
+      }
+      listo();
     } catch (err) { toast(mensajeError(err, 'No se pudo guardar.'), 'warn'); }
     setEnviando(false);
   };
@@ -121,7 +126,10 @@ function FormUsuario({ u, roles, listo }: { u?: Usuario; roles: Roles['roles']; 
     else enviar({ ...datos, email }, `Invitación enviada a ${email}: con el enlace crea su contraseña (vence en 72 horas).`);
   };
   const reenviar = async () => {
-    try { await api(`/usuarios/${u!.id}/invitacion`, { metodo: 'POST' }); toast(`Invitación enviada de nuevo a ${u!.email}.`); }
+    try {
+      const r = await api<Invitacion>(`/usuarios/${u!.id}/invitacion`, { metodo: 'POST' });
+      if (!entregarInvitacion(r, u!.nombre, u!.email)) toast(`Invitación enviada de nuevo a ${u!.email}.`);
+    }
     catch (err) { toast(mensajeError(err, 'No se pudo enviar.'), 'warn'); }
   };
   // Celular perdido y sin códigos de respaldo: el administrador la restablece (nadie la suya) y el usuario la configura de nuevo

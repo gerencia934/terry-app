@@ -58,7 +58,7 @@ export function SolicitudesServidor({ porConfirmar = false }: { porConfirmar?: b
     <>
       <PageHeader eyebrow="Logística" title={porConfirmar ? 'Por confirmar' : 'Solicitudes'}
         subtitle={porConfirmar
-          ? 'Solicitudes que esperan la aprobación comercial: las recurrentes que TERRY-GO crea al grabar un manifiesto y las que se registraron sin aprobar. Al aprobarlas pasan a «por programar».'
+          ? 'Solicitudes que esperan la aprobación comercial: las recurrentes que Terry-App crea al grabar un manifiesto y las que se registraron sin aprobar. Al aprobarlas pasan a «por programar».'
           : 'Servicios pedidos por los clientes. La aprobación comercial va aparte del avance: cada línea se programa en una ruta y queda realizada al grabar su manifiesto.'}
         actions={<>{tienePermiso('solicitudes.crear') && !porConfirmar && <Button variant="primary" onClick={() => setNueva(true)}><Plus size={16} /> Nueva solicitud</Button>}<Button onClick={lista.recargar}><RefreshCw size={16} /> Actualizar</Button></>} />
       <FilterBar active={activos} onClear={() => { setF(base); setNum(''); }}>
@@ -114,7 +114,7 @@ function DetalleSolicitud({ s, onClose, onCambio }: { s: Sol | null; onClose: ()
           <DefList items={[
             ['Cliente', s.cliente.razonSocial],
             ['Para el', fmtFecha(s.fechaSolicitada)],
-            ['Origen', s.clase === 'PRE' ? 'Recurrente (la generó TERRY-GO al grabar un manifiesto)' : desdePortal(s) ? `Pedida por el cliente desde su portal (${s.creadoPor!.nombre})` : s.operacion === 'DESCARGA' ? 'Descarga en planta' : 'Recolección en la sede'],
+            ['Origen', s.clase === 'PRE' ? 'Recurrente (la generó Terry-App al grabar un manifiesto)' : desdePortal(s) ? `Pedida por el cliente desde su portal (${s.creadoPor!.nombre})` : s.operacion === 'DESCARGA' ? 'Descarga en planta' : 'Recolección en la sede'],
             ['Aprobación', <EstadoBadge estado={s.aprobacion} />],
             ['Avance', <EstadoBadge estado={s.estado} />],
             ...(s.ordenCompra ? [['Orden de compra', s.ordenCompra]] as [string, string][] : []),

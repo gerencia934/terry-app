@@ -52,7 +52,7 @@ export default function Verificar() {
       <main className="mx-auto flex max-w-lg flex-col gap-5">
         <header className="flex flex-col items-center gap-2 text-center">
           <Logo className="h-12" />
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-subtle">TERRY-GO · Verificación de documentos</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-subtle">Terry-App · Verificación de documentos</p>
         </header>
 
         <section className="rounded-2xl border border-line bg-surface p-5 shadow-sm" aria-live="polite">

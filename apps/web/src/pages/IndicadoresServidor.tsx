@@ -1,19 +1,17 @@
 // Indicadores e inicio con datos reales (fase 1c). Las cifras salen de las conciliaciones no anuladas: lo pesado en
 // planta (o lo cargado, si aún no se concilia). Las toneladas cuentan solo las líneas en kg o toneladas; las demás
 // unidades (galones, m³, unidades) se muestran aparte para no sumar peras con manzanas.
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowRight, CalendarClock, ChevronRight, Info, MapPin, Receipt, Route as RouteIcon, ShieldCheck, Truck, Weight } from 'lucide-react';
-import { Badge, Button, Card, ColorBadge, Field, Input, Kpi, PageHeader, Tabs } from '../components/ui';
+import { Info, Receipt, ShieldCheck, Truck, Weight } from 'lucide-react';
+import { Card, Field, Input, Kpi, PageHeader, Tabs } from '../components/ui';
 import { BuscarCliente } from '../components/BuscarCliente';
-import { useAlertas } from '../lib/alertas';
-import { sesionActual, tienePermiso } from '../lib/api';
+import { tienePermiso } from '../lib/api';
 import { hoyCo, useApi } from '../lib/servidor';
-import { useRouter, type RouteName } from '../lib/router';
-import { cx, diasEntre, fmtFecha, fmtNum } from '../lib/format';
+import { fmtNum } from '../lib/format';
 import { useChartColors } from './Informes';
 
-interface Indicadores {
+export interface Indicadores {
   desde: string; hasta: string;
   totales: { toneladas: number; facturado: number; comprado: number; servicios: number };
   serie: { mes: string; toneladas: number; facturado: number; comprado: number; servicios: number }[];
@@ -114,127 +112,6 @@ export function IndicadoresServidor() {
             <Card title="Toneladas por conductor"><Barras rows={d.porConductor.filter((x) => x.toneladas > 0).map((x) => ({ n: x.nombre, v: x.toneladas }))} unidad="t" /></Card>
           </div>
         </div>
-      )}
-    </>
-  );
-}
-
-// ---------------------------- INICIO ----------------------------
-interface Inicio {
-  hoy: string; mes: string; recorridosMes: number;
-  cadena: { solicitadas: number; programadas: number; recolectadas: number; pesadas: number; certificadas: number };
-  negocio: { toneladas: number; facturado: number; servicios: number; comprado: number } | null;
-  rutasHoy: { id: string; codigo: string; vehiculo: { placa: string; color: string } | null; conductor: string | null; etapa: { nombre: string; color: string; orden: number; esFinal: boolean; cancela: boolean } | null; etapas: number; paradas: number; atendidas: number; clientes: string[] }[];
-  agenda: { hoy: number; manana: number; semana: number };
-  obligaciones: { id: string; codigo: string | null; descripcion: string; proximaFecha: string; permiso: { acto: string } }[];
-}
-const saludo = () => { const h = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota', hour: 'numeric', hour12: false })); return h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'; };
-
-export function InicioServidor() {
-  const { go } = useRouter();
-  const al = useAlertas();
-  const { datos: d, error } = useApi<Inicio>('/informes/inicio');
-  const nombre = sesionActual()?.usuario.nombre.split(' ')[0] ?? '';
-  const mesNombre = d ? `${MESES[Number(d.mes.slice(5, 7)) - 1]}` : '';
-  const cadena: { n: number; label: string; route: RouteName; hint: string }[] = d ? [
-    { n: d.cadena.solicitadas, label: 'Solicitadas', route: 'solicitudes', hint: 'líneas formales del mes' },
-    { n: d.cadena.programadas, label: 'Programadas', route: 'programacion', hint: 'en una ruta o ya hechas' },
-    { n: d.cadena.recolectadas, label: 'Recolectadas', route: 'manifiestos', hint: 'en un manifiesto grabado' },
-    { n: d.cadena.pesadas, label: 'Pesadas en planta', route: 'recepcion', hint: 'conciliadas' },
-    { n: d.cadena.certificadas, label: 'Certificadas', route: 'certificados', hint: 'en un acta emitida' },
-  ] : [];
-  const max = Math.max(...cadena.map((x) => x.n), 1);
-  const caja = (t: ReactNode) => <Card><p className="text-muted">{t}</p></Card>;
-  return (
-    <>
-      <div className="mb-6 flex flex-col gap-1">
-        <p className="text-[13px] text-muted">{fmtFecha(hoyCo())}</p>
-        <h1 className="text-[26px] font-bold text-brand-strong">{saludo()}{nombre ? `, ${nombre}` : ''}</h1>
-      </div>
-      {error && caja(error)}
-      {d && (
-        <>
-          <Card className="mb-5">
-            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-[15px] font-semibold">Cadena de trazabilidad · {mesNombre}</h2>
-              <p className="text-[12px] text-muted">Cada servicio debe llegar hasta «Certificadas». Toque un eslabón para ver el detalle.</p>
-            </div>
-            <ol className="grid gap-2 sm:grid-cols-5">
-              {cadena.map((x, i) => (
-                <li key={x.label}>
-                  <button onClick={() => go(x.route)} className="group flex h-full w-full flex-col gap-2 rounded-xl border border-line p-3 text-left transition-colors hover:border-brand">
-                    <span className="flex items-center justify-between text-[12px] font-medium text-muted"><span>{i + 1}. {x.label}</span>{i < cadena.length - 1 && <ArrowRight size={14} className="hidden text-subtle sm:block" />}</span>
-                    <span className="num font-display text-[28px] font-semibold leading-none">{fmtNum(x.n)}</span>
-                    <span className="h-1.5 overflow-hidden rounded-full bg-surface-2"><span className="block h-full rounded-full bg-brand" style={{ width: `${(x.n / max) * 100}%` }} /></span>
-                    <span className="text-[11px] text-subtle">{x.hint}</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </Card>
-          <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-            {d.negocio ? <>
-              <Kpi label="Servicios del mes" value={fmtNum(d.negocio.servicios)} icon={<Truck size={16} />} hint="manifiestos con conciliación" />
-              <Kpi label="Facturado del mes" value={millones(d.negocio.facturado)} icon={<Receipt size={16} />} hint="cobro conciliado" />
-              <Kpi label="Gestionado" value={`${fmtNum(d.negocio.toneladas)} t`} icon={<Weight size={16} />} hint="en kg o toneladas" />
-            </> : null}
-            <Kpi label="Recorridos del mes" value={fmtNum(d.recorridosMes)} icon={<RouteIcon size={16} />} hint={`${d.agenda.hoy} hoy`} />
-          </div>
-          <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-            <div className="flex min-w-0 flex-col gap-5">
-              <Card title="Operación de hoy" pad={false} action={<Button size="sm" variant="ghost" onClick={() => go('seguimiento')}>Seguimiento <ChevronRight size={15} /></Button>}>
-                {!d.rutasHoy.length && <p className="px-4 py-6 text-center text-[13px] text-muted">No hay recorridos programados para hoy.</p>}
-                <ul className="divide-y divide-line">
-                  {d.rutasHoy.map((r) => (
-                    <li key={r.id} className="flex flex-col gap-2 px-4 py-3.5">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        {r.vehiculo ? <ColorBadge color={r.vehiculo.color}>{r.vehiculo.placa}</ColorBadge> : <Badge tone="bad">Sin vehículo</Badge>}
-                        <span className="text-[13px] font-medium">{r.conductor ?? 'Sin conductor'}</span>
-                        <span className="num text-[12px] text-muted">{r.codigo}</span>
-                        <span className="ml-auto">{r.etapa ? <ColorBadge color={r.etapa.color}>{r.etapa.nombre}</ColorBadge> : <Badge>Programada</Badge>}</span>
-                      </div>
-                      {r.clientes.length > 0 && <p className="truncate text-[12px] text-muted"><MapPin size={12} className="mr-1 inline" />{r.clientes.join(' · ')}</p>}
-                      <div className="flex items-center gap-2 text-[12px] text-muted">
-                        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2"><span className={cx('block h-full rounded-full', r.etapa?.cancela ? 'bg-bad' : 'bg-brand')} style={{ width: `${r.paradas ? (r.atendidas / r.paradas) * 100 : 0}%` }} /></span>
-                        <span className="num">{r.atendidas}/{r.paradas} paradas</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-              <Card title="Agenda de recorridos" action={<CalendarClock size={17} className="text-subtle" />}>
-                <div className="grid grid-cols-3 gap-3">
-                  {[['Hoy', d.agenda.hoy], ['Mañana', d.agenda.manana], ['Próximos 7 días', d.agenda.semana]].map(([l, n]) => (
-                    <button key={l} onClick={() => go('programacion')} className="rounded-xl bg-surface-2 p-3 text-left hover:bg-brand-soft/60"><p className="num font-display text-[24px] font-semibold">{n}</p><p className="text-[12px] text-muted">{l}</p></button>
-                  ))}
-                </div>
-              </Card>
-            </div>
-            <div className="flex min-w-0 flex-col gap-5">
-              <Card title="Requiere atención" pad={false} action={<Badge tone="bad">{al.filter((a) => a.tone === 'bad').length} urgentes</Badge>}>
-                {!al.length && <p className="px-4 py-6 text-center text-[13px] text-muted">Nada pendiente.</p>}
-                <ul className="divide-y divide-line">
-                  {al.slice(0, 6).map((a) => (
-                    <li key={a.id}><button onClick={() => go(a.route)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-surface-2">
-                      <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', a.tone === 'bad' ? 'bg-bad' : a.tone === 'warn' ? 'bg-warn' : 'bg-info')} />
-                      <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{a.titulo}</span><span className="block truncate text-[12px] text-muted">{a.detalle}</span></span>
-                    </button></li>
-                  ))}
-                </ul>
-              </Card>
-              <Card title={<span className="flex items-center gap-2"><ShieldCheck size={16} className="text-brand" />Próximas obligaciones</span>} action={<Button size="sm" variant="ghost" onClick={() => go('permisos')}>Ver todas</Button>}>
-                {!d.obligaciones.length && <p className="text-[13px] text-muted">No hay obligaciones con fecha pendientes.</p>}
-                <ul className="flex flex-col gap-3">
-                  {d.obligaciones.map((o) => { const n = diasEntre(d.hoy, o.proximaFecha.slice(0, 10)); return (
-                    <li key={o.id} className="flex items-start justify-between gap-3">
-                      <div className="min-w-0"><p className="text-[13px] font-semibold">{o.permiso.acto}</p><p className="truncate text-[12px] text-muted">{o.codigo ? `${o.codigo} · ` : ''}{o.descripcion}</p></div>
-                      <Badge tone={n < 0 || n <= 15 ? 'bad' : n <= 30 ? 'warn' : 'ok'}>{n < 0 ? `vencida` : `${n} días`}</Badge>
-                    </li>); })}
-                </ul>
-              </Card>
-            </div>
-          </div>
-        </>
       )}
     </>
   );

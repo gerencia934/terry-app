@@ -610,8 +610,8 @@ export class ComercialService {
       select: { email: true }, take: 20 });
     const web = this.cfg.get('WEB_URL', { infer: true }).replace(/\/$/, '');
     const texto = [`Llegó una solicitud desde el sitio web: ${empresa}.`, '', `Contacto: ${b.nombre}${b.cargo ? `, ${b.cargo}` : ''}`, `Correo: ${b.correo ?? '—'} · Teléfono: ${b.telefono ?? '—'}`,
-      b.servicio ? `Servicio de interés: ${b.servicio}` : '', b.mensaje ? `Mensaje: ${b.mensaje}` : '', '', `Respóndala en TERRY-GO › Comercial: ${web}`].filter((x) => x !== '').join('\n');
-    for (const u of usuarios) if (u.email) await this.correo.enviar(u.email, `TERRY-GO · Solicitud del sitio web: ${empresa}`.slice(0, 150), texto).catch(() => undefined);
+      b.servicio ? `Servicio de interés: ${b.servicio}` : '', b.mensaje ? `Mensaje: ${b.mensaje}` : '', '', `Respóndala en Terry-App › Comercial: ${web}`].filter((x) => x !== '').join('\n');
+    for (const u of usuarios) if (u.email) await this.correo.enviar(u.email, `Terry-App · Solicitud del sitio web: ${empresa}`.slice(0, 150), texto).catch(() => undefined);
   }
 
   // ---------------- Importación de Bigin ----------------

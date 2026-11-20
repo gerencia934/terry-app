@@ -13,6 +13,7 @@ import { useRouter, type RouteName } from '../../lib/router';
 import { cx } from '../../lib/format';
 import { PortalCertificados, PortalDeclaraciones, PortalInformes, PortalInicio, PortalManifiestos, PortalSolicitudes } from './Consulta';
 import { PortalUsuarios } from './UsuariosPortal';
+import { EnlaceAccesoHost } from '../../components/EnlaceAcceso';
 
 export interface SedePortal { id: string; codigo: string | null; nombre: string; municipio?: { nombre: string } | null }
 export interface YoPortal {
@@ -164,6 +165,7 @@ function Marco({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
+      <EnlaceAccesoHost />
     </div>
   );
 }

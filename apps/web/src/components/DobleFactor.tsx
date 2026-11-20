@@ -13,7 +13,7 @@ export interface EstadoDobleFactor { dobleFactor: { activo: boolean; desde: stri
 /** Códigos de respaldo: se muestran una sola vez; se copian o se descargan para guardarlos fuera del celular. */
 function CodigosRespaldo({ codigos }: { codigos: string[] }) {
   const toast = useToast();
-  const texto = `Códigos de respaldo de TERRY-GO (${sesionActual()?.usuario.email ?? ''}). Cada uno sirve una sola vez.\n\n${codigos.join('\n')}\n`;
+  const texto = `Códigos de respaldo de Terry-App (${sesionActual()?.usuario.email ?? ''}). Cada uno sirve una sola vez.\n\n${codigos.join('\n')}\n`;
   const descargar = () => {
     const url = URL.createObjectURL(new Blob([texto], { type: 'text/plain;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = 'codigos-respaldo-terry-go.txt'; document.body.appendChild(a); a.click();

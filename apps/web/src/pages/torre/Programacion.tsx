@@ -189,7 +189,7 @@ function ProgramarSheet({ abierta, lineas, cat, onClose, onListo }: { abierta: b
         {modo === 'nueva' ? (
           <>
             <CamposRuta f={f} set={setF} cat={cat} id="pr" />
-            <Field label="Código de la ruta" id="pr-cod" hint="Déjelo vacío y TERRY-GO la numera sola (R-AAAAMMDD-01)"><Input id="pr-cod" value={codigo} onChange={(e) => setCodigo(e.target.value.toUpperCase())} maxLength={20} placeholder="Automático" /></Field>
+            <Field label="Código de la ruta" id="pr-cod" hint="Déjelo vacío y Terry-App la numera sola (R-AAAAMMDD-01)"><Input id="pr-cod" value={codigo} onChange={(e) => setCodigo(e.target.value.toUpperCase())} maxLength={20} placeholder="Automático" /></Field>
             <p className="text-[12px] text-subtle">Puede programar sin vehículo ni conductor y asignarlos después: la ruta no sale hasta tenerlos y tener la inspección del vehículo aprobada.</p>
           </>
         ) : (

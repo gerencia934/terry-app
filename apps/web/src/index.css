@@ -16,13 +16,16 @@
   --fg: 19 33 25;
   --muted: 78 94 85;
   --subtle: 122 137 128;
-  --brand: 30 120 56;
-  --brand-strong: 12 72 30;
-  --brand-soft: 226 241 229;
-  --brand-ink: 14 88 38;
-  --brand-lime: 93 184 71;
+  /* Manual de identidad: verde #1F5E3B, lima #7BC043, azul petróleo #1F4E5F y verde claro #D2FFAE */
+  --brand: 31 94 59;
+  --brand-strong: 22 70 43;
+  --brand-soft: 227 240 231;
+  --brand-ink: 31 94 59;
+  --brand-lime: 123 192 67;
+  --brand-teal: 31 78 95;
+  --brand-mint: 210 255 174;
   --on-brand: 255 255 255;
-  --nav: 17 88 40;
+  --nav: 31 94 59;
   --accent: 232 93 20;
   --ok: 21 128 61;
   --warn: 176 106 0;
@@ -35,6 +38,13 @@
   --chart-4: 237 161 0;
   --chart-5: 232 123 164;
   --chart-6: 0 131 0;
+  /* Tablero (paleta de la marca validada contra daltonismo, modo claro): verde, azul, ámbar, rosa, lima y «otros» en gris */
+  --serie-1: 47 143 78;
+  --serie-2: 42 120 214;
+  --serie-3: 237 161 0;
+  --serie-4: 232 123 164;
+  --serie-5: 123 192 67;
+  --serie-otros: 167 176 171;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -46,11 +56,13 @@
     --fg: 229 238 232;
     --muted: 163 178 169;
     --subtle: 118 133 124;
-    --brand: 78 176 100;
-    --brand-strong: 168 224 176;
+    --brand: 123 192 67;
+    --brand-strong: 196 236 160;
     --brand-soft: 27 52 35;
-    --brand-ink: 152 216 162;
-    --brand-lime: 122 204 92;
+    --brand-ink: 168 222 128;
+    --brand-lime: 140 205 85;
+    --brand-teal: 120 178 196;
+    --brand-mint: 210 255 174;
     --on-brand: 8 28 14;
     --nav: 15 46 27;
     --accent: 240 116 48;
@@ -65,6 +77,18 @@
     --chart-4: 201 133 0;
     --chart-5: 213 81 129;
     --chart-6: 12 163 12;
+  --serie-1: 36 163 90;
+  --serie-2: 57 135 229;
+  --serie-3: 201 133 0;
+  --serie-4: 213 81 129;
+  --serie-5: 104 168 52;
+  --serie-otros: 107 118 112;
+    --serie-1: 36 163 90;
+    --serie-2: 57 135 229;
+    --serie-3: 201 133 0;
+    --serie-4: 213 81 129;
+    --serie-5: 104 168 52;
+    --serie-otros: 107 118 112;
     color-scheme: dark;
   }
 }
@@ -76,11 +100,13 @@
   --fg: 229 238 232;
   --muted: 163 178 169;
   --subtle: 118 133 124;
-  --brand: 78 176 100;
-  --brand-strong: 168 224 176;
+  --brand: 123 192 67;
+  --brand-strong: 196 236 160;
   --brand-soft: 27 52 35;
-  --brand-ink: 152 216 162;
-  --brand-lime: 122 204 92;
+  --brand-ink: 168 222 128;
+  --brand-lime: 140 205 85;
+  --brand-teal: 120 178 196;
+  --brand-mint: 210 255 174;
   --on-brand: 8 28 14;
   --nav: 15 46 27;
   --accent: 240 116 48;

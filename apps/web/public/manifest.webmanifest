@@ -1,16 +1,32 @@
 {
-  "name": "TERRY-GO · Terra Viva",
-  "short_name": "TERRY-GO",
-  "description": "Trazabilidad de residuos de Terra Viva: ruta del día, inspección, manifiestos y certificados.",
+  "name": "Terry-App · Gestión de Residuos",
+  "short_name": "Terry Residuos",
+  "description": "Gestión de Residuos de Terra Viva: solicitudes, ruta del día, manifiestos, planta y certificados.",
   "lang": "es-CO",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F6F8F6",
-  "theme_color": "#1f7a3a",
+  "background_color": "#F5F8F5",
+  "theme_color": "#1F5E3B",
   "icons": [
-    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    {
+      "src": "iconos/terry-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "iconos/terry-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "iconos/terry-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

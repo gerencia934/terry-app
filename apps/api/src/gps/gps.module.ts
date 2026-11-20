@@ -407,7 +407,7 @@ export class GpsService implements OnApplicationBootstrap, OnModuleDestroy {
     ]);
     const limite = Date.now() - Math.max(10 * 60_000, 5 * this.intervaloMs);
     if (est && (est.fallosSeguidos >= 3 || (est.ultimoOk ? est.ultimoOk.getTime() < limite : est.fallosSeguidos > 0))) {
-      out.push({ tipo: 'gps', nivel: 'alta', titulo: est.ultimoOk ? `Wialon no responde desde las ${horaCo(est.ultimoOk)}` : 'TERRY-GO no ha podido conectarse con Wialon',
+      out.push({ tipo: 'gps', nivel: 'alta', titulo: est.ultimoOk ? `Wialon no responde desde las ${horaCo(est.ultimoOk)}` : 'Terry-App no ha podido conectarse con Wialon',
         detalle: `${est.error ?? 'Sin respuesta.'} Las posiciones no se actualizan; la operación sigue: el conductor marca las etapas en la app` });
     }
     for (const e of eventos) {

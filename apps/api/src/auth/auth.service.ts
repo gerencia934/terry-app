@@ -125,7 +125,7 @@ export class AuthService {
     if (u.totpSecreto) throw new BadRequestException({ mensaje: 'Ya tiene activa la verificación en dos pasos.' });
     const secreto = secretoNuevo();
     await this.db.usuario.update({ where: { id: a.id }, data: { totpPendiente: cifrar(secreto, this.claveTotp) } });
-    const uri = uriOtp('TERRY-GO', u.email, secreto);
+    const uri = uriOtp('Terry-App Residuos', u.email, secreto);
     return { secreto: secreto.match(/.{1,4}/g)!.join(' '), uri, qr: await QRCode.toDataURL(uri, { margin: 1, width: 240, errorCorrectionLevel: 'M' }) };
   }
 
@@ -143,7 +143,7 @@ export class AuthService {
       this.db.sesion.updateMany({ where: { usuarioId: a.id, revocadaEn: null }, data: { revocadaEn: new Date() } }),
     ]);
     await this.audit.registrar(a, 'usuario', a.id, 'ACTIVAR_2FA');
-    this.correo.enviar(u.email, 'Verificación en dos pasos activada · TERRY-GO',
+    this.correo.enviar(u.email, 'Verificación en dos pasos activada · Terry-App',
       `Hola ${u.nombre}:\n\nSe activó la verificación en dos pasos en su cuenta. Desde ahora, para entrar necesitará el código de su app de autenticación (o uno de sus códigos de respaldo).\n\nSi no fue usted, avise de inmediato al administrador.`).catch(() => undefined);
     return { codigosRespaldo: codigos, sesion: await this.emitir(a.id, meta) };
   }
@@ -171,7 +171,7 @@ export class AuthService {
       this.db.codigoRespaldo.deleteMany({ where: { usuarioId: a.id } }),
     ]);
     await this.audit.registrar(a, 'usuario', a.id, 'DESACTIVAR_2FA');
-    this.correo.enviar(u.email, 'Verificación en dos pasos desactivada · TERRY-GO',
+    this.correo.enviar(u.email, 'Verificación en dos pasos desactivada · Terry-App',
       `Hola ${u.nombre}:\n\nSe desactivó la verificación en dos pasos de su cuenta. Si no fue usted, cambie su contraseña y avise al administrador.`).catch(() => undefined);
   }
 
@@ -190,7 +190,7 @@ export class AuthService {
       this.db.sesion.updateMany({ where: { usuarioId: u.id, revocadaEn: null }, data: { revocadaEn: new Date() } }),
     ]);
     await this.audit.registrar(a, 'usuario', u.id, 'RESTABLECER_2FA');
-    this.correo.enviar(u.email, 'Verificación en dos pasos restablecida · TERRY-GO',
+    this.correo.enviar(u.email, 'Verificación en dos pasos restablecida · Terry-App',
       `Hola ${u.nombre}:\n\nUn administrador restableció la verificación en dos pasos de su cuenta y cerró sus sesiones. Al entrar, configúrela de nuevo con su app de autenticación.\n\nSi usted no lo pidió, avise de inmediato.`).catch(() => undefined);
     return { ok: true };
   }
@@ -204,7 +204,7 @@ export class AuthService {
     ]);
     if (!previas || conocida) return;
     const hora = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
-    this.correo.enviar(u.email, 'Nuevo ingreso a su cuenta · TERRY-GO',
+    this.correo.enviar(u.email, 'Nuevo ingreso a su cuenta · Terry-App',
       `Hola ${u.nombre}:\n\nSe ingresó a su cuenta el ${hora} desde la IP ${meta.ip ?? 'desconocida'} (${meta.ua?.slice(0, 120) ?? 'navegador desconocido'}).\n\nSi no fue usted, cambie su contraseña y cierre la sesión en todos los dispositivos.`)
       .catch(() => undefined); // el aviso no debe impedir el ingreso
   }
@@ -285,18 +285,25 @@ export class AuthService {
     return { ...datos, dobleFactor: { activo: !!u.totpActivoDesde, desde: u.totpActivoDesde, obligatorio: this.obligatorio(u), codigosRestantes: u._count.codigosRespaldo } };
   }
 
-  /** Invitación a un usuario nuevo (o reenvío): enlace para crear su contraseña, válido 72 horas y una sola vez. */
-  async invitar(usuarioId: string) {
+  /**
+   * Invitación a un usuario nuevo (o reenvío): enlace para crear su contraseña, válido 72 horas y una sola vez. Sin correo
+   * configurado, el enlace vuelve a quien lo pidió (un administrador) para que lo entregue por otro medio (WhatsApp).
+   */
+  async invitar(usuarioId: string): Promise<{ enviada: boolean; enlace: string | null }> {
     const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId }, include: { clientePortal: { select: { razonSocial: true } } } });
     const token = randomBytes(32).toString('base64url');
     await this.db.passwordReset.create({ data: { usuarioId: u.id, tokenHash: sha256(token), expiraEn: new Date(Date.now() + 72 * 3_600_000) } });
     const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
     const que = u.clientePortal
       ? `Le dimos acceso al portal de clientes de Terra Viva, a nombre de ${u.clientePortal.razonSocial}. Allí consulta y descarga sus declaraciones, manifiestos, certificados e informes.`
-      : 'Terra Viva le creó un usuario en TERRY-GO.';
-    await this.correo.enviar(u.email, u.clientePortal ? 'Portal de clientes de Terra Viva · cree su contraseña' : 'Bienvenido a TERRY-GO · cree su contraseña',
+      : 'Terra Viva le creó un usuario en Terry-App · Gestión de Residuos.';
+    const enviada = await this.correo.enviar(u.email, u.clientePortal ? 'Portal de clientes de Terra Viva · cree su contraseña' : 'Bienvenido a Terry-App · cree su contraseña',
       `Hola ${u.nombre}:\n\n${que} Para crear su contraseña abra este enlace (vence en 72 horas y sirve una sola vez):\n${url}\n\nSi no esperaba este correo, ignórelo.`);
+    return { enviada, enlace: enviada ? null : url };
   }
+
+  /** Lo que la pantalla de ingreso necesita saber antes de entrar (sin datos de nadie). */
+  opciones() { return { correo: this.correo.configurado }; }
 
   /** Siempre responde igual para no revelar si el correo existe. */
   async solicitarRecuperacion(email: string) {
@@ -305,7 +312,7 @@ export class AuthService {
     const token = randomBytes(32).toString('base64url');
     await this.db.passwordReset.create({ data: { usuarioId: u.id, tokenHash: sha256(token), expiraEn: new Date(Date.now() + 30 * 60_000) } });
     const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
-    await this.correo.enviar(u.email, 'Restablecer su contraseña · TERRY-GO',
+    await this.correo.enviar(u.email, 'Restablecer su contraseña · Terry-App',
       `Hola ${u.nombre}:\n\nPara crear una nueva contraseña abra este enlace (vence en 30 minutos y sirve una sola vez):\n${url}\n\nSi usted no lo pidió, ignore este mensaje.`);
   }
 

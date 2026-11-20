@@ -35,7 +35,7 @@ const terminar = (doc: PDFKit.PDFDocument) => {
 /** Manifiesto completo, tamaño carta. */
 export async function pdfManifiesto(d: DatosManifiesto): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'LETTER', margins: { top: 44, bottom: 56, left: 44, right: 44 }, bufferPages: true,
-    info: { Title: `Manifiesto ${d.numero}`, Author: d.emisor.razonSocial, Creator: 'TERRY-GO' } });
+    info: { Title: `Manifiesto ${d.numero}`, Author: d.emisor.razonSocial, Creator: 'Terry-App · Gestión de Residuos' } });
   const listo = terminar(doc);
   const x0 = doc.page.margins.left, ancho = doc.page.width - x0 - doc.page.margins.right;
 
@@ -115,7 +115,7 @@ export async function pdfManifiesto(d: DatosManifiesto): Promise<Buffer> {
   for (let i = 0; i < rango.count; i++) {
     doc.switchToPage(rango.start + i);
     const margen = doc.page.margins.bottom; doc.page.margins.bottom = 0;
-    doc.font('Helvetica').fontSize(7).fillColor(GRIS).text(`Manifiesto ${d.numero} · generado en TERRY-GO · Página ${i + 1} de ${rango.count}`, x0, doc.page.height - 38, { width: ancho, align: 'center', lineBreak: false });
+    doc.font('Helvetica').fontSize(7).fillColor(GRIS).text(`Manifiesto ${d.numero} · generado en Terry-App · Página ${i + 1} de ${rango.count}`, x0, doc.page.height - 38, { width: ancho, align: 'center', lineBreak: false });
     doc.page.margins.bottom = margen;
   }
   doc.end();
@@ -126,7 +126,7 @@ export async function pdfManifiesto(d: DatosManifiesto): Promise<Buffer> {
 export async function pdfRecibo(d: DatosManifiesto): Promise<Buffer> {
   const ancho = 204, x0 = 11; // 80 mm ≈ 227 pt de papel, con margen
   const alto = 220 + d.lineas.length * 30 + d.firmas.length * 60 + (d.observaciones ? 36 : 0) + (d.emisor.notaBascula ? 20 : 0);
-  const doc = new PDFDocument({ size: [227, alto], margins: { top: 10, bottom: 10, left: x0, right: 12 }, info: { Title: `Recibo ${d.numero}`, Creator: 'TERRY-GO' } });
+  const doc = new PDFDocument({ size: [227, alto], margins: { top: 10, bottom: 10, left: x0, right: 12 }, info: { Title: `Recibo ${d.numero}`, Creator: 'Terry-App · Gestión de Residuos' } });
   const listo = terminar(doc);
   const centro = (t: string, tam = 8, negrita = false) => doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(tam).fillColor('black').text(t, x0, doc.y, { width: ancho, align: 'center' });
   const linea = () => { doc.moveDown(0.3); doc.moveTo(x0, doc.y).lineTo(x0 + ancho, doc.y).dash(2, { space: 2 }).lineWidth(0.5).strokeColor('black').stroke().undash(); doc.moveDown(0.4); };
@@ -161,7 +161,7 @@ export async function pdfRecibo(d: DatosManifiesto): Promise<Buffer> {
     centro(`${f.titulo}: ${f.nombre ?? '—'}${f.documento ? ` · CC ${f.documento}` : ''}`, 7);
     doc.moveDown(0.4);
   }
-  centro('Documento generado en TERRY-GO. El manifiesto completo lleva el mismo número.', 6);
+  centro('Documento generado en Terry-App. El manifiesto completo lleva el mismo número.', 6);
   doc.end();
   return listo;
 }

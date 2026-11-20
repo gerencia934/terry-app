@@ -171,6 +171,20 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - ✅ alertas: solicitudes web por responder, tareas vencidas y cotizaciones sin respuesta;
   - falta: exportar de Bigin los CSV reales e importarlos, y poner el formulario en el sitio web (ver docs/DESPLIEGUE.md).
   111 pruebas de reglas y 474 e2e OK.
+- Terry-App · Gestión de Residuos (20-11-2026), pedido de la gerencia:
+  - marca del ecosistema: «Terry-App» con el módulo debajo, el logo de Terra Viva y Terry. Ingreso en pantalla dividida
+    igual al de Terry-App Mantenimiento, con el carrusel en `public/carrusel/carrusel.json` (se cambia sin código). Paleta
+    y letras del manual de identidad: #1F5E3B, #7BC043, #1F4E5F, #D2FFAE; Montserrat y Open Sans;
+  - tablero de inicio al estilo de Wialon: paneles con números grandes, anillos, toneladas por mes y accesos rápidos
+    (ICONTEC, PESV, MinAmbiente · IDEAM, Seguros) que se cambian en Ajustes;
+  - Súper Informe: el único informe de auditoría. Un Excel para licencias 0632 y 0235, PDC, ICONTEC, MinAmbiente / IDEAM
+    y PESV. Su hoja «Informe general V2» repite el consolidado de Residuos más reciente (informe de AVSA, enero a 18 de
+    noviembre de 2026); el PDC sigue el formato PDC-RE-F-01;
+  - avisos push en el celular y el computador (solicitudes nuevas, manifiestos por firmar, inspecciones de la flota y
+    alertas del día), con permiso al entrar;
+  - correo en pausa: se conecta con SMTP_HOST, SMTP_USER y SMTP_PASS (Gmail con contraseña de aplicación) sin tocar
+    código; mientras tanto, las invitaciones vuelven al administrador como enlace para WhatsApp.
+  111 pruebas de reglas y 481 e2e OK.
 - Publicación (20-11-2026, decisión de la gerencia): todo en la cuenta de Cloudflare de Terra Viva (plan Workers Paid),
   dominio `terravivasas.net` con el DNS en Hostinger. TERRY-GO queda en `residuos.terravivasas.net`:
   - las pantallas en Pages (`terra-residuos`); `/api` pasa al Worker `terra-residuos-api`;

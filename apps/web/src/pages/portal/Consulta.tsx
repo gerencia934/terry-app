@@ -418,7 +418,7 @@ interface Informe {
 }
 async function excelInforme(inf: Informe, cliente: { razonSocial: string; nit: string; dv: string | null }) {
   const ExcelJS = ((await import('exceljs')) as unknown as { default: typeof import('exceljs') }).default;
-  const wb = new ExcelJS.Workbook(); wb.creator = 'TERRY-GO · Terra Viva';
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Terry-App · Terra Viva';
   const ws = wb.addWorksheet(`Informe ${inf.anio}`);
   ws.addRow([`Residuos gestionados en ${inf.anio}`]).font = { bold: true, size: 14 };
   ws.addRow([`${cliente.razonSocial} · NIT ${nitConDv(cliente)}`]);

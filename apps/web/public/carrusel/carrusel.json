@@ -1,0 +1,26 @@
+{
+  "_ayuda": "Banners del inicio de sesión (el mismo formato de Terry-App Mantenimiento). Para publicar uno nuevo: suba la imagen a esta carpeta (WebP o JPG, máximo 200 KB, formato vertical 4:5 u horizontal 16:9) y agregue un bloque aquí. No hay que tocar el código. Campos: etiqueta, titulo, texto, imagen (opcional), fondo (color de la imagen en sus bordes), enlace (opcional), desde / hasta (opcional, AAAA-MM-DD: el banner solo se muestra en esas fechas).",
+  "segundos": 8,
+  "banners": [
+    {
+      "etiqueta": "Bienvenido",
+      "titulo": "Terry-App, toda la operación en un solo lugar",
+      "texto": "Mantenimiento, residuos y gestión comercial de Terra Viva con trazabilidad de principio a fin.",
+      "imagen": "terry-app.webp",
+      "fondo": "#1F5E3B"
+    },
+    {
+      "etiqueta": "Gestión de Residuos",
+      "titulo": "Cada residuo, de la sede del cliente al certificado",
+      "texto": "Solicitudes, rutas, manifiestos, recepción en planta y certificados en una sola cadena, lista para auditoría.",
+      "imagen": "terry-equipo.webp",
+      "fondo": "#216840"
+    },
+    {
+      "etiqueta": "Terra Viva",
+      "titulo": "Soluciones ambientales inteligentes",
+      "texto": "Sostenibilidad, transparencia, innovación y responsabilidad ambiental en cada servicio.",
+      "fondo": "#1F4E5F"
+    }
+  ]
+}

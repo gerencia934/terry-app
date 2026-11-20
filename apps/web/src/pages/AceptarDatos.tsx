@@ -22,7 +22,7 @@ export default function AceptarDatos() {
         <div className="flex justify-center"><Logo className="h-12" /></div>
         <section className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm">
           <h1 className="flex items-center gap-2 text-xl font-semibold"><ShieldCheck className="text-brand" size={24} /> Tratamiento de sus datos personales</h1>
-          <p className="text-[15px]">Hola{s ? `, ${s.usuario.nombre}` : ''}. Para usar TERRY-GO, {s?.usuario.empresa.razonSocial ?? 'la empresa'} necesita su autorización para tratar sus datos personales, conforme a la Ley 1581 de 2012.</p>
+          <p className="text-[15px]">Hola{s ? `, ${s.usuario.nombre}` : ''}. Para usar Terry-App, {s?.usuario.empresa.razonSocial ?? 'la empresa'} necesita su autorización para tratar sus datos personales, conforme a la Ley 1581 de 2012.</p>
           <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[14px] text-muted">
             <li><b className="text-fg">Qué datos:</b> nombre, documento, correo, teléfono, firmas y, en la app del conductor, la ubicación solo durante la jornada.</li>
             <li><b className="text-fg">Para qué:</b> operar la gestión de residuos, cumplir obligaciones legales y ambientales y dejar constancia de lo que se hace en el sistema.</li>

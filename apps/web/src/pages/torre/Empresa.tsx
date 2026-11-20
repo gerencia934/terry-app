@@ -7,6 +7,8 @@ import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha } from '../../lib/format';
 import { msg, useApi } from '../../lib/servidor';
 import { enlaceMapa, hace, type EstadoGps } from '../../components/gps';
+import { AccesosCard, CorreoCard } from './AjustesConexiones';
+import type { AccesoRapido } from '@terraviva/shared';
 
 interface Certificacion { norma: string; numero: string; entidad?: string; vence?: string }
 interface Bascula { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string }
@@ -25,6 +27,8 @@ interface Config {
   /** Correo diario de alertas por rol: si va (sí, si falta) y a qué hora (7:00, si falta). */
   resumenDiario?: { activo?: boolean; hora?: number };
   /** GPS (Wialon): ubicación de la planta y reglas de las geocercas y alertas. */
+  /** Accesos rápidos del tablero de inicio (nombre y dirección https). */
+  accesosRapidos?: AccesoRapido[];
   gps?: { plantaLatitud?: number | null; plantaLongitud?: number | null; radioPlantaM?: number; radioSedeM?: number; minutosParada?: number; kmDesvio?: number };
 }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL' | 'COTIZACION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
@@ -230,6 +234,8 @@ export function EmpresaServidor() {
         <ResumenDiarioCard c={c} setC={setC} edita={edita} guardar={guardarConfig} />
 
         <GpsCard c={c} setC={setC} edita={edita} />
+        <AccesosCard guardados={c.accesosRapidos} edita={edita} alGuardar={(accesosRapidos) => setC((s) => ({ ...s, accesosRapidos }))} />
+        {edita && <CorreoCard />}
 
         <Card title="Numeración de documentos">
           <p className="mb-3 text-[13px] text-muted">Para continuar la numeración del sistema anterior, escriba en «Último número» el último que se usó allá (por ejemplo, 1830 para seguir en TV1831). El último número solo puede subir.</p>

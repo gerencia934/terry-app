@@ -41,13 +41,13 @@ export class Monitoreo implements OnModuleInit {
     const repeticiones = await this.db.errorServidor.count({ where: { firma, fecha: { gte: new Date(Date.now() - 24 * UNA_HORA) } } });
     const cuando = x.fecha.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
     const texto = [
-      'TERRY-GO tuvo un error inesperado y la persona vio «Error interno».', '',
+      'Terry-App · Gestión de Residuos tuvo un error inesperado y la persona vio «Error interno».', '',
       `Cuándo: ${cuando}`, `Dónde: ${e.metodo} ${ruta}`, `Error: ${mensaje}`,
       `Veces en las últimas 24 horas: ${repeticiones}`, '',
       'El detalle técnico quedó en el registro del servidor. Si se repite, avise a quien da soporte a la plataforma.',
       'Este aviso se envía a lo sumo una vez por hora por cada error.',
     ].join('\n');
-    for (const p of para) await this.correo.enviar(p, `TERRY-GO · Error del servidor: ${e.metodo} ${ruta}`.slice(0, 150), texto).catch(() => undefined);
+    for (const p of para) await this.correo.enviar(p, `Terry-App · Error del servidor: ${e.metodo} ${ruta}`.slice(0, 150), texto).catch(() => undefined);
   }
 
   /** ALERTAS_CORREO (separados por coma) o, si no hay, los administradores activos de la empresa (o de todas). */

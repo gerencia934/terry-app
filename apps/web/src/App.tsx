@@ -32,7 +32,8 @@ import { TarifasServidor } from './pages/TarifasServidor';
 import { PermisosServidor } from './pages/PermisosServidor';
 import { FlotaServidor, InspeccionesServidor } from './pages/FlotaServidor';
 import { UsuariosServidor } from './pages/UsuariosServidor';
-import { IndicadoresServidor, InicioServidor } from './pages/IndicadoresServidor';
+import { IndicadoresServidor } from './pages/IndicadoresServidor';
+import { TableroInicio } from './pages/TableroInicio';
 import { CatalogosServidor, InventarioServidor } from './pages/CatalogosServidor';
 import Verificar from './pages/Verificar';
 import { PortalApp } from './pages/portal/PortalApp';
@@ -73,7 +74,7 @@ function Screen() {
   }
   const page = (() => {
     switch (route) {
-      case 'inicio': return MODO_REAL ? <InicioServidor /> : <Inicio />;
+      case 'inicio': return MODO_REAL ? <TableroInicio /> : <Inicio />;
       case 'clientes': return MODO_REAL ? <ClientesServidor /> : <Clientes />;
       case 'declaraciones': return MODO_REAL ? <DeclaracionesServidor /> : <Declaraciones />;
       case 'tarifas': return MODO_REAL ? <TarifasServidor /> : <Precios />;

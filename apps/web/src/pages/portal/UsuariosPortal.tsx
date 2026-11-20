@@ -8,6 +8,7 @@ import { api, ErrorApi } from '../../lib/api';
 import { fechaHoraCo, useApi } from '../../lib/servidor';
 import { cx } from '../../lib/format';
 import { PERFIL, usePortal, type SedePortal } from './PortalApp';
+import { entregarInvitacion, type Invitacion } from '../../components/EnlaceAcceso';
 
 export interface UsuarioPortal {
   id: string; nombre: string; email: string; documento: string; telefono: string | null; activo: boolean; perfilPortal: 'ADMIN' | 'CONSULTA';
@@ -92,15 +93,18 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
         await api(`${base}/${u.id}`, { metodo: 'PATCH', cuerpo: { ...cuerpo, ...(yo ? {} : { activo: v.activo }) } });
         toast(u.activo && !v.activo ? `${u.nombre} quedó inactivo: ya no puede ingresar.` : 'Usuario actualizado.');
       } else {
-        await api(base, { metodo: 'POST', cuerpo: { ...cuerpo, email: v.email } });
-        toast(`Invitación enviada a ${v.email.trim().toLowerCase()}: con el enlace crea su contraseña (vence en 72 horas).`);
+        const r = await api<{ invitacion?: Invitacion }>(base, { metodo: 'POST', cuerpo: { ...cuerpo, email: v.email } });
+        if (!entregarInvitacion(r.invitacion, v.nombre, v.email.trim().toLowerCase())) toast(`Invitación enviada a ${v.email.trim().toLowerCase()}: con el enlace crea su contraseña (vence en 72 horas).`);
       }
       listo();
     } catch (x) { toast(mensajeError(x, 'No se pudo guardar.'), 'warn'); }
     setEnviando(false);
   };
   const reenviar = async () => {
-    try { await api(`${base}/${u!.id}/invitacion`, { metodo: 'POST' }); toast(`Invitación enviada de nuevo a ${u!.email}.`); }
+    try {
+      const r = await api<Invitacion>(`${base}/${u!.id}/invitacion`, { metodo: 'POST' });
+      if (!entregarInvitacion(r, u!.nombre, u!.email)) toast(`Invitación enviada de nuevo a ${u!.email}.`);
+    }
     catch (x) { toast(mensajeError(x, 'No se pudo enviar.'), 'warn'); }
   };
   // Celular perdido y sin códigos de respaldo: la restablece otro administrador (nadie la suya) y se cierran sus sesiones

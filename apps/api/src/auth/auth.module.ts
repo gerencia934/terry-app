@@ -52,6 +52,9 @@ class AuthController {
   @PermitePortal() @Post('2fa/codigos') @HttpCode(200) codigos2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>) { return this.auth.codigos2fa(a, b.codigo); }
   @PermitePortal() @Post('2fa/desactivar') @HttpCode(204) desactivar2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>) { return this.auth.desactivar2fa(a, b.codigo); }
 
+  /** Antes de entrar: si hay correo configurado (si no, el enlace de acceso lo entrega el administrador). */
+  @Publico() @Get('opciones') opciones() { return this.auth.opciones(); }
+
   @Publico() @LimiteCredenciales(5) @Post('recuperar') @HttpCode(202)
   async recuperar(@Body(new Zod(Recuperar)) b: z.infer<typeof Recuperar>) {
     await this.auth.solicitarRecuperacion(b.email);

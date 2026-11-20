@@ -1,38 +1,32 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Eye, EyeOff, ShieldCheck, ArrowLeft, MailCheck, KeyRound, Server, FlaskConical } from 'lucide-react';
 import { Button, Field, Input } from '../components/ui';
 import { Logo } from '../components/AppShell';
 import { useRouter } from '../lib/router';
-import { EMPRESA } from '../data/mock';
-import { MODO_REAL, api, ingresar, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
-import terry from '../assets/terry.webp';
+import { API_URL, MODO_REAL, api, ingresar, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
+import { Carrusel } from '../components/Carrusel';
+import { MarcaTerryApp } from '../components/Marca';
 
+/** Ingreso en pantalla dividida (diseño del ecosistema Terry-App): a la izquierda el logo de Terra Viva y el formulario;
+ *  a la derecha el carrusel de información corporativa (public/carrusel/carrusel.json). */
 function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-full lg:grid-cols-[1.05fr_1fr]">
-      <aside className="relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-between lg:p-12" style={{ background: 'linear-gradient(160deg, #0C481E 0%, #17652E 55%, #3E9A3F 100%)' }}>
-        <div className="relative z-10 max-w-md text-white">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#B9E59B]">TERRY-GO · Trazabilidad de residuos de Terra Viva</p>
-          <h1 className="mt-3 font-display text-[38px] font-bold leading-[1.1]">Cada residuo, de la sede del cliente al certificado.</h1>
-          <p className="mt-4 text-[15px] leading-relaxed text-white/80">Declaraciones, recorridos, inspecciones, manifiestos, pesaje en planta y permisos ambientales, conectados en una sola cadena.</p>
+    <div className="grid min-h-full bg-surface lg:grid-cols-[minmax(440px,0.85fr)_1fr]">
+      <main className="safe-x flex min-h-full flex-col py-8 lg:px-12">
+        <Logo className="h-11 self-start" />
+        <div className="flex flex-1 items-center justify-center py-10">
+          <div className="w-full max-w-[400px]">{children}</div>
         </div>
-        <div className="relative z-10 flex max-w-[52%] flex-wrap gap-2">
-          {EMPRESA.certificaciones.map((c) => <span key={c} className="rounded-full border border-white/25 px-3 py-1 text-[12px] text-white/90">{c}</span>)}
-        </div>
-        <div className="absolute -bottom-6 right-6 z-0 w-[38%] max-w-[280px] overflow-hidden rounded-t-[40px] bg-[#F3F4F3] shadow-2xl">
-          <img src={terry} alt="Terry, mascota de Terra Viva" className="w-full" />
-        </div>
-      </aside>
-      <main className="safe-x flex items-center justify-center py-10">
-        <div className="w-full max-w-[400px]">{children}</div>
+        <p className="text-[12px] text-subtle">© {new Date().getFullYear()} Terra Viva S.A.S. E.S.P. · Soluciones ambientales inteligentes</p>
       </main>
+      <Carrusel className="hidden lg:flex" />
     </div>
   );
 }
 
 const Modo = () => (
   <p className={`mt-8 flex items-center gap-2 text-[12px] ${MODO_REAL ? 'text-ok' : 'text-subtle'}`}>
-    {MODO_REAL ? <><Server size={14} /> Conectado al servidor de TERRY-GO.</> : <><FlaskConical size={14} /> Modo demostración: cualquier correo y contraseña funcionan.</>}
+    {MODO_REAL ? <><Server size={14} /> Conectado al servidor de Terry-App.</> : <><FlaskConical size={14} /> Modo demostración: cualquier correo y contraseña funcionan.</>}
   </p>
 );
 
@@ -71,9 +65,9 @@ export function Login() {
   };
   if (desafio) return (
     <AuthLayout>
-      <Logo className="h-12" />
-      <h2 className="mt-8 flex items-center gap-2 text-2xl font-bold text-brand-strong"><ShieldCheck className="text-brand" /> Verificación en dos pasos</h2>
-      <p className="mt-1 text-muted">Abra su app de autenticación y escriba el código de 6 dígitos de TERRY-GO. Si no tiene el celular, use uno de sus códigos de respaldo.</p>
+      <MarcaTerryApp />
+      <h2 className="mt-8 flex items-center gap-2 font-display text-2xl font-bold text-brand-strong"><ShieldCheck className="text-brand" /> Verificación en dos pasos</h2>
+      <p className="mt-1 text-muted">Abra su app de autenticación y escriba el código de 6 dígitos de Terry-App (o TERRY-GO, si la configuró antes). Si no tiene el celular, use uno de sus códigos de respaldo.</p>
       <form onSubmit={verificar} className="mt-6 flex flex-col gap-4" noValidate>
         <Field label="Código" id="login-2fa"><Input id="login-2fa" autoFocus inputMode="text" autoComplete="one-time-code" maxLength={12} value={codigo}
           onChange={(e) => setCodigo(e.target.value)} placeholder="123456 o ABCD-EFGH" className="text-center font-mono text-lg tracking-[0.3em]" /></Field>
@@ -86,9 +80,9 @@ export function Login() {
   );
   return (
     <AuthLayout>
-      <Logo className="h-12" />
-      <h2 className="mt-8 text-2xl font-bold text-brand-strong">Ingresar</h2>
-      <p className="mt-1 text-muted">Con su correo registrado. Conductores y auxiliares entran directo a su app de campo, y los clientes, a su portal.</p>
+      <MarcaTerryApp />
+      <p className="mt-7 text-[15px] text-muted">Hola, soy Terry. Ingrese con su cuenta de Terra Viva.</p>
+      <p className="mt-1 text-[12px] text-subtle">Conductores y auxiliares entran directo a su app de campo, y los clientes, a su portal.</p>
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
         <Field label="Correo" id="login-email"><Input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@terravivasas.com" /></Field>
         <Field label="Contraseña" id="login-pass">
@@ -110,6 +104,12 @@ export function Login() {
 export function Recuperar() {
   const { go } = useRouter();
   const [sent, setSent] = useState(false);
+  // Sin correo configurado (SMTP), el enlace no puede llegar: el administrador lo entrega desde Usuarios y roles
+  const [correo, setCorreo] = useState(true);
+  useEffect(() => {
+    if (!MODO_REAL) return;
+    fetch(`${API_URL}/auth/opciones`).then((r) => r.json()).then((d: { correo?: boolean }) => setCorreo(d.correo !== false)).catch(() => undefined);
+  }, []);
   const [email, setEmail] = useState('');
   const [err, setErr] = useState('');
   const submit = async (e: FormEvent) => {
@@ -120,8 +120,14 @@ export function Recuperar() {
   return (
     <AuthLayout>
       <button onClick={() => go('login')} className="mb-6 inline-flex items-center gap-1.5 text-[13px] font-medium text-muted hover:text-fg"><ArrowLeft size={16} /> Volver a ingresar</button>
-      <h2 className="text-2xl font-bold text-brand-strong">Recuperar contraseña</h2>
-      {sent ? (
+      <h2 className="font-display text-2xl font-bold text-brand-strong">Recuperar contraseña</h2>
+      {!correo ? (
+        <div className="mt-6 rounded-xl border border-line bg-surface-2 p-5">
+          <KeyRound className="text-brand" />
+          <p className="mt-3 font-medium">Pídale el enlace a su administrador</p>
+          <p className="mt-1 text-muted">El envío de correos de la plataforma todavía no está activo. El administrador de Terry-App puede generarle un enlace para crear su contraseña desde <b>Usuarios y roles</b> y enviárselo por WhatsApp.</p>
+        </div>
+      ) : sent ? (
         <div className="mt-6 rounded-xl border border-line bg-surface p-5">
           <MailCheck className="text-ok" />
           <p className="mt-3 font-medium">Revise su correo</p>
@@ -156,7 +162,7 @@ export function Restablecer() {
   return (
     <AuthLayout>
       <KeyRound className="text-brand" size={28} />
-      <h2 className="mt-4 text-2xl font-bold text-brand-strong">Crear contraseña nueva</h2>
+      <h2 className="mt-4 font-display text-2xl font-bold text-brand-strong">Crear contraseña nueva</h2>
       {ok ? (
         <div className="mt-6 flex flex-col gap-4"><p className="text-muted">Listo. Su contraseña cambió y se cerraron las sesiones abiertas en otros equipos.</p><Button variant="primary" size="lg" onClick={() => { history.replaceState(null, '', location.pathname); go('login'); }}>Ingresar</Button></div>
       ) : (

@@ -197,7 +197,7 @@ class ConciliacionesService {
 
   private async excelPreparado(a: Actor, id: string): Promise<ArchivoPreparado> {
     const c = await this.obtener(a, id);
-    const wb = new ExcelJS.Workbook(); wb.creator = 'TERRY-GO · Terra Viva S.A.S. E.S.P.';
+    const wb = new ExcelJS.Workbook(); wb.creator = 'Terry-App · Terra Viva S.A.S. E.S.P.';
     const ws = wb.addWorksheet('Conciliación');
     ws.addRow([`Conciliación del manifiesto ${c.manifiesto.numero} · ${c.manifiesto.cliente.razonSocial} (NIT ${c.manifiesto.cliente.nit})`]).font = { bold: true, size: 13 };
     ws.addRow([`Fecha de servicio: ${c.manifiesto.fechaServicio.toISOString().slice(0, 10)} · Estado: ${c.estado}`]);

@@ -323,6 +323,7 @@ model Empresa {
   actividadesComerciales  ActividadComercial[]
   cotizaciones            Cotizacion[]
 
+  suscripcionesPush        SuscripcionPush[]
   @@map("empresas")
 }
 
@@ -445,6 +446,7 @@ model Usuario {
   sincronizacionesSiigo   SincronizacionSiigo[]
 
   @@index([empresaId])
+  suscripcionesPush        SuscripcionPush[]
   @@map("usuarios")
 }
 
@@ -2383,4 +2385,24 @@ model CotizacionItem {
 
   @@unique([cotizacionId, orden], map: "ux_citem_orden")
   @@map("cotizacion_items")
+}
+
+/// Notificaciones push: una suscripción por navegador o teléfono de cada persona (Web Push con VAPID).
+model SuscripcionPush {
+  id          String    @id @default(uuid()) @db.Uuid
+  empresaId   String    @map("empresa_id") @db.Uuid
+  usuarioId   String    @map("usuario_id") @db.Uuid
+  endpoint    String    @unique(map: "ux_suscripciones_push_endpoint")
+  p256dh      String    @db.VarChar(200)
+  auth        String    @db.VarChar(100)
+  agente      String?   @db.VarChar(300)
+  creadaEn    DateTime  @default(now()) @map("creada_en") @db.Timestamptz
+  ultimoEnvio DateTime? @map("ultimo_envio") @db.Timestamptz
+  fallos      Int       @default(0)
+
+  empresa Empresa @relation(fields: [empresaId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId], map: "ix_suscripciones_push_usuario")
+  @@map("suscripciones_push")
 }

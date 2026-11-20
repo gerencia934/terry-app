@@ -21,6 +21,6 @@ async function arrancar() {
   app.enableShutdownHooks();
   const port = cfg.get('PORT', { infer: true });
   await app.listen(port);
-  new Logger('API').log(`TERRY-GO API escuchando en http://localhost:${port}/api/v1  (salud: /api/v1/salud)`);
+  new Logger('API').log(`Terry-App · Gestión de Residuos (API) escuchando en http://localhost:${port}/api/v1  (salud: /api/v1/salud)`);
 }
 arrancar();

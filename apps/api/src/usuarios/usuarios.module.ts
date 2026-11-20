@@ -70,8 +70,8 @@ class UsuariosService {
     if (await this.db.usuario.findUnique({ where: { email: b.email } })) throw new BadRequestException({ mensaje: `Ya existe un usuario con el correo ${b.email}.` });
     const u = await this.db.usuario.create({ data: { ...b, empresaId: a.empresaId, passwordHash: await hashClave(randomBytes(32).toString('base64url')) }, select: seguro });
     await this.audit.registrar(a, 'usuario', u.id, 'CREAR', undefined, { nombre: u.nombre, email: u.email, rol: u.rol.nombre });
-    await this.auth.invitar(u.id);
-    return u;
+    const invitacion = await this.auth.invitar(u.id);
+    return { ...u, invitacion };
   }
 
   async editar(a: Actor, id: string, b: z.infer<typeof Editar>) {
@@ -103,8 +103,9 @@ class UsuariosService {
     const u = await this.db.usuario.findFirst({ where: { id, empresaId: a.empresaId, clienteId: null } });
     if (!u) throw new NotFoundException({ mensaje: 'Usuario no encontrado.' });
     if (!u.activo) throw new BadRequestException({ mensaje: 'El usuario está inactivo: actívelo antes de enviarle la invitación.' });
-    await this.auth.invitar(u.id);
-    await this.audit.registrar(a, 'usuario', id, 'INVITACION');
+    const invitacion = await this.auth.invitar(u.id);
+    await this.audit.registrar(a, 'usuario', id, 'INVITACION', undefined, { porCorreo: invitacion.enviada });
+    return invitacion;
   }
 }
 
@@ -115,7 +116,7 @@ class UsuariosController {
   @Permiso('configuracion.editar') @Get('roles') roles(@ActorActual() a: Actor) { return this.s.roles(a); }
   @Permiso('configuracion.editar') @Post('usuarios') crear(@ActorActual() a: Actor, @Body(new Zod(Crear)) b: z.infer<typeof Crear>) { return this.s.crear(a, b); }
   @Permiso('configuracion.editar') @Patch('usuarios/:id') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Editar)) b: z.infer<typeof Editar>) { return this.s.editar(a, id, b); }
-  @Permiso('configuracion.editar') @Post('usuarios/:id/invitacion') @HttpCode(204) reenviar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviar(a, id); }
+  @Permiso('configuracion.editar') @Post('usuarios/:id/invitacion') @HttpCode(200) reenviar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviar(a, id); }
 }
 
 @Module({ imports: [AuthModule], controllers: [UsuariosController], providers: [UsuariosService] })

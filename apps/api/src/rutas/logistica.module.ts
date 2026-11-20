@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
+import { Notificaciones } from '../notificaciones/notificaciones.module';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
 
 const Rango = z.object({ desde: z.coerce.date().optional(), hasta: z.coerce.date().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
@@ -80,7 +81,7 @@ const rango = (f: { desde?: Date; hasta?: Date }) => (f.desde || f.hasta ? { gte
 
 @Injectable()
 class LogisticaService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly notificaciones: Notificaciones) {}
 
   async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
     const { take, skip, pagina, porPagina } = paginar(f);
@@ -108,7 +109,7 @@ class LogisticaService {
     const destino = b.destinoId ? await this.db.proveedor.findFirst({ where: { id: b.destinoId, empresaId: a.empresaId, esDestino: true } }) : null;
     if (b.destinoId && !destino) throw new BadRequestException({ mensaje: 'Destino de descarga no encontrado.' });
     if (destino && !destino.activo) throw new BadRequestException({ mensaje: `Ya no se trabaja con ${destino.razonSocial}: elija otro destino de descarga.` });
-    return this.db.$transaction(async (tx) => {
+    const creada = await this.db.$transaction(async (tx) => {
       const transporteId = b.transporte ? (await tx.transporteTercero.create({ data: { ...b.transporte, empresaId: a.empresaId } })).id : undefined;
       const s = await tx.solicitud.create({ data: {
         empresaId: a.empresaId, clase: b.clase, operacion: b.operacion, clienteId: b.clienteId, fechaSolicitada: b.fechaSolicitada, franjaHoraria: b.franjaHoraria, creadoPorId: a.id,
@@ -125,6 +126,18 @@ class LogisticaService {
       await this.audit.registrar(a, 'solicitud', s.id, 'CREAR', undefined, { numero: s.numero, aprobacion: b.aprobacion }, tx);
       return s;
     });
+    void this.avisarSolicitud(a, creada);
+    return creada;
+  }
+
+  /** Aviso push a quienes programan y aprueban: hay una solicitud de recolección nueva. */
+  private async avisarSolicitud(a: Actor, s: { numero: number; clase: string; clienteId: string; fechaSolicitada: Date; aprobacion: string }) {
+    if (s.clase !== 'FORMAL') return;
+    const cliente = await this.db.cliente.findUnique({ where: { id: s.clienteId }, select: { razonSocial: true } }).catch(() => null);
+    await this.notificaciones.aPermisos(a.empresaId, ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar'], {
+      titulo: 'Nueva solicitud de recolección', cuerpo: `N.° ${s.numero} · ${cliente?.razonSocial ?? 'Cliente'} · para el ${s.fechaSolicitada.toISOString().slice(0, 10)}`,
+      ruta: s.aprobacion === 'PENDIENTE' ? 'por-confirmar' : 'solicitudes', etiqueta: `solicitud-${s.numero}`,
+    }, a.id);
   }
 
   async aprobarSolicitud(a: Actor, id: string, b: z.infer<typeof AprobacionSol>) {
@@ -358,6 +371,11 @@ class LogisticaService {
       aprobado: fallaCritica.length === 0, observaciones: b.observaciones, respuestas: { create: b.respuestas.map((r) => ({ elementoId: r.elementoId, resultado: r.resultado })) },
     } });
     await this.audit.registrar(a, 'preoperacional', p.id, p.aprobado ? 'APROBADO' : 'NO_APROBADO', undefined, { fallas: fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre) });
+    // Aviso push a programación (flota): el vehículo no debe salir sin revisar las fallas críticas
+    if (!p.aprobado) void this.db.vehiculo.findUnique({ where: { id: b.vehiculoId }, select: { placa: true } }).then((v) => this.notificaciones.aPermisos(a.empresaId, ['rutas.programar'], {
+      titulo: `Inspección no aprobada · ${v?.placa ?? 'vehículo'}`, cuerpo: `Fallas críticas: ${fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre).join(', ')}`,
+      ruta: 'inspecciones', etiqueta: `preoperacional-${p.id}`,
+    }, a.id)).catch(() => undefined);
     return { ...p, fallasCriticas: fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre) };
   }
 

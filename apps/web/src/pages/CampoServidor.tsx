@@ -9,6 +9,7 @@ import { api, ErrorApi, sesionActual, tienePermiso } from '../lib/api';
 import { cx } from '../lib/format';
 import { borrarBorrador, descartar, encolar, guardarBorrador, guardarPaquete, leerBorrador, leerPaquete, listar, procesar, reintentar, useCola, type Operacion } from '../campo/cola';
 import { comprimirFoto, detenerGps, iniciarGps } from '../campo/medios';
+import { AvisoNotificaciones } from '../components/Notificaciones';
 
 // ---------- Tipos del API (solo lo que usa la app) ----------
 interface Etapa { id: string; nombre: string; color: string; orden: number; esFinal: boolean; cancela: boolean; rastreo: boolean }
@@ -106,7 +107,7 @@ function CampoLayout({ children, title, back }: { children: ReactNode; title?: s
           </button>
         </div>
       </header>
-      <main className="safe-x flex-1 py-4 pb-28">{children}</main>
+      <main className="safe-x flex-1 py-4 pb-28"><AvisoNotificaciones />{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface safe-bottom" aria-label="Navegación de campo">
         <div className="mx-auto grid max-w-[560px] grid-cols-3">
           {([['campo', <Home size={22} />, 'Mi ruta'], ['campo-preop', <ClipboardCheck size={22} />, 'Inspección'], ['campo-envios', <CloudUpload size={22} />, 'Envíos']] as const).map(([r, ic, l]) => (

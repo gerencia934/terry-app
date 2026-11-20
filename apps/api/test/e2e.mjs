@@ -743,7 +743,7 @@ prueba('un usuario bloqueado por intentos fallidos aparece bloqueado', r.status 
 r = await llamar('PATCH', `/usuarios/${nuevoU.id}`, { token: T, cuerpo: { desbloquear: true } });
 prueba('…y la administración lo desbloquea', r.status === 200 && r.json.bloqueado === false, JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', `/usuarios/${nuevoU.id}/invitacion`, { token: T });
-prueba('reenviar la invitación crea un enlace nuevo', r.status === 204 && (await db.passwordReset.count({ where: { usuarioId: nuevoU.id } })) === 2, String(r.status));
+prueba('reenviar la invitación crea un enlace nuevo (sin correo, vuelve el enlace para entregarlo)', r.status === 200 && r.json.enviada === false && !!r.json.enlace && (await db.passwordReset.count({ where: { usuarioId: nuevoU.id } })) === 2, JSON.stringify([r.status, r.json]));
 // Administrador de prueba (para revisar en el navegador las pantallas de administración sobre la base de prueba)
 const rolAdminE2e = await db.rol.findFirst({ where: { nombre: 'Administrador', empresaId: cliente.empresaId } });
 await db.usuario.upsert({ where: { email: 'admin.e2e@terravivasas.com' }, update: {}, create: { empresaId: cliente.empresaId, rolId: rolAdminE2e.id, nombre: 'Administrador E2E', documento: '5', email: 'admin.e2e@terravivasas.com',
@@ -1648,7 +1648,7 @@ prueba('activarla: confirmar sin haber leído el código QR → 400', r.status =
 r = await llamar('POST', '/auth/2fa/iniciar', { token: sDos.accessToken, cuerpo: {} });
 const secretoDos = claveDe(r.json);
 prueba('…empezar entrega la clave (de a 4 letras), el enlace otpauth y el código QR', r.status === 200 && /^[A-Z2-7]{32}$/.test(secretoDos) && /^([A-Z2-7]{4} ){7}[A-Z2-7]{4}$/.test(r.json.secreto)
-  && r.json.uri?.startsWith('otpauth://totp/TERRY-GO') && r.json.uri.includes(`secret=${secretoDos}`) && r.json.qr?.startsWith('data:image/png;base64,'), JSON.stringify(r.json).slice(0, 160));
+  && r.json.uri?.startsWith('otpauth://totp/Terry-App%20Residuos') && r.json.uri.includes(`secret=${secretoDos}`) && r.json.qr?.startsWith('data:image/png;base64,'), JSON.stringify(r.json).slice(0, 160));
 let filaDos = await db.usuario.findUnique({ where: { id: dos.id } });
 prueba('…la clave queda pendiente y cifrada en la base (no la de la app): todavía no está activa', !!filaDos.totpPendiente && !filaDos.totpPendiente.includes(secretoDos) && filaDos.totpSecreto === null);
 r = await llamar('POST', '/auth/2fa/confirmar', { token: sDos.accessToken, cuerpo: { codigo: codigoErrado(secretoDos) } });
@@ -2149,6 +2149,80 @@ prueba('Bigin: la vista previa no guarda nada y dice lo que hará; la importaci�
   && cmCementos.oportunidades.some((o) => o.etapa === 'COTIZADA' && Number(o.valorMensual) === 12_500_000) && cmCementos.oportunidades.some((o) => o.etapa === 'GANADA' && o.biginId === 'zcrm_3003')
   && cmRepite.json.empresas.nuevas === 0 && cmRepite.json.contactos.nuevos === 0 && cmRepite.json.negocios.nuevos === 0 && cmRepite.json.negocios.existentes === 3,
   JSON.stringify([cmVista.json, cmRepite.json]).slice(0, 600));
+
+
+console.log('\n16. Terry-App: tablero, accesos rápidos, correo sin conectar, avisos push y Súper Informe');
+r = await llamar('GET', '/informes/inicio', { token: T8 });
+prueba('tablero: los números del mes (certificados, solicitudes por programar, manifiestos por grabar) y los accesos rápidos de siempre',
+  r.status === 200 && Number.isInteger(r.json.kpis?.certificadosMes) && Number.isInteger(r.json.kpis?.solicitudesPendientes) && Number.isInteger(r.json.kpis?.manifiestosPorFirmar)
+  && r.json.accesos?.length === 4 && r.json.accesos[0].etiqueta === 'ICONTEC' && r.json.accesos.every((a) => a.url.startsWith('https://')), JSON.stringify([r.json?.kpis, r.json?.accesos]));
+
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { accesosRapidos: [{ etiqueta: 'Inseguro', url: 'http://ejemplo.com' }] } });
+const accMalo = r.status;
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { accesosRapidos: [{ etiqueta: 'ARL Sura', url: 'https://www.arlsura.com/' }, { etiqueta: 'PESV', url: 'https://www.supertransporte.gov.co/' }] } });
+const accBueno = r.status;
+const accInicio = (await llamar('GET', '/informes/inicio', { token: T8 })).json.accesos;
+await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { accesosRapidos: shared.ACCESOS_RAPIDOS_DEFECTO } });
+prueba('accesos rápidos: solo direcciones https; se cambian en Ajustes y el inicio los muestra', accMalo === 400 && accBueno === 200 && accInicio?.length === 2 && accInicio[0].etiqueta === 'ARL Sura', JSON.stringify(accInicio));
+
+const opc = await llamar('GET', '/auth/opciones');
+const estCorreo = await llamar('GET', '/empresa/correo', { token: T8 });
+r = await llamar('POST', '/empresa/correo/prueba', { token: T8, cuerpo: {} });
+prueba('correo sin conectar: el ingreso lo sabe sin sesión, Ajustes dice cómo conectarlo (sin mostrar claves) y la prueba lo explica sin fallar',
+  opc.status === 200 && opc.json.correo === false && estCorreo.status === 200 && estCorreo.json.configurado === false && !('clave' in estCorreo.json)
+  && r.status === 200 && r.json.enviado === false && /SMTP_HOST/.test(r.json.mensaje), JSON.stringify([opc.json, estCorreo.json, r.json]));
+
+const invNueva = await llamar('POST', '/usuarios', { token: T8, cuerpo: { email: 'whatsapp.e2e@terravivasas.com', nombre: 'Acceso Por WhatsApp', documento: '5550001', rolId: rolComercialId } });
+const tokenInv = invNueva.json.invitacion?.enlace ? new URL(invNueva.json.invitacion.enlace).searchParams.get('token') : null;
+const restab = await llamar('POST', '/auth/restablecer', { cuerpo: { token: tokenInv, clave: 'Whatsapp2026x' } });
+const usadoInv = await db.passwordReset.findFirst({ where: { usuarioId: invNueva.json.id, usadoEn: { not: null } } });
+const reenv = await llamar('POST', `/usuarios/${invNueva.json.id}/invitacion`, { token: T8 });
+prueba('sin correo, la invitación vuelve al administrador como enlace (para WhatsApp); sirve para crear la contraseña y entrar; reenviarla da otro enlace',
+  invNueva.status === 201 && invNueva.json.invitacion?.enviada === false && /#restablecer$/.test(invNueva.json.invitacion.enlace ?? '') && !!tokenInv
+  && [200, 204].includes(restab.status) && !!usadoInv
+  && reenv.status === 200 && reenv.json.enviada === false && !!reenv.json.enlace && reenv.json.enlace !== invNueva.json.invitacion.enlace,
+  JSON.stringify([invNueva.json.invitacion, restab.status, !!usadoInv, reenv.json]).slice(0, 500));
+
+const pushCfg = await llamar('GET', '/notificaciones/push/configuracion', { token: T8 });
+const ep = `https://push.ejemplo.invalid/e2e/${randomUUID()}`;
+const llavesPush = { p256dh: 'B' + 'x'.repeat(86), auth: 'a'.repeat(22) };
+const pushHttp = (await llamar('POST', '/notificaciones/push/suscripciones', { token: T8, cuerpo: { endpoint: 'http://inseguro.invalid/x', keys: llavesPush } })).status;
+const pushSub = await llamar('POST', '/notificaciones/push/suscripciones', { token: T8, cuerpo: { endpoint: ep, keys: llavesPush } });
+const pushPrueba = await llamar('POST', '/notificaciones/push/prueba', { token: T8, cuerpo: {} });
+// Una solicitud nueva (la crea Comercial) avisa a quien programa y aprueba: aquí, al administrador con su equipo suscrito
+// Una declaración que al final de la corrida sigue autorizada y activa, en una sede activa de un cliente activo
+const comboPush = await db.declaracionSucursal.findFirst({ where: { activa: true, sucursal: { activa: true, cliente: { activo: true, nit: NIT } }, declaracion: { estado: 'AUTORIZADA', activa: true } }, include: { sucursal: { select: { id: true, clienteId: true } } } });
+const solPush = await llamar('POST', '/solicitudes', { token: tcom, cuerpo: { aprobacion: 'PENDIENTE', clienteId: comboPush?.sucursal.clienteId, sucursalId: comboPush?.sucursal.id, fechaSolicitada: fechaEn(3), items: [{ declaracionId: comboPush?.declaracionId, cantidadEstimada: 5 }] } });
+await new Promise((listo) => setTimeout(listo, 800));
+const avisos = (await llamar('GET', '/notificaciones/push/pruebas', { token: T8 })).json;
+prueba('avisos push: el servidor los ofrece, solo acepta direcciones https, registra el equipo, el aviso de prueba sale y una solicitud nueva avisa a quien programa',
+  pushCfg.status === 200 && pushCfg.json.activo === true && pushHttp === 400 && pushSub.status === 201 && pushSub.json.suscripciones === 1
+  && pushPrueba.status === 200 && pushPrueba.json.enviados === 1 && solPush.status === 201
+  && Array.isArray(avisos) && avisos.some((a) => a.etiqueta === 'prueba')
+  && avisos.some((a) => a.titulo === 'Nueva solicitud de recolección' && a.ruta === 'por-confirmar' && a.cuerpo.includes(String(solPush.json.numero))),
+  JSON.stringify([pushCfg.json, pushHttp, pushSub.json, pushPrueba.json, solPush.status, solPush.json?.mensaje, avisos]).slice(0, 700));
+const pushQuitar = (await llamar('DELETE', '/notificaciones/push/suscripciones', { token: T8, cuerpo: { endpoint: ep } })).status;
+r = await llamar('GET', '/notificaciones/push/configuracion', { token: T8 });
+prueba('…apagarlos en el equipo borra su suscripción', pushQuitar === 204 && r.json.suscripciones === 0, JSON.stringify(r.json));
+
+const siSinPermiso = (await llamar('POST', '/informes/super-informe', { token: tc, cuerpo: { desde: '2026-01-01', hasta: fechaEn(0) } })).status;
+const si = await porLaCola('/informes/super-informe', { desde: '2026-01-01', hasta: fechaEn(0) }, T8);
+let hojasSI = [], tituloSI = '', fechaSI = '', encabezadosSI = [], rellenoSI = '', filasSI = 0, resumenSI = '';
+if (si.status === 200) {
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(si.buf);
+  hojasSI = wb.worksheets.map((w) => w.name);
+  const ig = wb.getWorksheet('Informe general V2');
+  tituloSI = String(ig.getCell(1, 2).value); fechaSI = String(ig.getCell(2, 1).value); encabezadosSI = ig.getRow(3).values.slice(1);
+  rellenoSI = ig.getCell(3, 1).fill?.fgColor?.argb ?? ''; filasSI = ig.rowCount - 3; resumenSI = String(wb.getWorksheet('Resumen').getCell(1, 2).value);
+}
+const auditSI = await db.auditoria.findFirst({ where: { entidad: 'informe', entidadId: 'super-informe', accion: 'EXPORTAR' }, orderBy: { fecha: 'desc' } });
+prueba('Súper Informe: un solo Excel (resumen, «Informe general V2» con la estructura exacta del consolidado de Terra Viva, trazabilidad, certificados, PDC, RESPEL, PESV y licencias); sin permiso no sale y queda en la auditoría',
+  siSinPermiso === 403 && si.status === 200 && si.buf.subarray(0, 2).toString() === 'PK'
+  && JSON.stringify(hojasSI) === JSON.stringify(['Resumen', 'Informe general V2', 'Trazabilidad', 'Certificados', 'PDC · Despachos MP', 'RESPEL', 'PESV', 'Licencias'])
+  && tituloSI === 'INFORME GENERAL V.2-TERRA VIVA S.A.S. E.S.P' && fechaSI.startsWith('Fecha documento: ')
+  && JSON.stringify(encabezadosSI) === JSON.stringify(['Fecha', 'Manifiesto', 'FACTURA ', 'ORDEN O.', 'Tipo', 'Cliente', 'Sucursal', 'Cantidad', 'Unidad', 'Vehículo/Placa', 'RECAUDO', 'Observaciones'])
+  && rellenoSI === 'FF1D7E4D' && filasSI > 0 && resumenSI.startsWith('SÚPER INFORME DE CUMPLIMIENTO INTEGRAL') && !!auditSI,
+  JSON.stringify({ siSinPermiso, status: si.status, hojasSI, tituloSI, fechaSI, encabezadosSI, rellenoSI, filasSI, resumenSI, trabajo: si.trabajo }).slice(0, 700));
 
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);

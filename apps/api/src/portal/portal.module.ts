@@ -21,6 +21,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { AVISO_CLIENTE_INACTIVO } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { Notificaciones } from '../notificaciones/notificaciones.module';
 import { Auditoria } from '../common/servicios';
 import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, SoloPortal, Zod, fechaColombia, paginar, type Actor } from '../common/http';
@@ -64,7 +65,7 @@ export class PortalService {
   private readonly claveDescargas: string;
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly auth: AuthService, private readonly archivos: Archivos,
     private readonly manifiestos: ManifiestosService, private readonly importacion: ImportacionService, private readonly jwt: JwtService, cfg: ConfigService<Config, true>,
-    private readonly comercial: CertificadoComercialService) {
+    private readonly comercial: CertificadoComercialService, private readonly notificaciones: Notificaciones) {
     // Clave propia de los enlaces de descarga (distinta de la de las sesiones)
     this.claveDescargas = createHash('sha256').update(`${cfg.get('JWT_SECRET', { infer: true })}:descargas-portal`).digest('base64url');
   }
@@ -354,7 +355,7 @@ export class PortalService {
     if (fecha.getTime() > hoy.getTime() + 366 * 86_400_000) throw new BadRequestException({ mensaje: 'Pida el servicio con máximo un año de anticipación.' });
     const ids = b.items.map((i) => i.declaracionId);
     if (new Set(ids).size !== ids.length) throw new BadRequestException({ mensaje: 'Cada residuo o servicio va una sola vez en la solicitud.' });
-    return this.conCliente(a, async (tx) => {
+    const r = await this.conCliente(a, async (tx) => {
       await this.exigirActivo(tx, a);
       const sedes = await this.sedes(tx, a);
       const sede = (!sedes.length || sedes.includes(b.sucursalId))
@@ -378,6 +379,11 @@ export class PortalService {
       await this.audit.registrar(a, 'solicitud', s.id, 'CREAR_PORTAL', undefined, { numero: s.numero, sede: sede.nombre, lineas: b.items.length }, tx);
       return { id: s.id, numero: s.numero };
     });
+    // Aviso push a quienes aprueban: un pedido nuevo del portal espera su confirmación
+    void this.db.cliente.findUnique({ where: { id: a.clienteId! }, select: { razonSocial: true } }).then((c) => this.notificaciones.aPermisos(a.empresaId, ['solicitudes.aprobar', 'solicitudes.crear'], {
+      titulo: 'Pedido nuevo desde el portal', cuerpo: `N.° ${r.numero} · ${c?.razonSocial ?? 'Cliente'} · para el ${b.fechaSolicitada}`, ruta: 'por-confirmar', etiqueta: `solicitud-${r.numero}`,
+    })).catch(() => undefined);
+    return r;
   }
 
   /** El cliente cancela un pedido que Terra Viva aún no ha confirmado ni programado. Sus líneas quedan descartadas (regla de la base). */
@@ -506,8 +512,8 @@ export class PortalService {
       return u;
     };
     const u = a.clienteId ? await this.conCliente(a, crear) : await this.db.$transaction(crear);
-    await this.auth.invitar(u.id);
-    return u;
+    const invitacion = await this.auth.invitar(u.id);
+    return { ...u, invitacion };
   }
 
   /**
@@ -566,8 +572,9 @@ export class PortalService {
     if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal envía invitaciones.' });
     const u = await this.usuarioGestionable(a, clienteId, id);
     if (!u.activo) throw new BadRequestException({ mensaje: 'El usuario está inactivo: actívelo antes de enviarle la invitación.' });
-    await this.auth.invitar(u.id);
-    await this.audit.registrar(a, 'usuario', id, 'INVITACION_PORTAL');
+    const invitacion = await this.auth.invitar(u.id);
+    await this.audit.registrar(a, 'usuario', id, 'INVITACION_PORTAL', undefined, { porCorreo: invitacion.enviada });
+    return invitacion;
   }
 
   /** Verificación en dos pasos de un usuario del portal que perdió el celular y sus códigos: la restablece su administrador o la oficina. */

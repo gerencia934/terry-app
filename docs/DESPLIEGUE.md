@@ -1,6 +1,6 @@
-# Publicar TERRY-GO (producción)
+# Publicar Terry-App · Gestión de Residuos (producción)
 
-Guía paso a paso para dejar TERRY-GO funcionando en internet con la cuenta de Cloudflare de Terra Viva (plan Workers
+Guía paso a paso para dejar Terry-App · Gestión de Residuos (antes TERRY-GO) funcionando en internet con la cuenta de Cloudflare de Terra Viva (plan Workers
 Paid). Los valores secretos (claves, tokens, conexiones) nunca van en este repositorio: viven solo en Cloudflare (claves
 del Worker), en Neon o en el `.env` local.
 
@@ -10,9 +10,10 @@ del Worker), en Neon o en el `.env` local.
 |---|---|---|
 | Pantallas (oficina, app del conductor y portal de clientes) | Cloudflare Pages, proyecto `terra-residuos` | `https://residuos.terravivasas.net` |
 | Servidor (API) | Contenedor de Cloudflare (Workers Paid) con la imagen de siempre (`apps/api/Dockerfile`), controlado por el Worker `terra-residuos-api` | `https://residuos.terravivasas.net/api/v1` (la misma dirección) |
-| Base de datos | Neon: PostgreSQL 16 administrado, región AWS US East (Virginia) | — |
-| Archivos (PDF, fotos, firmas) | Cloudflare R2 (ya configurado) | — |
-| Correo de salida | Un buzón con SMTP en `terravivasas.net` (Hostinger) | — |
+| Base de datos | Neon, proyecto `terra-residuos`: PostgreSQL 16, región AWS US East (Virginia), aparte del de Mantenimiento | — |
+| Archivos (PDF, fotos, firmas) | Cloudflare R2, bucket `terra-residuos-archivos` (producción; el de pruebas es `terry-app-storage`) | — |
+| Correo de salida | En pausa: se conecta con SMTP (por ejemplo una cuenta de Gmail) sin tocar código | — |
+| Avisos push | Web Push con llaves VAPID (ya cargadas en el Worker) | — |
 | Publicación | GitHub Actions (`.github/workflows/publicar.yml`): cuando las pruebas pasan en `main` | — |
 
 ```
@@ -47,6 +48,28 @@ navegador ─► residuos.terravivasas.net   (CNAME en Hostinger → terra-resid
 - R2: centavos.
 
 Todo queda dentro del presupuesto aprobado (hasta US$150 al mes).
+
+## Estado al 20-11-2026
+
+Hecho desde este computador (Cloudflare y Neon autorizados por la gerencia):
+- proyecto de Pages `terra-residuos` (`terra-residuos.pages.dev`) con las pantallas y la función `/api`;
+- Worker `terra-residuos-api` provisional (responde «se está instalando») con sus claves: DATABASE_URL, JWT_SECRET, R2,
+  Siigo, Wialon y VAPID. La primera publicación desde GitHub lo reemplaza por el del contenedor; las claves se conservan;
+- Neon: proyecto `terra-residuos` (Virginia, PostgreSQL 16), usuario `terraviva_app` sin permiso para saltarse la RLS,
+  base `terrygo` con las 29 migraciones, catálogos y el usuario administrador. Su acceso inicial está en
+  `docs/privado/acceso-produccion.txt` (fuera de git);
+- R2: bucket `terra-residuos-archivos` en el oriente de Norteamérica.
+
+Falta:
+1. **R2:** las llaves actuales solo sirven para el bucket de pruebas. En Cloudflare, **R2 › Manage API tokens › Create API
+   token** → permiso *Object Read & Write*, solo el bucket `terra-residuos-archivos`. Las dos llaves (*Access Key ID* y
+   *Secret Access Key*) se cargan en el Worker como `R2_ACCESS_KEY_ID` y `R2_SECRET_ACCESS_KEY`.
+2. **GitHub:** `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` (paso 2 de la sección siguiente).
+3. **Dominio:** `residuos.terravivasas.net` en Pages y el CNAME en Hostinger (paso 5).
+4. **Política de datos:** `POLITICA_DATOS_URL` y `POLITICA_DATOS_VERSION`. Sin ellas el servidor no arranca.
+5. **Neon:** pasar la organización al plan pago (*Launch*) antes de salir al aire. Con el gratuito, la base se detiene
+   cuando se acaban las horas del mes.
+6. **Correo** (cuando se decida): sección 7.
 
 ## 2. Lo que hace la gerencia (cuentas a nombre de la empresa, con doble factor)
 
@@ -111,6 +134,7 @@ Todo queda dentro del presupuesto aprobado (hasta US$150 al mes).
    | `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Archivos |
    | `SIIGO_USERNAME`, `SIIGO_ACCESS_KEY`, `SIIGO_PARTNER_ID` | Siigo Nube |
    | `WIALON_TOKEN` | Wialon (solo lectura) |
+   | `VAPID_PUBLICA`, `VAPID_PRIVADA` | Avisos push. Ya están cargadas; cambiarlas obliga a cada equipo a activar los avisos de nuevo |
 
 4. **Publicar:** se une la rama a `main` (pruebas → publicación). Para volver a publicar sin cambios: GitHub → **Actions
    → Publicar → Run workflow**.
@@ -163,6 +187,23 @@ ahí. Ejemplo para la página del sitio:
 - **Copias:** Neon permite volver a un punto en el tiempo. Además, una copia semanal fuera de Neon (en R2).
 - **Monitoreo externo:** un revisor de disponibilidad (por ejemplo UptimeRobot) contra
   `https://residuos.terravivasas.net/api/v1/salud`. Los errores del servidor ya llegan por correo al administrador.
+
+## 7. Correo de salida (pausado; listo para conectar)
+
+El envío está listo: basta cargar las claves en el Worker (**Workers & Pages › terra-residuos-api › Settings › Variables
+and Secrets**, o con `npx wrangler secret put`) y el contenedor se reinicia solo con ellas. Con una cuenta de Gmail:
+- `SMTP_HOST` = `smtp.gmail.com`, `SMTP_PORT` = `587`;
+- `SMTP_USER` = la cuenta de Gmail;
+- `SMTP_PASS` = una contraseña de aplicación de esa cuenta (Cuenta de Google › Seguridad › Contraseñas de aplicaciones;
+  requiere verificación en dos pasos);
+- `MAIL_FROM` = `Terry-App · Terra Viva <la misma cuenta de Gmail>`.
+
+Después, en **Ajustes › Datos de la empresa › Correo de salida** sale «Conectado» y el botón de correo de prueba.
+Mientras el correo esté en pausa:
+- las invitaciones y los reenvíos le devuelven al administrador el enlace para crear la contraseña, con botones para
+  copiarlo o enviarlo por WhatsApp;
+- «Olvidé mi contraseña» le indica a la persona que se lo pida al administrador;
+- el resumen diario de alertas llega como aviso push.
 
 ## 6. Cómo funciona por dentro (desarrollo)
 

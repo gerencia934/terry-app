@@ -68,18 +68,39 @@ export class Municipios {
   }
 }
 
-/** Correo transaccional. Sin SMTP configurado, escribe el mensaje en la consola (útil en desarrollo). */
+/**
+ * Correo transaccional, listo y modular: basta con SMTP_HOST, SMTP_USER y SMTP_PASS (y MAIL_FROM) para que salga, sin tocar
+ * código. Gmail: smtp.gmail.com, puerto 587 y una «contraseña de aplicación»; el remitente debe ser esa cuenta.
+ * Sin SMTP no sale nada: en desarrollo el mensaje va a la consola; en producción solo el asunto (puede llevar enlaces).
+ */
 @Injectable()
 export class Correo {
   private readonly log = new Logger('Correo');
   private transporte: Transporter | null = null;
   constructor(private readonly cfg: ConfigService<Config, true>) {
     const host = this.cfg.get('SMTP_HOST', { infer: true });
-    if (host) this.transporte = nodemailer.createTransport({ host, port: this.cfg.get('SMTP_PORT', { infer: true }), auth: { user: this.cfg.get('SMTP_USER', { infer: true }), pass: this.cfg.get('SMTP_PASS', { infer: true }) } });
+    const port = this.cfg.get('SMTP_PORT', { infer: true });
+    if (host) this.transporte = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user: this.cfg.get('SMTP_USER', { infer: true }), pass: this.cfg.get('SMTP_PASS', { infer: true }) } });
   }
-  async enviar(para: string, asunto: string, texto: string) {
-    if (!this.transporte) { this.log.log(`(sin SMTP) Para: ${para} · ${asunto}\n${texto}`); return; }
+  /** Hay servidor de correo (si no, la app entrega los enlaces de acceso de otra forma). */
+  get configurado() { return !!this.transporte; }
+  /** Envía un correo; devuelve false si no hay SMTP configurado. */
+  async enviar(para: string, asunto: string, texto: string): Promise<boolean> {
+    if (!this.transporte) {
+      if (this.cfg.get('NODE_ENV', { infer: true }) === 'production') this.log.log(`(sin SMTP) No se envió «${asunto}» a ***${para.slice(para.indexOf('@'))}`);
+      else this.log.log(`(sin SMTP) Para: ${para} · ${asunto}\n${texto}`);
+      return false;
+    }
     await this.transporte.sendMail({ from: this.cfg.get('MAIL_FROM', { infer: true }), to: para, subject: asunto, text: texto });
+    return true;
+  }
+  /** Lo que se puede mostrar en Ajustes (nunca la clave). */
+  estado() {
+    const usuario = this.cfg.get('SMTP_USER', { infer: true });
+    return {
+      configurado: this.configurado, servidor: this.cfg.get('SMTP_HOST', { infer: true }) || null, puerto: this.cfg.get('SMTP_PORT', { infer: true }),
+      usuario: usuario ? usuario.replace(/^(.{2}).*(@.*)$/, '$1***$2') : null, remitente: this.cfg.get('MAIL_FROM', { infer: true }),
+    };
   }
 }
 

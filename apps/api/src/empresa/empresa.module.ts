@@ -1,10 +1,10 @@
 // Datos de la empresa que usan los documentos: firma y certificaciones del certificado, nota de calibración de la
 // báscula, numeración (TV / PSAP) y textos legales del certificado con versión (documentos reales §2 y §3).
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, Patch, Post, Put } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
-import { Auditoria } from '../common/servicios';
+import { Auditoria, Correo } from '../common/servicios';
 import { ActorActual, Permiso, Zod, fechaColombia, type Actor } from '../common/http';
 
 const fechaOVacia = z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD.')]);
@@ -39,6 +39,11 @@ const Configuracion = z.object({
     radioPlantaM: z.number().int().min(50).max(5000), radioSedeM: z.number().int().min(50).max(2000),
     minutosParada: z.number().int().min(5).max(240), kmDesvio: z.number().min(1).max(100),
   }).partial().optional(),
+  // Accesos rápidos del inicio (ICONTEC, PESV, MinAmbiente · IDEAM, Seguros): nombre y dirección https. Lista vacía: ninguno
+  accesosRapidos: z.array(z.object({
+    etiqueta: z.string().trim().min(2, 'Escriba el nombre del acceso.').max(40),
+    url: z.string().trim().max(300).regex(/^https:\/\/[^\s]+\.[^\s]+$/i, 'Use una dirección completa que empiece por https://'),
+  })).max(8).optional(),
   // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   bascula: z.object({
     identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,
@@ -157,7 +162,20 @@ class EmpresaService {
 
 @Controller('empresa')
 class EmpresaController {
-  constructor(private readonly s: EmpresaService) {}
+  constructor(private readonly s: EmpresaService, private readonly correo: Correo, private readonly db: PrismaService) {}
+  /** Estado del correo de salida (sin la clave): se conecta con SMTP_HOST, SMTP_USER y SMTP_PASS en el servidor. */
+  @Permiso('configuracion.editar') @Get('correo') estadoCorreo() { return this.correo.estado(); }
+  /** Correo de prueba a quien lo pide. */
+  @Permiso('configuracion.editar') @Post('correo/prueba') @HttpCode(200) async pruebaCorreo(@ActorActual() a: Actor) {
+    const u = await this.db.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { email: true } });
+    if (!this.correo.configurado) return { enviado: false, para: u.email, mensaje: 'Aún no hay correo configurado en el servidor (SMTP_HOST, SMTP_USER y SMTP_PASS).' };
+    try {
+      await this.correo.enviar(u.email, 'Terry-App · Correo de prueba', 'Si lee esto, el correo de Terry-App · Gestión de Residuos quedó funcionando.');
+      return { enviado: true, para: u.email, mensaje: `Correo de prueba enviado a ${u.email}.` };
+    } catch (e) {
+      return { enviado: false, para: u.email, mensaje: `El servidor de correo no aceptó el envío: ${(e as Error).message.slice(0, 200)}` };
+    }
+  }
   @Get() obtener(@ActorActual() a: Actor) { return this.s.obtener(a); }
   @Permiso('configuracion.editar') @Patch('configuracion') configurar(@ActorActual() a: Actor, @Body(new Zod(Configuracion)) b: z.infer<typeof Configuracion>) { return this.s.configurar(a, b); }
   @Permiso('configuracion.editar') @Patch('consecutivos/:documento') consecutivo(@ActorActual() a: Actor, @Param('documento') d: string, @Body(new Zod(Consecutivo)) b: z.infer<typeof Consecutivo>) { return this.s.consecutivo(a, d, b); }

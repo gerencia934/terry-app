@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EstadoPermiso, UnidadMedida } from '@prisma/client';
 import { z } from 'zod';
+import { Notificaciones } from '../notificaciones/notificaciones.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Correo } from '../common/servicios';
 import type { Config } from '../config';
@@ -426,7 +427,8 @@ const NIVEL: Record<Alerta['nivel'], string> = { alta: 'URGENTE', media: 'PARA A
 export class ResumenDiario implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger('ResumenDiario');
   private reloj: NodeJS.Timeout | null = null;
-  constructor(private readonly db: PrismaService, private readonly s: CumplimientoService, private readonly correo: Correo, private readonly cfg: ConfigService<Config, true>) {}
+  constructor(private readonly db: PrismaService, private readonly s: CumplimientoService, private readonly correo: Correo, private readonly cfg: ConfigService<Config, true>,
+    private readonly notificaciones: Notificaciones) {}
 
   onApplicationBootstrap() {
     if (!this.cfg.get('RESUMEN_DIARIO', { infer: true })) return;
@@ -453,7 +455,10 @@ export class ResumenDiario implements OnApplicationBootstrap, OnModuleDestroy {
     } catch (e) { this.log.error(`Correo diario de alertas: ${(e as Error).message}`); }
   }
 
-  /** Arma y envía el correo de cada persona de la oficina con las alertas que le tocan por su rol (sin alertas, no le escribe). */
+  /**
+   * Arma y envía a cada persona de la oficina las alertas que le tocan por su rol: un aviso push a sus equipos y, si hay
+   * correo configurado, el correo (sin alertas, no le escribe). A cada conductor le avisa sus manifiestos por firmar.
+   */
   async enviar(empresaId: string) {
     // Las alertas se calculan una vez (con todos los permisos) y a cada quien se le dejan las de su rol
     const todas = await this.s.alertas({ id: 'resumen-diario', empresaId, rol: 'Sistema', permisos: ['*'], nombre: 'Resumen diario' });
@@ -462,17 +467,26 @@ export class ResumenDiario implements OnApplicationBootstrap, OnModuleDestroy {
     const web = this.cfg.get('WEB_URL', { infer: true }).replace(/\/$/, '');
     const hoy = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const porUsuario: { nombre: string; rol: string; alertas: number; tipos: string[] }[] = [];
+    const hoyDia = fechaColombia();
+    const pendientes = await this.db.manifiesto.groupBy({ by: ['conductorId'], where: { empresaId, estado: 'PENDIENTE', fechaServicio: { lte: hoyDia }, conductorId: { not: null } }, _count: true });
     for (const u of usuarios) {
-      if (!u.email) continue;
       const permisos = u.rol.permisos.map((p) => p.permiso.codigo);
+      const mios = pendientes.find((x) => x.conductorId === u.id)?._count ?? 0;
+      if (mios) await this.notificaciones.aUsuarios([u.id], { titulo: `Tiene ${mios} ${mios === 1 ? 'manifiesto' : 'manifiestos'} por firmar`, cuerpo: 'Ábralos en su app de campo y grábelos con la firma.', ruta: 'campo', etiqueta: 'manifiestos-por-firmar' });
       const suyas = todas.filter((x) => leToca(permisos, x.tipo));
       if (!suyas.length) continue;
       const urgentes = suyas.filter((x) => x.nivel === 'alta').length;
+      await this.notificaciones.aUsuarios([u.id], {
+        titulo: `${suyas.length} ${suyas.length === 1 ? 'alerta' : 'alertas'} para hoy${urgentes ? ` (${urgentes} ${urgentes === 1 ? 'urgente' : 'urgentes'})` : ''}`,
+        cuerpo: [...suyas].sort((x, y) => (x.nivel === 'alta' ? 0 : 1) - (y.nivel === 'alta' ? 0 : 1)).slice(0, 3).map((x) => `• ${x.titulo}`).join('\n'),
+        ruta: 'inicio', etiqueta: 'resumen-diario',
+      });
+      if (!u.email) continue;
       const bloques = (['alta', 'media', 'info'] as const).map((n) => [n, suyas.filter((x) => x.nivel === n)] as const).filter(([, xs]) => xs.length)
         .map(([n, xs]) => `${NIVEL[n]}\n${xs.map((x) => `• ${x.titulo}${x.detalle ? ` — ${x.detalle}` : ''}`).join('\n')}`);
-      const texto = [`Buenos días, ${u.nombre.split(' ')[0]}.`, '', `Estas son sus alertas de TERRY-GO para hoy, ${hoy}:`, '', ...bloques.flatMap((b) => [b, '']),
-        `Ábralas en TERRY-GO: ${web}`, '', `Le llegan por su rol (${u.rol.nombre}). Si no quiere recibirlas, pídaselo al administrador.`].join('\n');
-      const asunto = `TERRY-GO · ${suyas.length} ${suyas.length === 1 ? 'alerta' : 'alertas'} para hoy${urgentes ? ` (${urgentes} ${urgentes === 1 ? 'urgente' : 'urgentes'})` : ''}`;
+      const texto = [`Buenos días, ${u.nombre.split(' ')[0]}.`, '', `Estas son sus alertas de Terry-App para hoy, ${hoy}:`, '', ...bloques.flatMap((b) => [b, '']),
+        `Ábralas en Terry-App: ${web}`, '', `Le llegan por su rol (${u.rol.nombre}). Si no quiere recibirlas, pídaselo al administrador.`].join('\n');
+      const asunto = `Terry-App · ${suyas.length} ${suyas.length === 1 ? 'alerta' : 'alertas'} para hoy${urgentes ? ` (${urgentes} ${urgentes === 1 ? 'urgente' : 'urgentes'})` : ''}`;
       await this.correo.enviar(u.email, asunto, texto).catch((e) => this.log.warn(`No se pudo enviar a ${u.id}: ${(e as Error).message}`));
       porUsuario.push({ nombre: u.nombre, rol: u.rol.nombre, alertas: suyas.length, tipos: [...new Set(suyas.map((x) => x.tipo))].sort() });
     }

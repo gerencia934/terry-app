@@ -6,6 +6,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, fechaColombia, type Actor } from '../common/http';
 import { Trabajos, type ArchivoPreparado } from '../trabajos/trabajos.module';
+import { accesosRapidos } from '@terraviva/shared';
+import { ConfigService } from '@nestjs/config';
+import type { Config } from '../config';
+import { prepararSuperInforme } from './super-informe';
 
 const id = z.string().uuid();
 const Rango = z.object({
@@ -15,12 +19,24 @@ const Rango = z.object({
 /** Indicadores: un rango de fechas de servicio (máximo 400 días) y, si se quiere, un cliente. */
 const RangoIndicadores = z.object({ desde: z.coerce.date(), hasta: z.coerce.date(), clienteId: id.optional() })
   .refine((f) => f.hasta >= f.desde && f.hasta.getTime() - f.desde.getTime() <= 400 * 86_400_000, { message: 'Rango inválido (máximo 400 días).' });
+/** Súper Informe: un rango de fechas de servicio (máximo 400 días). */
+const RangoSuper = z.object({ desde: z.coerce.date(), hasta: z.coerce.date() })
+  .refine((f) => f.hasta >= f.desde && f.hasta.getTime() - f.desde.getTime() <= 400 * 86_400_000, { message: 'Elija un periodo de hasta 400 días.' });
 const pct = (a: number, b: number) => (b ? Math.round((a * 10000) / b) / 100 : null);
 const dia = (d: Date) => d.toISOString().slice(0, 10);
 
 @Injectable()
 class InformesService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly trabajos: Trabajos) {
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly trabajos: Trabajos, private readonly cfg: ConfigService<Config, true>) {
+    // Súper Informe de cumplimiento integral: un solo Excel para licencias, PDC, ICONTEC, MinAmbiente / IDEAM y PESV
+    this.trabajos.registrar<{ desde: string; hasta: string }>('SUPER_INFORME', {
+      permiso: 'exportar.masivo',
+      preparar: async (a, p) => {
+        const { archivo, conteos } = await prepararSuperInforme(this.db, a, new Date(p.desde), new Date(p.hasta), this.cfg.get('WEB_URL', { infer: true }));
+        await this.audit.registrar(a, 'informe', 'super-informe', 'EXPORTAR', undefined, { desde: p.desde, hasta: p.hasta, ...conteos });
+        return archivo;
+      },
+    });
     // El Excel de costos se prepara en la cola de trabajos, no durante la petición (requisitos de producción §1)
     this.trabajos.registrar<{ desde: string; hasta: string; vehiculoId?: string; conductorId?: string; auxiliarId?: string }>('EXCEL_COSTOS_RUTAS', {
       permiso: 'exportar.masivo',
@@ -110,7 +126,8 @@ class InformesService {
     const E = a.empresaId;
     const itemsMes: Prisma.SolicitudItemWhereInput = { solicitud: { empresaId: E, clase: 'FORMAL', fechaSolicitada: { gte: inicioMes, lte: finMes } }, estado: { not: 'DESCARTADO' } };
     const conciliadasMes: Prisma.ConciliacionItemWhereInput = { conciliacion: { empresaId: E, estado: { not: 'ANULADA' }, manifiesto: { fechaServicio: { gte: inicioMes, lte: finMes } } } };
-    const [solicitadas, programadas, recolectadas, pesadas, certificadas, recorridosMes, rutasHoy, manana, semana, obligaciones, negocio] = await Promise.all([
+    const [solicitadas, programadas, recolectadas, pesadas, certificadas, recorridosMes, rutasHoy, manana, semana, obligaciones, negocio,
+      certificadosMes, solicitudesPendientes, manifiestosPorFirmar, empresa] = await Promise.all([
       this.db.solicitudItem.count({ where: itemsMes }),
       this.db.solicitudItem.count({ where: { ...itemsMes, estado: { in: ['PROGRAMADO', 'REALIZADO'] } } }),
       this.db.solicitudItem.count({ where: { ...itemsMes, estado: 'REALIZADO' } }),
@@ -126,6 +143,11 @@ class InformesService {
       this.db.obligacionPermiso.findMany({ where: { permiso: { empresaId: E }, cumplida: false, proximaFecha: { not: null } }, orderBy: { proximaFecha: 'asc' }, take: 5,
         select: { id: true, codigo: true, descripcion: true, proximaFecha: true, permiso: { select: { acto: true } } } }),
       verNegocio ? this.indicadores(a, { desde: inicioMes, hasta: finMes }) : Promise.resolve(null),
+      // Tablero: certificados (actas) emitidos en el mes, solicitudes formales sin programar y manifiestos sin grabar
+      this.db.acta.count({ where: { empresaId: E, estado: 'EMITIDA', emitidaEn: { gte: inicioMes, lt: new Date(finMes.getTime() + diaMs) } } }),
+      this.db.solicitud.count({ where: { empresaId: E, clase: 'FORMAL', estado: 'PENDIENTE' } }),
+      this.db.manifiesto.count({ where: { empresaId: E, estado: 'PENDIENTE', fechaServicio: { lte: hoy } } }),
+      this.db.empresa.findUniqueOrThrow({ where: { id: E }, select: { configuracion: true } }),
     ]);
     const etapas = await this.db.estadoRecorrido.count({ where: { empresaId: E, activo: true, cancela: false } });
     return {
@@ -140,6 +162,8 @@ class InformesService {
       })),
       agenda: { hoy: rutasHoy.filter((r) => !r.estadoRecorrido?.cancela).length, manana, semana },
       obligaciones,
+      kpis: { certificadosMes, solicitudesPendientes, manifiestosPorFirmar },
+      accesos: accesosRapidos(empresa.configuracion),
     };
   }
 
@@ -242,6 +266,10 @@ class InformesService {
   }
 
   /** Pide el Excel de costos: responde de inmediato y la cola lo prepara. */
+  async encolarSuperInforme(a: Actor, f: z.infer<typeof RangoSuper>) {
+    return this.trabajos.encolar(a, 'SUPER_INFORME', `Súper Informe de cumplimiento, ${dia(f.desde)} a ${dia(f.hasta)}`, { desde: dia(f.desde), hasta: dia(f.hasta) });
+  }
+
   async encolarCostos(a: Actor, f: z.infer<typeof Rango>) {
     return this.trabajos.encolar(a, 'EXCEL_COSTOS_RUTAS', `Costos de flete por ruta, ${dia(f.desde)} a ${dia(f.hasta)}`, {
       desde: dia(f.desde), hasta: dia(f.hasta), ...(f.vehiculoId ? { vehiculoId: f.vehiculoId } : {}), ...(f.conductorId ? { conductorId: f.conductorId } : {}), ...(f.auxiliarId ? { auxiliarId: f.auxiliarId } : {}),
@@ -252,7 +280,7 @@ class InformesService {
   private async costosExcel(a: Actor, f: z.infer<typeof Rango>): Promise<ArchivoPreparado> {
     const { filas, total } = await this.costosFilas(a, f);
     await this.audit.registrar(a, 'informe', 'costos-rutas', 'EXPORTAR', undefined, { desde: dia(f.desde), hasta: dia(f.hasta), rutas: filas.length });
-    const wb = new ExcelJS.Workbook(); wb.creator = 'TERRY-GO · Terra Viva S.A.S. E.S.P.';
+    const wb = new ExcelJS.Workbook(); wb.creator = 'Terry-App · Terra Viva S.A.S. E.S.P.';
     const ws = wb.addWorksheet('Costos por ruta');
     ws.addRow([`Costos de flete por ruta · ${dia(f.desde)} a ${dia(f.hasta)}`]).font = { bold: true, size: 13 };
     ws.addRow([]);
@@ -270,6 +298,7 @@ class InformesController {
   constructor(private readonly s: InformesService) {}
   @Permiso('informes.ver') @Get('recepcion-planta') recepcion(@ActorActual() a: Actor, @Query(new Zod(RangoIndicadores)) f: z.infer<typeof RangoIndicadores>) { return this.s.recepcionPlanta(a, f); }
   @Get('inicio') inicio(@ActorActual() a: Actor) { return this.s.inicio(a); }
+  @Permiso('exportar.masivo') @Post('super-informe') @HttpCode(202) superInforme(@ActorActual() a: Actor, @Body(new Zod(RangoSuper)) f: z.infer<typeof RangoSuper>) { return this.s.encolarSuperInforme(a, f); }
   @Permiso('informes.ver') @Get('indicadores') indicadores(@ActorActual() a: Actor, @Query(new Zod(RangoIndicadores)) f: z.infer<typeof RangoIndicadores>) { return this.s.indicadores(a, f); }
   @Permiso('informes.ver') @Get('rutas/rendimiento') rendimiento(@ActorActual() a: Actor, @Query(new Zod(Rango)) f: z.infer<typeof Rango>) { return this.s.rendimiento(a, f); }
   @Permiso('informes.ver') @Get('rutas/costos') costos(@ActorActual() a: Actor, @Query(new Zod(Rango)) f: z.infer<typeof Rango>) { return this.s.costos(a, f); }

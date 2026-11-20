@@ -131,7 +131,7 @@ export async function marcoTerraViva(doc: PDFKit.PDFDocument, m: Marco) {
     const lineaContacto = [contacto?.direccion, contacto?.municipio, contacto?.telefono, contacto?.correo].filter(Boolean).join(' · ');
     doc.font('Helvetica').fontSize(6.5).fillColor(GRIS, 1);
     if (lineaContacto) doc.text(lineaContacto, x0, H - 62, { width: W + 40, lineBreak: false });
-    doc.text(`Documento generado en TERRY-GO. Verifique su autenticidad en ${m.url}`, x0, H - 52, { width: W - 30, lineBreak: false })
+    doc.text(`Documento generado en Terry-App · Gestión de Residuos. Verifique su autenticidad en ${m.url}`, x0, H - 52, { width: W - 30, lineBreak: false })
       .text(`Página ${i + 1} de ${rango.count}`, x0 + W - 60, H - 52, { width: 100, align: 'right', lineBreak: false });
     doc.page.margins.bottom = margen;
   }
@@ -139,7 +139,7 @@ export async function marcoTerraViva(doc: PDFKit.PDFDocument, m: Marco) {
 
 export async function pdfActa(c: ContenidoActa): Promise<Buffer> {
   const doc = new PDFDocument({ size: A4, margins: { top: M.arriba, bottom: M.abajo, left: M.izq, right: M.der }, bufferPages: true,
-    info: { Title: `${TITULOS[c.tipo]} ${c.numero}`, Author: c.emisor.razonSocial, Creator: 'TERRY-GO', Subject: `Verificación: ${c.verificacion.url}` } });
+    info: { Title: `${TITULOS[c.tipo]} ${c.numero}`, Author: c.emisor.razonSocial, Creator: 'Terry-App · Gestión de Residuos', Subject: `Verificación: ${c.verificacion.url}` } });
   const partes: Buffer[] = [];
   doc.on('data', (b: Buffer) => partes.push(b));
   const listo = new Promise<Buffer>((ok) => doc.on('end', () => ok(Buffer.concat(partes))));

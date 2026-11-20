@@ -11,6 +11,9 @@ import { useAlertas } from '../lib/alertas';
 import { MODO_REAL, salir, salirDeTodos, sesionActual, tienePermiso } from '../lib/api';
 import { VentanaDobleFactor } from './DobleFactor';
 import { Descargas } from './Descargas';
+import { MODULO } from './Marca';
+import { AvisoNotificaciones, OpcionNotificaciones } from './Notificaciones';
+import { EnlaceAccesoHost } from './EnlaceAcceso';
 import logoDark from '../assets/logo-dark.webp';
 import logoLight from '../assets/logo-light.webp';
 
@@ -117,9 +120,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const Lateral = (
     <div className="flex h-full flex-col">
-      <button onClick={() => go('inicio')} className="mb-5 px-2 text-left" aria-label="TERRY-GO: ir al inicio">
+      <button onClick={() => go('inicio')} className="mb-5 px-2 text-left" aria-label="Terry-App · Gestión de Residuos: ir al inicio">
         <Logo className="h-10" />
-        <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.14em] text-subtle">TERRY-GO</span>
+        <span className="mt-1.5 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-subtle"><span className="h-0.5 w-4 rounded-full bg-brand-lime" aria-hidden />{MODULO}</span>
       </button>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1"><Navegacion route={route} go={go} /></div>
       <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
@@ -175,6 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {menuUsuario && (
                   <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-line bg-surface p-1.5 shadow-xl" onKeyDown={(e) => { if (e.key === 'Escape') setMenuUsuario(false); }}>
                     {usuario && <p className="px-3 py-2 text-[12px] text-muted">{usuario.nombre}<br />{usuario.rol}</p>}
+                    {MODO_REAL && <OpcionNotificaciones />}
                     {MODO_REAL && <button onClick={() => { setMenuUsuario(false); setVer2fa(true); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2"><ShieldCheck size={15} className="text-brand" />Verificación en dos pasos</button>}
                     <button onClick={cerrarSesion} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión</button>
                     {MODO_REAL && <button onClick={cerrarTodas} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión en todos los dispositivos</button>}
@@ -188,11 +192,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           {MODO_REAL && !CONECTADAS.has(route) && (
             <p className="mb-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 px-4 py-2.5 text-[13px] text-warn"><FlaskConical size={16} className="mt-px shrink-0" />Esta sección todavía muestra datos de ejemplo: lo que ve aquí no es de su empresa ni se guarda. Las demás secciones ya trabajan con el servidor.</p>
           )}
+          <AvisoNotificaciones />
           {children}
         </main>
       </div>
 
       {MODO_REAL && <VentanaDobleFactor open={ver2fa} onClose={() => setVer2fa(false)} />}
+      {MODO_REAL && <EnlaceAccesoHost />}
 
       {drawer && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menú">
