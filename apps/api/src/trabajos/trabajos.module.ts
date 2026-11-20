@@ -150,7 +150,7 @@ export class Trabajos implements OnApplicationBootstrap, OnModuleDestroy {
     await this.db.$executeRaw`
       UPDATE trabajos SET estado = CASE WHEN intentos < ${MAX_INTENTOS} THEN 'PENDIENTE'::"EstadoTrabajo" ELSE 'FALLIDO'::"EstadoTrabajo" END,
         error = 'No terminó a tiempo.', terminado_en = CASE WHEN intentos < ${MAX_INTENTOS} THEN NULL ELSE now() END
-      WHERE estado = 'EN_CURSO' AND iniciado_en < now() - make_interval(mins => ${ATASCADO_MIN})`;
+      WHERE estado = 'EN_CURSO' AND iniciado_en < now() - make_interval(mins => ${ATASCADO_MIN}::int)`; // el número llega como bigint y make_interval pide int
     const vencidos = await this.db.trabajo.findMany({ where: { estado: 'LISTO', venceEn: { lt: new Date() } }, take: 100 });
     for (const v of vencidos) {
       if (v.archivo) await this.archivos.borrarGenerado(v.archivo, v.empresaId).catch((e) => this.log.warn(`No se borró ${v.archivo}: ${(e as Error).message}`));
