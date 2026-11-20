@@ -270,14 +270,17 @@ export class AuthService {
     const s = id && secreto ? await this.db.sesion.findUnique({ where: { id } }).catch(() => null) : null;
     if (!s || !iguales(s.tokenHash, sha256(secreto))) throw new UnauthorizedException({ mensaje: 'Sesión inválida. Ingrese de nuevo.' });
     if (s.revocadaEn) {
-      await this.db.sesion.updateMany({ where: { usuarioId: s.usuarioId, revocadaEn: null }, data: { revocadaEn: new Date() } });
+      // Solo es sospechoso reusar un token que ya se cambió por otro al renovar: pudo ser robado. El de una sesión que
+      // simplemente se cerró (salida, entrada desde el portal en otra pestaña, cambio de clave…) solo ya no sirve.
+      if (s.cerradaPor !== 'ROTACION') throw new UnauthorizedException({ mensaje: 'La sesión fue cerrada. Ingrese de nuevo.' });
+      await this.db.sesion.updateMany({ where: { usuarioId: s.usuarioId, revocadaEn: null }, data: { revocadaEn: new Date(), cerradaPor: 'REUSO' } });
       await this.audit.registrar({ id: s.usuarioId }, 'sesion', s.id, 'REUSO_TOKEN');
       throw new UnauthorizedException({ mensaje: 'Por seguridad se cerraron todas sus sesiones. Ingrese de nuevo.' });
     }
     if (s.expiraEn < new Date()) throw new UnauthorizedException({ mensaje: 'La sesión venció. Ingrese de nuevo.' });
     const u = await this.db.usuario.findUnique({ where: { id: s.usuarioId } });
     if (!u?.activo) throw new UnauthorizedException({ mensaje: 'Usuario inactivo.' });
-    await this.db.sesion.update({ where: { id: s.id }, data: { revocadaEn: new Date() } });
+    await this.db.sesion.update({ where: { id: s.id }, data: { revocadaEn: new Date(), cerradaPor: 'ROTACION' } });
     return this.emitir(s.usuarioId, meta, s.viaPortal);
   }
 

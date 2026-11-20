@@ -32,6 +32,16 @@ function guardar(s: Sesion | null) {
   try { s ? localStorage.setItem(CLAVE, JSON.stringify(s)) : localStorage.removeItem(CLAVE); } catch { /* sin almacenamiento */ }
   oyentes.forEach((f) => f(s));
 }
+// Varias pestañas comparten la misma sesión (localStorage). Si otra pestaña entra (también desde el portal), renueva o sale,
+// esta se entera al instante: así nunca presenta un token que otra ya cambió (el servidor lo tomaría por un robo).
+const leerGuardada = (): Sesion | null => { try { return JSON.parse(localStorage.getItem(CLAVE) ?? 'null'); } catch { return null; } };
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== CLAVE && e.key !== null) return;
+    sesion = leerGuardada();
+    oyentes.forEach((f) => f(sesion));
+  });
+}
 export const sesionActual = () => sesion;
 export const alCambiarSesion = (f: (s: Sesion | null) => void) => { oyentes.add(f); return () => oyentes.delete(f); };
 /** La sesión actual como estado de React (cambia al entrar, salir, renovar o aceptar la política de datos). */
@@ -44,12 +54,28 @@ export const tienePermiso = (p: string) => !!sesion && (sesion.usuario.permisos.
 
 async function renovar(): Promise<boolean> {
   if (!sesion) return false;
+  const usada = sesion.refreshToken;
+  /** ¿Otra pestaña ya renovó o entró de nuevo? Entonces se usa su sesión en lugar de gastar un token ya cambiado. */
+  const adoptarOtra = () => {
+    const otra = leerGuardada();
+    if (!otra || otra.refreshToken === usada) return false;
+    sesion = otra; oyentes.forEach((f) => f(otra));
+    return true;
+  };
+  const trabajo = async () => {
+    if (adoptarOtra()) return true;
+    try {
+      const r = await fetch(`${API_URL}/auth/renovar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: usada }) });
+      if (!r.ok) { if (adoptarOtra()) return true; guardar(null); return false; }
+      guardar(await r.json()); return true;
+    } catch { return false; }
+  };
   renovando ??= (async () => {
     try {
-      const r = await fetch(`${API_URL}/auth/renovar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: sesion!.refreshToken }) });
-      if (!r.ok) { guardar(null); return false; }
-      guardar(await r.json()); return true;
-    } catch { return false; } finally { setTimeout(() => { renovando = null; }, 0); }
+      // Una sola pestaña renueva a la vez (Web Locks); las demás esperan y toman la sesión nueva
+      const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+      return locks ? await locks.request('tv-renovar-sesion', trabajo) : await trabajo();
+    } finally { setTimeout(() => { renovando = null; }, 0); }
   })();
   return renovando;
 }

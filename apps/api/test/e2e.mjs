@@ -2295,6 +2295,16 @@ else {
     sN.status === 200 && sN.json.usuario.requiereAceptarDatos === true && sN.json.usuario.requiereConfigurar2fa === false
       && aceptN.status === 200 && aceptN.json.usuario.requiereConfigurar2fa === false && sesionN?.viaPortal === true,
     JSON.stringify({ sN: [sN.status, sN.json?.mensaje, sN.json?.usuario?.requiereAceptarDatos, sN.json?.usuario?.requiereConfigurar2fa], acept: [aceptN.status, aceptN.json?.mensaje, aceptN.json?.usuario?.requiereConfigurar2fa], via: sesionN?.viaPortal }));
+  // Varias pestañas: si una presenta el token de una sesión que solo se cerró (no rotada), la respuesta es «cerrada»
+  // y las demás sesiones siguen; cerrar todas queda solo para el reuso de un token ya rotado (posible robo)
+  const sA = await entrar(pase(), '198.51.100.20');
+  const sB = await entrar(pase(), '198.51.100.20');
+  if (sA.status === 200) await llamar('POST', '/auth/salir', { cuerpo: { refreshToken: sA.json.refreshToken } });
+  const reusoCerrada = sA.status === 200 ? await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: sA.json.refreshToken } }) : { status: 0, json: {} };
+  const sigueB = sB.status === 200 ? (await llamar('GET', '/auth/yo', { token: sB.json.accessToken })).status : 0;
+  prueba('…y si otra pestaña presenta el token de una sesión ya cerrada, solo responde «cerrada»: no cierra las demás sesiones',
+    sA.status === 200 && sB.status === 200 && reusoCerrada.status === 401 && /cerrada/.test(reusoCerrada.json.mensaje ?? '') && !/cerraron/.test(reusoCerrada.json.mensaje ?? '') && sigueB === 200,
+    JSON.stringify({ sA: sA.status, sB: sB.status, reuso: [reusoCerrada.status, reusoCerrada.json?.mensaje], sigueB }));
 }
 
 await db.$disconnect();

@@ -465,6 +465,8 @@ model Sesion {
   revocadaEn DateTime? @map("revocada_en") @db.Timestamptz
   /// Abierta con el pase del portal Terry-App: la verificación en dos pasos la hizo el portal (docs/ECOSISTEMA.md)
   viaPortal  Boolean   @default(false) @map("via_portal")
+  /// Por qué se cerró: «ROTACION» al renovar (reusarla hace sospechar un robo), «REUSO», o vacío (salida, cambio de clave…)
+  cerradaPor String?   @map("cerrada_por") @db.VarChar(20)
   usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
   @@index([usuarioId])
