@@ -302,6 +302,30 @@ await rechaza('revisado, la revisión no cambia', () => db.eventoGps.update({ wh
 await rechaza('solo hay dos tipos de evento: parada no programada y desvío', () =>
   db.eventoGps.create({ data: { empresaId: E, rutaId: ruta2.id, vehiculoId: vehiculo.id, tipo: 'OTRO', inicio: new Date(), latitud: 7.4, longitud: -73.5 } }), /chk_egps_tipo/);
 
+console.log('\n14. Comercial: nada se borra y lo enviado no cambia');
+const prosR = await db.prospecto.create({ data: { empresaId: E, razonSocial: `Prospecto de reglas ${sufijo}`, nit: `7${sufijo}11` } });
+await rechaza('el NIT de un prospecto no se repite', () => db.prospecto.create({ data: { empresaId: E, razonSocial: 'Otro prospecto', nit: prosR.nit } }), /Unique constraint|ux_prospectos_nit/);
+const opR = await db.oportunidad.create({ data: { empresaId: E, prospectoId: prosR.id, titulo: 'Oportunidad de reglas' } });
+await rechaza('perdida, con su motivo', () => db.oportunidad.update({ where: { id: opR.id }, data: { etapa: 'PERDIDA', cerradaEn: new Date() } }), /chk_op_perdida/);
+await rechaza('cerrada, con su fecha', () => db.oportunidad.update({ where: { id: opR.id }, data: { etapa: 'PERDIDA', motivoPerdida: 'Precio' } }), /chk_op_cerrada/);
+await rechaza('ganada, con el cliente que se creó', () => db.oportunidad.update({ where: { id: opR.id }, data: { etapa: 'GANADA', cerradaEn: new Date() } }), /chk_op_ganada/);
+await db.oportunidad.update({ where: { id: opR.id }, data: { etapa: 'GANADA', cerradaEn: new Date(), clienteId: cliente.id } });
+await rechaza('una oportunidad ganada no se reabre', () => db.oportunidad.update({ where: { id: opR.id }, data: { etapa: 'NEGOCIACION', cerradaEn: null } }), /no se reabre/);
+await rechaza('…ni se borra', () => db.oportunidad.delete({ where: { id: opR.id } }), /no se borran/);
+await rechaza('una actividad tiene fecha (por hacer o ya hecha)', () => db.actividadComercial.create({ data: { empresaId: E, prospectoId: prosR.id, tipo: 'NOTA', asunto: 'Sin fecha' } }), /chk_act_fecha/);
+const actR = await db.actividadComercial.create({ data: { empresaId: E, prospectoId: prosR.id, tipo: 'LLAMADA', asunto: 'Llamada de prueba', hechaEn: new Date() } });
+await rechaza('las actividades son historia: no se borran', () => db.actividadComercial.delete({ where: { id: actR.id } }), /no se borran/);
+const cotR = await db.cotizacion.create({ data: { empresaId: E, oportunidadId: opR.id } });
+await db.cotizacionItem.create({ data: { cotizacionId: cotR.id, orden: 1, tipo: 'SERVICIO', descripcion: 'Servicio de prueba', precioUnitario: 1000 } });
+await rechaza('enviada, con número, PDF, copia fija y código de verificación', () => db.cotizacion.update({ where: { id: cotR.id }, data: { estado: 'ENVIADA' } }), /chk_cot_enviada/);
+const codigoR = Array.from({ length: 24 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
+await db.cotizacion.update({ where: { id: cotR.id }, data: { estado: 'ENVIADA', numero: `COT-R-${sufijo}`, enviadaEn: new Date(), pdfClave: 'local:prueba/cotizacion.pdf', contenido: {}, codigoVerificacion: codigoR } });
+await rechaza('una cotización enviada no cambia', () => db.cotizacion.update({ where: { id: cotR.id }, data: { totalEstimado: 5 } }), /ya se envió/);
+await rechaza('…ni sus renglones', () => db.cotizacionItem.create({ data: { cotizacionId: cotR.id, orden: 2, tipo: 'SERVICIO', descripcion: 'Otro renglón', precioUnitario: 1 } }), /ya se envió/);
+await db.cotizacion.update({ where: { id: cotR.id }, data: { estado: 'ACEPTADA', respondidaEn: new Date() } });
+await rechaza('la respuesta del cliente no se cambia', () => db.cotizacion.update({ where: { id: cotR.id }, data: { estado: 'RECHAZADA' } }), /ya tiene la respuesta/);
+await rechaza('las cotizaciones no se borran', () => db.cotizacion.delete({ where: { id: cotR.id } }), /no se borran/);
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

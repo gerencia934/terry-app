@@ -113,6 +113,8 @@ jobs:
           WIALON_TOKEN: token-prueba-wialon
           WIALON_EMPRESA_NIT: 901089780-8
           WIALON_CONSULTAR: 'false'
+          # Formulario del sitio web (hay dos empresas en las pruebas): los prospectos van a Terra Viva
+          FORMULARIO_WEB_EMPRESA_NIT: 901089780-8
         run: |
           nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for i in $(seq 1 30); do

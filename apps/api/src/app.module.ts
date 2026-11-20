@@ -12,6 +12,7 @@ import { CertificadoComercialModule } from './clientes/certificado-comercial.mod
 import { FinanzasModule } from './finanzas/finanzas.module';
 import { MonitoreoModule } from './monitoreo/monitoreo.module';
 import { GpsModule } from './gps/gps.module';
+import { ComercialModule } from './comercial/comercial.module';
 import { DeclaracionesModule } from './declaraciones/declaraciones.module';
 import { LogisticaModule } from './rutas/logistica.module';
 import { CumplimientoModule } from './permisos/cumplimiento.module';
@@ -41,7 +42,7 @@ import { PortalModule } from './portal/portal.module';
       }),
     }),
     PrismaModule, ComunModule, ArchivosModule, TrabajosModule, AuthModule,
-    MonitoreoModule, GpsModule, ClientesModule, CertificadoComercialModule, FinanzasModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
+    MonitoreoModule, GpsModule, ComercialModule, ClientesModule, CertificadoComercialModule, FinanzasModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
     ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule,
   ],
   providers: [

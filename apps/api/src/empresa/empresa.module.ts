@@ -45,7 +45,7 @@ const Configuracion = z.object({
     laboratorio: z.string().trim().max(120), vigenteHasta: fechaOVacia,
   }).partial().optional(),
 });
-const DOCUMENTOS = ['MANIFIESTO', 'ACTA', 'INSPECCION', 'CERT_COMERCIAL'] as const;
+const DOCUMENTOS = ['MANIFIESTO', 'ACTA', 'INSPECCION', 'CERT_COMERCIAL', 'COTIZACION'] as const;
 const Consecutivo = z.object({
   prefijo: z.string().trim().max(10).regex(/^[A-Za-z0-9-]*$/, 'Solo letras, números y guion.').optional(),
   digitos: z.number().int().min(0).max(8).optional(),
@@ -61,7 +61,7 @@ const TextoNuevo = Texto.extend({ codigo: z.string().trim().toUpperCase().regex(
 /** Valores por defecto de cada consecutivo (los mismos de la base, fn_siguiente_consecutivo). */
 const DEFECTO: Record<(typeof DOCUMENTOS)[number], { prefijo: string; digitos: number; reinicioAnual: boolean }> = {
   MANIFIESTO: { prefijo: 'TV', digitos: 4, reinicioAnual: false }, ACTA: { prefijo: 'PSAP', digitos: 0, reinicioAnual: true }, INSPECCION: { prefijo: 'INS-', digitos: 5, reinicioAnual: true },
-  CERT_COMERCIAL: { prefijo: 'CC-', digitos: 4, reinicioAnual: true },
+  CERT_COMERCIAL: { prefijo: 'CC-', digitos: 4, reinicioAnual: true }, COTIZACION: { prefijo: 'COT-', digitos: 4, reinicioAnual: true },
 };
 /** Cómo se verá el próximo número (igual que fn_siguiente_consecutivo). */
 const muestra = (c: { prefijo: string; digitos: number; reinicioAnual: boolean; anio: number; ultimo: number }) => {

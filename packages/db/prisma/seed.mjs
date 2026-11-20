@@ -27,6 +27,8 @@ const PERMISOS = [
   // Facturación (Siigo): solo Comercial, Facturación (financiero) y Gerencia ven facturas, pagos y sus alertas
   ['finanzas.ver', 'Ver facturas, pagos, la regla de certificado de los clientes y las alertas de manifiestos sin facturar'],
   ['finanzas.gestionar', 'Sincronizar con Siigo, enlazar facturas, registrar pagos, marcar manifiestos sin cobro y liberar certificados'],
+  // Comercial (reemplaza a Bigin): prospectos, oportunidades, actividades, cotizaciones e importación de Bigin
+  ['comercial.gestionar', 'Prospectos, oportunidades, tareas y cotizaciones; ganar una oportunidad crea el cliente y sus declaraciones con tarifa'],
 ];
 const ROLES = {
   Administrador: ['*'],
@@ -34,7 +36,7 @@ const ROLES = {
     'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'],
   HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'importacion.revertir', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'],
   Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo',
-    'finanzas.ver'],
+    'finanzas.ver', 'comercial.gestionar'],
   Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo',
     'finanzas.ver', 'finanzas.gestionar'],
   Conductor: ['rutas.operar', 'manifiestos.operar'],

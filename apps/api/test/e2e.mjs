@@ -1906,13 +1906,16 @@ for (const [m, f] of [[52, 0.2], [54, 0.4], [56, 0.6], [58, 0.8], [60, 1]]) msj(
 for (const m of [62, 67, 72, 77, 82]) msj(m, D, 0);
 for (let k = 0; k < 10; k++) msj(84 + 2 * k, entre(D, P, 0.1 * (k + 1)), 60);
 msj(104, P, 0); msj(108, P, 0);
-wialon.unidades = [{ id: 7001, nm: 'LPM482 - JMC Furgón' }, { id: 7002, nm: 'UPS 485' }, { id: 7003, nm: 'Camioneta gerencia' }, { id: 7004, nm: 'Furgon USD855' }, { id: 7005, nm: 'USD-855 respaldo' }];
-wialon.mensajes = { 7001: viaje, 7002: [{ t: T0, pos: { y: 7.1, x: -73.1, s: 0, c: 0 } }] };
+wialon.unidades = [{ id: 7001, nm: 'LPM482 - JMC Furgón' }, { id: 7002, nm: 'UPS 485' }, { id: 7003, nm: 'Camioneta gerencia' }, { id: 7004, nm: 'Furgon USD855' }, { id: 7005, nm: 'USD-855 respaldo' },
+  { id: 7006, nm: 'DXY545' }, { id: 7007, nm: 'NO DXY545 2G' }]; // el equipo viejo 2G sigue en la cuenta con la misma placa
+wialon.mensajes = { 7001: viaje, 7002: [{ t: T0, pos: { y: 7.1, x: -73.1, s: 0, c: 0 } }], 7006: [{ t: T0 + 100 * 60, pos: { y: 7.2, x: -73.2, s: 0, c: 0 } }],
+  7007: [{ t: T0 - 3 * 365 * 86_400, pos: { y: 7.2, x: -73.2, s: 0, c: 0 } }] };
 
 r = await llamar('POST', '/gps/actualizar', { token: tLog, cuerpo: {} });
-const [lpmGps, upsGps, usdGps] = await Promise.all(['LPM482', 'UPS485', 'USD855'].map(placaVeh));
-prueba('Wialon: ingresa con el token y las unidades que traen la placa se enlazan solas (dos unidades con la misma placa, no)',
-  r.status === 201 && r.json.unidades === 5 && r.json.enlazadas === 2 && r.json.errores === 0 && lpmGps.wialonUnidadId === 7001 && upsGps.wialonUnidadId === 7002 && usdGps.wialonUnidadId === null
+const [lpmGps, upsGps, usdGps, dxyGps] = await Promise.all(['LPM482', 'UPS485', 'USD855', 'DXY545'].map(placaVeh));
+prueba('Wialon: ingresa con el token y las unidades que traen la placa se enlazan solas (con dos de la misma placa, la única que reporta; si no hay una sola, a mano)',
+  r.status === 201 && r.json.unidades === 7 && r.json.enlazadas === 3 && r.json.errores === 0 && lpmGps.wialonUnidadId === 7001 && upsGps.wialonUnidadId === 7002 && usdGps.wialonUnidadId === null
+  && dxyGps.wialonUnidadId === 7006
   && (await db.auditoria.count({ where: { entidad: 'vehiculo', entidadId: lpm.id, accion: 'ENLAZAR_WIALON', usuarioId: null } })) === 1, JSON.stringify(r.json));
 const vg = await db.vehiculoGps.findUnique({ where: { vehiculoId: lpm.id } });
 prueba('…y queda la última posición de cada vehículo (en vivo)', !!vg && Number(vg.latitud) === 7.3 && Number(vg.longitud) === -73.9 && segs(vg.posicionEn) === T0 + 108 * 60, JSON.stringify(vg));
@@ -2005,6 +2008,147 @@ const [estOtra, actOtra] = [await llamar('GET', '/gps/estado', { token: tOtra })
 prueba('la cuenta de Wialon es solo de su empresa: otra empresa de la instalación la ve sin configurar y sin unidades', estOtra.status === 200 && estOtra.json.configurado === false
   && estOtra.json.unidades.length === 0 && actOtra.status === 400, JSON.stringify([estOtra.json.configurado, actOtra.status]));
 wialonSimulado.close();
+
+console.log('\n15. Comercial: prospectos, oportunidades, cotizaciones y conversión a cliente (reemplaza a Bigin)');
+const [cmHseq, cmCond, cmPortal] = [await llamar('GET', '/comercial/embudo', { token: thseq }), await llamar('GET', '/comercial/embudo', { token: tc }), await llamar('GET', '/comercial/embudo', { token: tPA })];
+prueba('el módulo Comercial lo usan Comercial y Gerencia: HSEQ, el conductor y el portal de clientes no', cmHseq.status === 403 && cmCond.status === 403 && cmPortal.status === 403,
+  `${cmHseq.status} ${cmCond.status} ${cmPortal.status}`);
+const cmNit = String(800000000 + (Date.now() % 99_999_999)).slice(0, 9);
+r = await llamar('POST', '/comercial/prospectos', { token: tcom, cuerpo: { razonSocial: 'Palmas del Magdalena S.A.S.', nit: cmNit, sector: 'agricola', origen: 'REFERIDO',
+  telefono: '6070000000', contacto: { nombre: 'Ana Gómez', cargo: 'Jefe ambiental', correo: 'ana@palmas.test', telefono: '3000000000' } } });
+const cmPros = r.json;
+const cmDup = await llamar('POST', '/comercial/prospectos', { token: tcom, cuerpo: { razonSocial: 'Otra con el mismo NIT', nit: cmNit } });
+const cmFicha = await llamar('GET', `/comercial/prospectos/${cmPros.id}`, { token: tcom });
+prueba('prospecto nuevo con su contacto principal (el sector se toma de la lista y el asesor es quien lo crea); el NIT no se repite',
+  r.status === 201 && cmPros.sector === 'Agrícola' && cmPros.asesorId === comercialDb.id && cmDup.status === 409
+  && cmFicha.json.contactos?.length === 1 && cmFicha.json.contactos[0].principal === true, JSON.stringify([r.json, cmDup.json]).slice(0, 300));
+r = await llamar('POST', '/comercial/oportunidades', { token: tcom, cuerpo: { prospectoId: cmPros.id, titulo: 'Lodos de la planta extractora', valorMensual: 3_500_000 } });
+const cmOp = r.json;
+const cmTarea = (await llamar('POST', '/comercial/actividades', { token: tcom, cuerpo: { oportunidadId: cmOp.id, tipo: 'TAREA', asunto: 'Visitar la planta',
+  venceEn: new Date(Date.now() - 3_600_000).toISOString() } })).json;
+const cmSinFecha = await llamar('POST', '/comercial/actividades', { token: tcom, cuerpo: { oportunidadId: cmOp.id, tipo: 'TAREA', asunto: 'Tarea sin fecha' } });
+const cmLlamada = (await llamar('POST', '/comercial/actividades', { token: tcom, cuerpo: { oportunidadId: cmOp.id, tipo: 'LLAMADA', asunto: 'Primera llamada', detalle: 'Interesados' } })).json;
+r = await llamar('PATCH', `/comercial/oportunidades/${cmOp.id}`, { token: tcom, cuerpo: { etapa: 'CONTACTADA' } });
+const [cmTareas, cmAlertas] = [await llamar('GET', '/comercial/tareas', { token: tcom }), await llamar('GET', '/alertas', { token: tcom })];
+prueba('oportunidad con su tarea (sin fecha no se acepta) y su llamada ya hecha; cambia de etapa; la tarea vencida sale en las alertas de Comercial',
+  cmOp.etapa === 'NUEVA' && cmTarea.hechaEn === null && cmSinFecha.status === 400 && !!cmLlamada.hechaEn && r.json.etapa === 'CONTACTADA'
+  && cmTareas.json.some?.((t) => t.id === cmTarea.id) && cmAlertas.json.some?.((x) => x.tipo === 'comercial' && /tarea comercial vencida|tareas comerciales vencidas/.test(x.titulo)),
+  JSON.stringify(cmAlertas.json.filter?.((x) => x.tipo === 'comercial')));
+r = await llamar('POST', `/comercial/actividades/${cmTarea.id}/hecha`, { token: tcom, cuerpo: { resultado: 'Visita hecha: 2 t/mes de lodos' } });
+prueba('…la tarea se marca hecha con su resultado', r.status === 200 && !!r.json.hechaEn && /Resultado: Visita hecha/.test(r.json.detalle), JSON.stringify(r.json).slice(0, 200));
+
+// Cotización: borrador → vista previa → enviada (número, PDF, verificación) → aceptada
+const cmCat = (await llamar('GET', '/declaraciones/catalogos', { token: tcom })).json;
+const cmServ = await db.catalogoResiduo.findFirst({ where: { empresaId: comercialDb.empresaId, tipo: 'SERVICIO', activo: true, lineaServicioId: { not: null } } });
+const cmKg = cmCat.metricasPrecio.find((m) => m.abreviacion === 'kg'), cmRespel = cmCat.categorias.find((x) => x.codigo === 'RESPEL');
+const cmLinea = cmCat.lineas.find((x) => x.codigo === '01'), cmBio = cmCat.disposiciones.find((x) => x.codigo === 'BIO');
+r = await llamar('POST', `/comercial/oportunidades/${cmOp.id}/cotizaciones`, { token: tcom, cuerpo: { validezDias: 30, formaPago: 'CREDITO_30', condiciones: 'Incluye los recipientes.', items: [
+  { tipo: 'SERVICIO', catalogoId: cmServ.id, descripcion: cmServ.nombre, precioUnitario: 450_000, frecuencia: 'mensual' },
+  { tipo: 'RESIDUO', descripcion: 'Lodos aceitosos', categoriaId: cmRespel.id, lineaServicioId: cmLinea.id, disposicionId: cmBio.id, esPeligroso: true, metricaId: cmKg.id, cantidadEstimada: 2000, precioUnitario: 780 },
+  { tipo: 'RESIDUO', descripcion: 'Renglón sin línea de servicio', precioUnitario: 1000 },
+] } });
+const cmCot = r.json;
+const cmVp = await fetch(API + `/comercial/cotizaciones/${cmCot.id}/vista-previa`, { headers: { authorization: `Bearer ${tcom}` } });
+const cmVpBuf = Buffer.from(await cmVp.arrayBuffer());
+prueba('cotización en borrador: sin número, con el total estimado de lo que tiene cantidad; se revisa en PDF antes de enviarla',
+  r.status === 201 && cmCot.estado === 'BORRADOR' && cmCot.numero === null && Number(cmCot.totalEstimado) === 1_560_000
+  && cmVp.status === 200 && (cmVp.headers.get('content-type') ?? '').includes('application/pdf') && cmVpBuf.subarray(0, 4).toString() === '%PDF', JSON.stringify(r.json).slice(0, 300));
+r = await llamar('POST', `/comercial/cotizaciones/${cmCot.id}/enviar`, { token: tcom });
+const cmEnv = r.json;
+const cmEditarEnviada = await llamar('PATCH', `/comercial/cotizaciones/${cmCot.id}`, { token: tcom, cuerpo: { items: [{ tipo: 'SERVICIO', descripcion: 'Otra cosa', precioUnitario: 1 }] } });
+let cmCambioDb = 'se cambió';
+try { await db.cotizacionItem.updateMany({ where: { cotizacionId: cmCot.id }, data: { precioUnitario: 1 } }); } catch (e) { cmCambioDb = /ya se envió/.test(String(e.message)) ? 'no' : String(e.message); }
+const [cmEnlace, cmVerif, cmOpTras] = [await llamar('POST', `/comercial/cotizaciones/${cmCot.id}/enlace`, { token: tcom }), await llamar('GET', `/verificar/${cmEnv.codigoVerificacion}`),
+  (await llamar('GET', `/comercial/oportunidades/${cmOp.id}`, { token: tcom })).json];
+prueba('enviarla le da número (COT-AAAA-0001), PDF guardado y código de verificación público (sin datos del cliente); ya no cambia, tampoco en la base; la oportunidad pasa a cotizada con su seguimiento',
+  r.status === 200 && /^COT-\d{4}-\d{4}$/.test(cmEnv.numero) && !!cmEnv.pdfClave && cmEditarEnviada.status === 409 && cmCambioDb === 'no' && cmEnlace.status === 200 && !!cmEnlace.json.url
+  && cmVerif.status === 200 && cmVerif.json.documento === 'Cotización' && cmVerif.json.numero === cmEnv.numero && !JSON.stringify(cmVerif.json).includes('Palmas')
+  && cmOpTras.etapa === 'COTIZADA' && cmOpTras.actividades.some((x) => /Seguimiento a la cotización/.test(x.asunto) && !x.hechaEn), JSON.stringify([cmEnv.numero, cmEditarEnviada.status, cmCambioDb, cmVerif.json]).slice(0, 400));
+r = await llamar('POST', `/comercial/cotizaciones/${cmCot.id}/responder`, { token: tcom, cuerpo: { aceptada: true } });
+const cmResp2 = await llamar('POST', `/comercial/cotizaciones/${cmCot.id}/responder`, { token: tcom, cuerpo: { aceptada: false, motivo: 'Cambió de opinión' } });
+prueba('…el cliente la acepta (la oportunidad pasa a negociación) y la respuesta no se cambia', r.status === 200 && r.json.estado === 'ACEPTADA' && cmResp2.status === 409
+  && (await db.oportunidad.findUnique({ where: { id: cmOp.id } })).etapa === 'NEGOCIACION', JSON.stringify([r.json.estado, cmResp2.status]));
+
+// Ganar: cliente con su sede y declaraciones con tarifa, sin volver a digitar
+const cmSinDatos = await llamar('POST', `/comercial/oportunidades/${cmOp.id}/ganar`, { token: tcom, cuerpo: { cotizacionId: cmCot.id } });
+r = await llamar('POST', `/comercial/oportunidades/${cmOp.id}/ganar`, { token: tcom, cuerpo: { cotizacionId: cmCot.id,
+  cliente: { nit: cmNit, razonSocial: 'Palmas del Magdalena S.A.S.', representanteLegal: 'Carlos Pérez', sector: 'Agrícola' },
+  sede: { nombre: 'Planta Puerto Wilches', direccion: 'Km 12 vía Puerto Wilches', municipioDane: '68575', contacto: 'Ana Gómez' } } });
+const cmGan = r.json;
+const cmCliente = await db.cliente.findUnique({ where: { id: cmGan.clienteId ?? randomUUID() }, include: { sucursales: true, declaraciones: { include: { tarifas: true } } } });
+prueba('ganar crea el cliente con su sede principal y vuelve la cotización aceptada declaraciones con su tarifa (servicio para autorizar, residuo en borrador); el renglón sin línea se explica',
+  cmSinDatos.status === 400 && r.status === 200 && cmGan.nuevoCliente === true && cmCliente?.sucursales.length === 1 && cmCliente.sucursales[0].esPrincipal && cmCliente.representanteLegal === 'Carlos Pérez'
+  && cmGan.declaraciones.length === 2 && cmGan.omitidas.length === 1
+  && cmCliente.declaraciones.some((d) => d.tipo === 'SERVICIO' && d.estado === 'PENDIENTE' && d.catalogoId === cmServ.id && Number(d.tarifas[0]?.precioUnitario) === 450_000 && d.tarifas[0].formaPago === 'CREDITO_30')
+  && cmCliente.declaraciones.some((d) => d.tipo === 'RESIDUO' && d.estado === 'BORRADOR' && d.esPeligroso && Number(d.tarifas[0]?.precioUnitario) === 780 && d.tarifas[0].metricaId === cmKg.id),
+  JSON.stringify([cmSinDatos.json, cmGan]).slice(0, 500));
+const cmReabrir = await llamar('PATCH', `/comercial/oportunidades/${cmOp.id}`, { token: tcom, cuerpo: { etapa: 'NEGOCIACION' } });
+let cmReabrirDb = 'se reabrió';
+try { await db.oportunidad.update({ where: { id: cmOp.id }, data: { etapa: 'NEGOCIACION', cerradaEn: null } }); } catch (e) { cmReabrirDb = /no se reabre/.test(String(e.message)) ? 'no' : String(e.message); }
+prueba('…una oportunidad ganada no se reabre (tampoco en la base) y el prospecto queda enlazado a su cliente', cmReabrir.status === 409 && cmReabrirDb === 'no'
+  && (await db.prospecto.findUnique({ where: { id: cmPros.id } })).clienteId === cmGan.clienteId, `${cmReabrir.status} ${cmReabrirDb}`);
+const cmOp2 = (await llamar('POST', '/comercial/oportunidades', { token: tcom, cuerpo: { prospectoId: cmPros.id, titulo: 'Aceites usados' } })).json;
+const cmSinMotivo = await llamar('POST', `/comercial/oportunidades/${cmOp2.id}/perder`, { token: tcom, cuerpo: { motivo: '' } });
+r = await llamar('POST', `/comercial/oportunidades/${cmOp2.id}/perder`, { token: tcom, cuerpo: { motivo: 'Eligió otro gestor por precio' } });
+const cmReab = await llamar('PATCH', `/comercial/oportunidades/${cmOp2.id}`, { token: tcom, cuerpo: { etapa: 'CONTACTADA' } });
+let cmBorrar = 'se borró';
+try { await db.oportunidad.delete({ where: { id: cmOp2.id } }); } catch (e) { cmBorrar = /no se borran/.test(String(e.message)) ? 'no' : String(e.message); }
+prueba('perder pide el motivo; una perdida se puede reabrir; las oportunidades no se borran', cmSinMotivo.status === 400 && r.json.etapa === 'PERDIDA' && cmReab.json.etapa === 'CONTACTADA'
+  && cmReab.json.cerradaEn === null && cmBorrar === 'no', JSON.stringify([cmSinMotivo.status, r.json.etapa, cmReab.json.etapa, cmBorrar]));
+r = await llamar('POST', '/comercial/oportunidades', { token: tcom, cuerpo: { clienteId: suc.clienteId, titulo: 'Ampliar: limpieza de trampas de grasa' } });
+const cmFichaCliente = await db.prospecto.findMany({ where: { clienteId: suc.clienteId } });
+const cmOtraVez = await llamar('POST', '/comercial/oportunidades', { token: tcom, cuerpo: { clienteId: suc.clienteId, titulo: 'Otra para el mismo cliente' } });
+prueba('oportunidad para un cliente que ya existe: se crea su ficha comercial enlazada, una sola', r.status === 201 && cmFichaCliente.length === 1 && r.json.prospectoId === cmFichaCliente[0].id
+  && cmOtraVez.json.prospectoId === cmFichaCliente[0].id, JSON.stringify(r.json).slice(0, 200));
+const cmEmbudo = await llamar('GET', '/comercial/embudo', { token: tcom });
+prueba('embudo: abiertas y cerradas recientes con su próxima tarea, y los indicadores (ganadas del mes, tasa de cierre)', cmEmbudo.status === 200
+  && cmEmbudo.json.oportunidades.some((o) => o.id === cmOp.id && o.etapa === 'GANADA') && cmEmbudo.json.kpis.ganadasMes >= 1 && cmEmbudo.json.kpis.abiertas >= 2
+  && typeof cmEmbudo.json.kpis.tasaCierre === 'number', JSON.stringify(cmEmbudo.json.kpis));
+
+// Formulario del sitio web (sin sesión)
+const cmWeb = (cuerpo) => fetch(API + '/comercial/formulario-web', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+const [cmW1, cmRobot, cmSinPolitica] = [
+  await cmWeb({ empresa: 'Hotel La Ceiba', nombre: 'Luis Rey', correo: 'luis@laceiba.test', servicio: 'Recolección de aceite de cocina', mensaje: 'Necesitamos cotización', aceptaDatos: true }),
+  await cmWeb({ empresa: 'Spam Robot', nombre: 'Bot', correo: 'bot@spam.test', aceptaDatos: true, sitio: 'http://spam.test' }),
+  await cmWeb({ empresa: 'Sin política', nombre: 'Persona', correo: 'p@x.test', aceptaDatos: false }),
+];
+const cmPWeb = await db.prospecto.findFirst({ where: { razonSocial: 'Hotel La Ceiba' }, include: { oportunidades: true, actividades: true, contactos: true } });
+const cmAlWeb = (await llamar('GET', '/alertas', { token: tcom })).json;
+prueba('formulario del sitio web (sin sesión): crea el prospecto, su contacto, la oportunidad y la tarea de responder (sale en las alertas); el robot y quien no acepta la política no entran',
+  cmW1.status === 201 && cmRobot.status === 201 && cmSinPolitica.status === 400 && cmPWeb?.origen === 'WEB' && cmPWeb.contactos.length === 1 && cmPWeb.oportunidades.length === 1
+  && cmPWeb.actividades.some((x) => x.tipo === 'TAREA' && !x.hechaEn) && cmPWeb.actividades.some((x) => /política de tratamiento de datos/.test(x.detalle ?? ''))
+  && !(await db.prospecto.findFirst({ where: { razonSocial: 'Spam Robot' } })) && cmAlWeb.some?.((x) => x.tipo === 'comercial' && /sitio web por responder/.test(x.titulo)),
+  JSON.stringify([cmW1.status, cmRobot.status, cmSinPolitica.status, cmAlWeb.filter?.((x) => x.tipo === 'comercial')]).slice(0, 400));
+
+// Importación de Bigin: vista previa, importación y repetirla sin duplicar
+const cmEmpresasCsv = 'Record Id,Company Name,Phone,Website,Billing City,Description,Company Owner\n'
+  + 'zcrm_1001,Cementos del Norte S.A.,6075551234,www.cementos.test,Bucaramanga,Cliente potencial grande,Comercial E2E\n'
+  + 'zcrm_1002,Palmas del Magdalena SAS,,,,,\n'
+  + 'zcrm_1003,,,,,,\n';
+const cmContactosCsv = 'Record Id,First Name,Last Name,Email,Mobile,Title,Company Name,Company Name.id\n'
+  + 'zcrm_2001,María,López,maria@cementos.test,3001112233,Coordinadora HSE,Cementos del Norte S.A.,zcrm_1001\n'
+  + 'zcrm_2002,Pedro,Ruiz,,3009998877,Compras,Ferretería El Tornillo,\n';
+const cmNegociosCsv = 'Record Id,Deal Name,Company Name,Company Name.id,Contact Name,Stage,Amount,Closing Date,Deal Owner\n'
+  + 'zcrm_3001,Disposición de escombros,Cementos del Norte S.A.,zcrm_1001,María López,Proposal/Price Quote,"COP 12,500,000.00",2026-12-15,Comercial E2E\n'
+  + 'zcrm_3002,Aceites 2025,Ferretería El Tornillo,,Pedro Ruiz,Closed Lost,800000,30/06/2025,\n'
+  + 'zcrm_3003,Contrato anual,Cementos del Norte S.A.,zcrm_1001,,Closed Won,5000000,2025-01-10,\n';
+const cmFormBigin = (confirmar) => { const fo = new FormData(); fo.append('empresas', new Blob([cmEmpresasCsv]), 'Empresas.csv'); fo.append('contactos', new Blob([cmContactosCsv]), 'Contactos.csv');
+  fo.append('negocios', new Blob([cmNegociosCsv]), 'Negocios.csv'); if (confirmar) fo.append('confirmar', 'true'); return fo; };
+const cmAntes = await db.prospecto.count();
+const cmVista = await llamar('POST', '/comercial/importar-bigin', { token: tcom, form: cmFormBigin(false) });
+const cmTrasVista = await db.prospecto.count();
+const cmImp = await llamar('POST', '/comercial/importar-bigin', { token: tcom, form: cmFormBigin(true) });
+const cmRepite = await llamar('POST', '/comercial/importar-bigin', { token: tcom, form: cmFormBigin(true) });
+const cmCementos = await db.prospecto.findFirst({ where: { biginId: 'zcrm_1001' }, include: { contactos: true, oportunidades: true } });
+const cmEsperado = (x) => x.empresas?.nuevas === 2 && x.empresas.existentes === 1 && x.contactos.nuevos === 2 && x.negocios.nuevos === 3 && x.totalErrores === 1
+  && x.negocios.porEtapa.COTIZADA === 1 && x.negocios.porEtapa.PERDIDA === 1 && x.negocios.porEtapa.GANADA === 1;
+prueba('Bigin: la vista previa no guarda nada y dice lo que hará; la importación crea empresas, contactos y negocios con su etapa y valor; repetirla no duplica',
+  cmVista.status === 200 && cmVista.json.confirmado === false && cmEsperado(cmVista.json) && cmTrasVista === cmAntes
+  && cmImp.status === 200 && cmImp.json.confirmado === true && cmEsperado(cmImp.json) && (await db.prospecto.count()) === cmAntes + 2
+  && cmCementos?.origen === 'BIGIN' && cmCementos.contactos.length === 1 && cmCementos.contactos[0].principal
+  && cmCementos.oportunidades.some((o) => o.etapa === 'COTIZADA' && Number(o.valorMensual) === 12_500_000) && cmCementos.oportunidades.some((o) => o.etapa === 'GANADA' && o.biginId === 'zcrm_3003')
+  && cmRepite.json.empresas.nuevas === 0 && cmRepite.json.contactos.nuevos === 0 && cmRepite.json.negocios.nuevos === 0 && cmRepite.json.negocios.existentes === 3,
+  JSON.stringify([cmVista.json, cmRepite.json]).slice(0, 600));
 
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);

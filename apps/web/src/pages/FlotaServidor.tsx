@@ -258,7 +258,8 @@ function FormVehiculo({ v, gps, listo }: { v?: Vehiculo; gps?: EstadoGps | null;
             {actual?.unidadId && !gps.unidades.some((u) => u.id === actual.unidadId) && <option value={actual.unidadId}>{actual.unidadNombre ?? actual.unidadId} (ya no está en la cuenta)</option>}
             {gps.unidades.map((u) => {
               const otro = gps.vehiculos.find((y) => y.unidadId === u.id && y.id !== v.id);
-              return <option key={u.id} value={u.id} disabled={!!otro}>{u.nombre}{otro ? ` (en ${otro.placa})` : ''}</option>;
+              const vieja = !u.posicionEn || Date.now() - new Date(u.posicionEn).getTime() > 30 * 86_400_000; // p. ej. el equipo viejo 2G
+              return <option key={u.id} value={u.id} disabled={!!otro}>{u.nombre}{otro ? ` (en ${otro.placa})` : vieja ? ' (no reporta hace más de 30 días)' : ''}</option>;
             })}
           </Select>
         </Field>

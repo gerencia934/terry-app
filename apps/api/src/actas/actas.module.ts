@@ -500,6 +500,10 @@ class ActasService {
       const cc = await this.db.certificadoComercial.findUnique({ where: { codigoVerificacion: codigo }, include: { empresa: { select: { razonSocial: true } } } });
       if (cc) return { valido: true, estado: 'EMITIDA' as const, documento: 'Certificado comercial', numero: cc.numero, emitidaEn: cc.creadoEn, emisor: { razonSocial: cc.empresa.razonSocial },
         mensaje: 'Documento auténtico: refleja la relación comercial a la fecha de su expedición.' };
+      // Cotización enviada: tampoco muestra datos del cliente ni precios
+      const cot = await this.db.cotizacion.findUnique({ where: { codigoVerificacion: codigo }, include: { empresa: { select: { razonSocial: true } } } });
+      if (cot?.numero) return { valido: true, estado: 'EMITIDA' as const, documento: 'Cotización', numero: cot.numero, emitidaEn: cot.enviadaEn, emisor: { razonSocial: cot.empresa.razonSocial },
+        mensaje: 'Documento auténtico: es la cotización que se envió en esa fecha (la oferta vale por el plazo que dice).' };
     }
     if (!x || x.estado === 'BORRADOR') throw new NotFoundException({ valido: false, mensaje: 'No existe un documento emitido con ese código.' });
     return {

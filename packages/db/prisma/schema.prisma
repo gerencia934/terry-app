@@ -318,6 +318,10 @@ model Empresa {
   sincronizacionesSiigo   SincronizacionSiigo[]
   eventosGps              EventoGps[]
   wialonEstado            WialonEstado?
+  prospectos              Prospecto[]
+  oportunidades           Oportunidad[]
+  actividadesComerciales  ActividadComercial[]
+  cotizaciones            Cotizacion[]
 
   @@map("empresas")
 }
@@ -422,6 +426,15 @@ model Usuario {
   declaracionesAceptadas  Declaracion[]            @relation("DeclAceptadaPor")
   declaracionesRevision   Declaracion[]            @relation("DeclRevisionPedidaPor")
   eventosGpsRevisados     EventoGps[]              @relation("EventoGpsRevisor")
+  prospectosAsesor        Prospecto[]              @relation("ProspectoAsesor")
+  prospectosCreados       Prospecto[]              @relation("ProspectoCreadoPor")
+  oportunidadesAsesor     Oportunidad[]            @relation("OportunidadAsesor")
+  oportunidadesCerradas   Oportunidad[]            @relation("OportunidadCerradaPor")
+  oportunidadesCreadas    Oportunidad[]            @relation("OportunidadCreadaPor")
+  actividadesResponsable  ActividadComercial[]     @relation("ActividadResponsable")
+  actividadesCreadas      ActividadComercial[]     @relation("ActividadCreadaPor")
+  cotizacionesEnviadas    Cotizacion[]             @relation("CotizacionEnviadaPor")
+  cotizacionesCreadas     Cotizacion[]             @relation("CotizacionCreadaPor")
   carguesRevertidos       CargueMasivo[]           @relation("CargueRevertidoPor")
   cumplimientos           ObligacionCumplimiento[] @relation("CumplimientoUsuario")
   declaracionesCreadas    Declaracion[]            @relation("DeclCreadaPor")
@@ -499,6 +512,8 @@ model Cliente {
   usuariosPortal          Usuario[]              @relation("UsuarioPortal")
   certificadosComerciales CertificadoComercial[]
   facturasSiigo           FacturaSiigo[]
+  prospectos              Prospecto[]
+  oportunidades           Oportunidad[]
 
   @@unique([empresaId, nit])
   @@map("clientes")
@@ -753,9 +768,10 @@ model CatalogoResiduo {
   valores         Json            @default("{}") // instantánea de las secciones 2 a 6 del formulario
   activo          Boolean         @default(true)
 
-  empresa       Empresa        @relation(fields: [empresaId], references: [id])
-  lineaServicio LineaServicio? @relation(fields: [lineaServicioId], references: [id])
-  declaraciones Declaracion[]
+  empresa         Empresa          @relation(fields: [empresaId], references: [id])
+  lineaServicio   LineaServicio?   @relation(fields: [lineaServicioId], references: [id])
+  declaraciones   Declaracion[]
+  cotizacionItems CotizacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("catalogo_residuos")
@@ -1915,8 +1931,9 @@ model CategoriaDeclarado {
   descripcion String?
   activo      Boolean @default(true)
 
-  empresa       Empresa       @relation(fields: [empresaId], references: [id])
-  declaraciones Declaracion[]
+  empresa         Empresa          @relation(fields: [empresaId], references: [id])
+  declaraciones   Declaracion[]
+  cotizacionItems CotizacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("categorias_declarado")
@@ -1964,10 +1981,11 @@ model LineaServicio {
   descripcion     String?
   activo          Boolean @default(true)
 
-  empresa       Empresa           @relation(fields: [empresaId], references: [id])
-  unidadNegocio UnidadNegocio     @relation(fields: [unidadNegocioId], references: [id])
-  declaraciones Declaracion[]
-  catalogo      CatalogoResiduo[]
+  empresa         Empresa           @relation(fields: [empresaId], references: [id])
+  unidadNegocio   UnidadNegocio     @relation(fields: [unidadNegocioId], references: [id])
+  declaraciones   Declaracion[]
+  catalogo        CatalogoResiduo[]
+  cotizacionItems CotizacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("lineas_servicio")
@@ -1989,6 +2007,7 @@ model Metrica {
   declaraciones     Declaracion[]
   manifiestoItems   ManifiestoItem[]
   conciliacionItems ConciliacionItem[]
+  cotizacionItems   CotizacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("metricas")
@@ -2017,6 +2036,7 @@ model Disposicion {
   declaraciones     DeclaracionDisposicion[]
   manifiestoItems   ManifiestoItem[]
   conciliacionItems ConciliacionItem[]
+  cotizacionItems   CotizacionItem[]
 
   @@unique([empresaId, codigo])
   @@map("disposiciones")
@@ -2106,6 +2126,7 @@ model Municipio {
   departamento String @db.VarChar(60)
 
   sucursales Sucursal[]
+  prospectos Prospecto[]
 
   @@map("municipios")
 }
@@ -2146,4 +2167,220 @@ model DisposicionGestor {
   @@id([disposicionId, proveedorId])
   @@index([proveedorId], map: "ix_disposicion_gestor_proveedor")
   @@map("disposicion_gestores")
+}
+
+// ---------------------------------------------------------------------
+// COMERCIAL (reemplaza a Bigin): prospectos, oportunidades por etapas, actividades y cotizaciones
+// ---------------------------------------------------------------------
+enum OrigenProspecto {
+  WEB // formulario del sitio web
+  BIGIN // importado de Bigin
+  REFERIDO
+  LLAMADA
+  VISITA
+  EVENTO
+  OTRO
+}
+
+enum EtapaOportunidad {
+  NUEVA
+  CONTACTADA
+  COTIZADA
+  NEGOCIACION
+  GANADA // creó (o amplió) el cliente: no se reabre
+  PERDIDA // con su motivo; se puede reabrir
+}
+
+enum TipoActividad {
+  LLAMADA
+  VISITA
+  CORREO
+  REUNION
+  WHATSAPP
+  TAREA
+  NOTA
+}
+
+enum EstadoCotizacion {
+  BORRADOR // se edita; no tiene número
+  ENVIADA // número, PDF y copia fija: ya no cambia
+  ACEPTADA
+  RECHAZADA
+}
+
+/// Empresa que puede volverse cliente. Si ya es cliente (o se ganó), queda enlazada a él.
+model Prospecto {
+  id                 String          @id @default(uuid()) @db.Uuid
+  empresaId          String          @map("empresa_id") @db.Uuid
+  razonSocial        String          @map("razon_social") @db.VarChar(200)
+  nit                String?         @db.VarChar(10) // sin DV; único por empresa (índice parcial en SQL)
+  sector             String?         @db.VarChar(60)
+  municipioDane      String?         @map("municipio_dane") @db.Char(5)
+  direccion          String?         @db.VarChar(300)
+  telefono           String?         @db.VarChar(30)
+  correo             String?         @db.VarChar(150)
+  sitioWeb           String?         @map("sitio_web") @db.VarChar(200)
+  representanteLegal String?         @map("representante_legal") @db.VarChar(150)
+  origen             OrigenProspecto @default(OTRO)
+  asesorId           String?         @map("asesor_id") @db.Uuid
+  clienteId          String?         @map("cliente_id") @db.Uuid // único (índice parcial en SQL)
+  notas              String?
+  activo             Boolean         @default(true)
+  biginId            String?         @map("bigin_id") @db.VarChar(60)
+  creadoPorId        String?         @map("creado_por") @db.Uuid
+  creadoEn           DateTime        @default(now()) @map("creado_en") @db.Timestamptz
+  actualizadoEn      DateTime        @default(now()) @updatedAt @map("actualizado_en") @db.Timestamptz
+
+  empresa       Empresa              @relation(fields: [empresaId], references: [id])
+  municipio     Municipio?           @relation(fields: [municipioDane], references: [codigoDane])
+  asesor        Usuario?             @relation("ProspectoAsesor", fields: [asesorId], references: [id])
+  cliente       Cliente?             @relation(fields: [clienteId], references: [id])
+  creadoPor     Usuario?             @relation("ProspectoCreadoPor", fields: [creadoPorId], references: [id])
+  contactos     ContactoComercial[]
+  oportunidades Oportunidad[]
+  actividades   ActividadComercial[]
+
+  @@index([empresaId, creadoEn(sort: Desc)], map: "ix_prospectos_empresa")
+  @@map("prospectos")
+}
+
+model ContactoComercial {
+  id          String   @id @default(uuid()) @db.Uuid
+  prospectoId String   @map("prospecto_id") @db.Uuid
+  nombre      String   @db.VarChar(150)
+  cargo       String?  @db.VarChar(100)
+  telefono    String?  @db.VarChar(30)
+  correo      String?  @db.VarChar(150)
+  principal   Boolean  @default(false) // uno por prospecto (índice parcial en SQL)
+  activo      Boolean  @default(true)
+  biginId     String?  @map("bigin_id") @db.VarChar(60)
+  creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  prospecto     Prospecto     @relation(fields: [prospectoId], references: [id])
+  oportunidades Oportunidad[]
+
+  @@index([prospectoId], map: "ix_contactos_prospecto")
+  @@map("contactos_comerciales")
+}
+
+/// Oportunidad de negocio por etapas. Ganada: creó o amplió el cliente (regla en la base: no se reabre).
+model Oportunidad {
+  id             String           @id @default(uuid()) @db.Uuid
+  empresaId      String           @map("empresa_id") @db.Uuid
+  prospectoId    String           @map("prospecto_id") @db.Uuid
+  contactoId     String?          @map("contacto_id") @db.Uuid
+  titulo         String           @db.VarChar(200)
+  etapa          EtapaOportunidad @default(NUEVA)
+  valorMensual   Decimal?         @map("valor_mensual") @db.Decimal(16, 2)
+  cierreEstimado DateTime?        @map("cierre_estimado") @db.Date
+  asesorId       String?          @map("asesor_id") @db.Uuid
+  motivoPerdida  String?          @map("motivo_perdida") @db.VarChar(300)
+  cerradaEn      DateTime?        @map("cerrada_en") @db.Timestamptz
+  cerradaPorId   String?          @map("cerrada_por") @db.Uuid
+  clienteId      String?          @map("cliente_id") @db.Uuid
+  notas          String?
+  biginId        String?          @map("bigin_id") @db.VarChar(60)
+  creadoPorId    String?          @map("creado_por") @db.Uuid
+  creadoEn       DateTime         @default(now()) @map("creado_en") @db.Timestamptz
+  actualizadoEn  DateTime         @default(now()) @updatedAt @map("actualizado_en") @db.Timestamptz
+
+  empresa      Empresa              @relation(fields: [empresaId], references: [id])
+  prospecto    Prospecto            @relation(fields: [prospectoId], references: [id])
+  contacto     ContactoComercial?   @relation(fields: [contactoId], references: [id])
+  asesor       Usuario?             @relation("OportunidadAsesor", fields: [asesorId], references: [id])
+  cerradaPor   Usuario?             @relation("OportunidadCerradaPor", fields: [cerradaPorId], references: [id])
+  creadoPor    Usuario?             @relation("OportunidadCreadaPor", fields: [creadoPorId], references: [id])
+  cliente      Cliente?             @relation(fields: [clienteId], references: [id])
+  actividades  ActividadComercial[]
+  cotizaciones Cotizacion[]
+
+  @@index([empresaId, etapa], map: "ix_oportunidades_etapa")
+  @@index([prospectoId], map: "ix_oportunidades_prospecto")
+  @@map("oportunidades")
+}
+
+/// Llamada, visita, correo, reunión, nota o tarea con fecha. Es la historia del cliente: no se borra.
+model ActividadComercial {
+  id            String        @id @default(uuid()) @db.Uuid
+  empresaId     String        @map("empresa_id") @db.Uuid
+  prospectoId   String        @map("prospecto_id") @db.Uuid
+  oportunidadId String?       @map("oportunidad_id") @db.Uuid
+  tipo          TipoActividad
+  asunto        String        @db.VarChar(200)
+  detalle       String?
+  venceEn       DateTime?     @map("vence_en") @db.Timestamptz // tarea o seguimiento programado
+  hechaEn       DateTime?     @map("hecha_en") @db.Timestamptz
+  responsableId String?       @map("responsable_id") @db.Uuid
+  creadoPorId   String?       @map("creado_por") @db.Uuid
+  creadoEn      DateTime      @default(now()) @map("creado_en") @db.Timestamptz
+
+  empresa     Empresa      @relation(fields: [empresaId], references: [id])
+  prospecto   Prospecto    @relation(fields: [prospectoId], references: [id])
+  oportunidad Oportunidad? @relation(fields: [oportunidadId], references: [id])
+  responsable Usuario?     @relation("ActividadResponsable", fields: [responsableId], references: [id])
+  creadoPor   Usuario?     @relation("ActividadCreadaPor", fields: [creadoPorId], references: [id])
+
+  @@index([prospectoId, creadoEn(sort: Desc)], map: "ix_actividades_prospecto")
+  @@map("actividades_comerciales")
+}
+
+/// Cotización de una oportunidad. Enviada (con número, PDF y copia fija) ya no cambia: solo su respuesta (regla en la base).
+model Cotizacion {
+  id                 String           @id @default(uuid()) @db.Uuid
+  empresaId          String           @map("empresa_id") @db.Uuid
+  oportunidadId      String           @map("oportunidad_id") @db.Uuid
+  numero             String?          @db.VarChar(20) // COT-2026-0001, al enviarla
+  estado             EstadoCotizacion @default(BORRADOR)
+  validezDias        Int              @default(30) @map("validez_dias")
+  tipoNegociacion    TipoNegociacion  @default(COBRO) @map("tipo_negociacion")
+  formaPago          FormaPago        @default(CONTADO) @map("forma_pago")
+  condiciones        String?
+  totalEstimado      Decimal          @default(0) @map("total_estimado") @db.Decimal(16, 2)
+  contenido          Json?
+  pdfClave           String?          @map("pdf_clave") @db.VarChar(300)
+  pdfSha256          String?          @map("pdf_sha256") @db.Char(64)
+  codigoVerificacion String?          @unique @map("codigo_verificacion") @db.Char(24)
+  enviadaEn          DateTime?        @map("enviada_en") @db.Timestamptz
+  enviadaPorId       String?          @map("enviada_por") @db.Uuid
+  respondidaEn       DateTime?        @map("respondida_en") @db.Timestamptz
+  motivoRechazo      String?          @map("motivo_rechazo") @db.VarChar(300)
+  creadoPorId        String?          @map("creado_por") @db.Uuid
+  creadoEn           DateTime         @default(now()) @map("creado_en") @db.Timestamptz
+
+  empresa     Empresa          @relation(fields: [empresaId], references: [id])
+  oportunidad Oportunidad      @relation(fields: [oportunidadId], references: [id])
+  enviadaPor  Usuario?         @relation("CotizacionEnviadaPor", fields: [enviadaPorId], references: [id])
+  creadoPor   Usuario?         @relation("CotizacionCreadaPor", fields: [creadoPorId], references: [id])
+  items       CotizacionItem[]
+
+  @@index([oportunidadId], map: "ix_cotizaciones_oportunidad")
+  @@map("cotizaciones")
+}
+
+/// Renglón de la cotización: servicio del catálogo o residuo con su tratamiento, unidad y precio. Al ganar se vuelve declaración con tarifa.
+model CotizacionItem {
+  id               String          @id @default(uuid()) @db.Uuid
+  cotizacionId     String          @map("cotizacion_id") @db.Uuid
+  orden            Int             @db.SmallInt
+  tipo             TipoDeclaracion
+  catalogoId       String?         @map("catalogo_id") @db.Uuid
+  descripcion      String          @db.VarChar(300)
+  categoriaId      String?         @map("categoria_id") @db.Uuid
+  lineaServicioId  String?         @map("linea_servicio_id") @db.Uuid
+  disposicionId    String?         @map("disposicion_id") @db.Uuid
+  esPeligroso      Boolean         @default(false) @map("es_peligroso")
+  metricaId        String?         @map("metrica_id") @db.Uuid // NULL = precio global por servicio
+  cantidadEstimada Decimal?        @map("cantidad_estimada") @db.Decimal(12, 2)
+  frecuencia       String?         @db.VarChar(60)
+  precioUnitario   Decimal         @map("precio_unitario") @db.Decimal(14, 2)
+
+  cotizacion    Cotizacion          @relation(fields: [cotizacionId], references: [id])
+  catalogo      CatalogoResiduo?    @relation(fields: [catalogoId], references: [id])
+  categoria     CategoriaDeclarado? @relation(fields: [categoriaId], references: [id])
+  lineaServicio LineaServicio?      @relation(fields: [lineaServicioId], references: [id])
+  disposicion   Disposicion?        @relation(fields: [disposicionId], references: [id])
+  metrica       Metrica?            @relation(fields: [metricaId], references: [id])
+
+  @@unique([cotizacionId, orden], map: "ux_citem_orden")
+  @@map("cotizacion_items")
 }

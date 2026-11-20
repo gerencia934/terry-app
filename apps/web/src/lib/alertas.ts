@@ -42,9 +42,9 @@ export function alertas(): Alerta[] {
   return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
 }
 
-interface AlertaApi { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas' | 'seguridad' | 'gps'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; referencia?: string }
-const RUTA: Record<AlertaApi['tipo'], RouteName> = { cumplimiento: 'permisos', flota: 'vehiculos', personal: 'usuarios', operacion: 'programacion', finanzas: 'facturacion', seguridad: 'usuarios', gps: 'seguimiento' };
-const CAT: Record<AlertaApi['tipo'], Alerta['categoria']> = { cumplimiento: 'Cumplimiento', flota: 'Flota', personal: 'Flota', operacion: 'Operación', finanzas: 'Facturación', seguridad: 'Seguridad', gps: 'Operación' };
+interface AlertaApi { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas' | 'seguridad' | 'gps' | 'comercial'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; referencia?: string }
+const RUTA: Record<AlertaApi['tipo'], RouteName> = { cumplimiento: 'permisos', flota: 'vehiculos', personal: 'usuarios', operacion: 'programacion', finanzas: 'facturacion', seguridad: 'usuarios', gps: 'seguimiento', comercial: 'comercial' };
+const CAT: Record<AlertaApi['tipo'], Alerta['categoria']> = { cumplimiento: 'Cumplimiento', flota: 'Flota', personal: 'Flota', operacion: 'Operación', finanzas: 'Facturación', seguridad: 'Seguridad', gps: 'Operación', comercial: 'Comercial' };
 
 /** Alertas del servidor en modo real; las de ejemplo en modo demostración. */
 export function useAlertas(): Alerta[] {

@@ -5,6 +5,7 @@ import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
 import { MODO_REAL, tienePermiso, useSesion } from './lib/api';
 import { FacturacionServidor } from './pages/FacturacionServidor';
+import { ComercialServidor } from './pages/ComercialServidor';
 import AceptarDatos from './pages/AceptarDatos';
 import { ConfigurarDobleFactor } from './pages/DobleFactor';
 import { Login, Recuperar, Restablecer } from './pages/Auth';
@@ -88,6 +89,8 @@ function Screen() {
       case 'descargues': return MODO_REAL ? <RecepcionPlantaServidor /> : <Recepcion />;
       case 'inventario': return MODO_REAL ? <InventarioServidor /> : <Inventario />;
       case 'certificados': return MODO_REAL ? <ActasServidor /> : <Certificados />;
+      case 'comercial': return MODO_REAL && tienePermiso('comercial.gestionar') ? <ComercialServidor />
+        : <p className="rounded-xl bg-surface-2 p-6 text-center text-muted">{MODO_REAL ? 'El embudo comercial es para Comercial y Gerencia.' : 'El embudo comercial necesita el servidor: esta es la versión de demostración.'}</p>;
       case 'facturacion': return MODO_REAL && tienePermiso('finanzas.ver') ? <FacturacionServidor />
         : <p className="rounded-xl bg-surface-2 p-6 text-center text-muted">{MODO_REAL ? 'Facturación es solo para Comercial, Facturación y Gerencia.' : 'Facturación necesita el servidor: esta es la versión de demostración.'}</p>;
       case 'permisos': return MODO_REAL ? <PermisosServidor /> : <Permisos />;

@@ -27,11 +27,11 @@ interface Config {
   /** GPS (Wialon): ubicación de la planta y reglas de las geocercas y alertas. */
   gps?: { plantaLatitud?: number | null; plantaLongitud?: number | null; radioPlantaM?: number; radioSedeM?: number; minutosParada?: number; kmDesvio?: number };
 }
-interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
+interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL' | 'COTIZACION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
 interface Texto { id: string; codigo: string; version: number; titulo: string; texto: string; disposiciones: string[]; orden: number; revisado: boolean; vigenteDesde: string }
 interface GrupoTexto { codigo: string; vigente: Texto | null; historial: { id: string; version: number; vigenteDesde: string; activo: boolean; revisado: boolean; creadoPor: { nombre: string } | null }[] }
-const DOCUMENTO = { MANIFIESTO: 'Manifiestos (y recibos)', ACTA: 'Certificados', INSPECCION: 'Inspecciones vehiculares', CERT_COMERCIAL: 'Certificados comerciales' };
+const DOCUMENTO = { MANIFIESTO: 'Manifiestos (y recibos)', ACTA: 'Certificados', INSPECCION: 'Inspecciones vehiculares', CERT_COMERCIAL: 'Certificados comerciales', COTIZACION: 'Cotizaciones' };
 const area = 'min-h-[120px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
 /** Correo diario de alertas: a cada persona de la oficina, las de su rol (Cumplimiento a HSEQ, Flota a Logística, Facturación a Comercial y Facturación…). */

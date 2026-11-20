@@ -59,6 +59,8 @@ const Esquema = z.object({
   // Consulta automática cada tantos segundos (30 a 300); false = solo con el botón «Actualizar» (pruebas)
   WIALON_CONSULTAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   WIALON_INTERVALO: sinVacio(z.coerce.number().int().min(30).max(300).default(60)),
+  // Formulario del sitio web (módulo Comercial): NIT de la empresa que recibe los prospectos. Vacío = la única empresa.
+  FORMULARIO_WEB_EMPRESA_NIT: z.string().trim().default(''),
   // Cola de trabajos (ZIP, Excel): esta copia del API los procesa (en producción puede haber una copia solo para eso)
   TRABAJOS_PROCESAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   TRABAJOS_SIMULTANEOS: sinVacio(z.coerce.number().int().min(1).max(8).default(2)),

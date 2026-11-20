@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 // y dentro del prototipo publicado. En producción puede migrarse a React Router sin tocar páginas.
 export const ROUTES = [
   'login', 'recuperar', 'restablecer', 'inicio',
-  'clientes', 'declaraciones', 'tarifas', 'exportar',
+  'comercial', 'clientes', 'declaraciones', 'tarifas', 'exportar',
   'solicitudes', 'por-confirmar', 'programacion', 'programacion-tabla', 'seguimiento',
   'inspecciones', 'manifiestos',
   'recepcion', 'descargues', 'inventario', 'certificados', 'facturacion',

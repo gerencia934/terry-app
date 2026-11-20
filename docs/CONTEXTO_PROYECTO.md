@@ -156,9 +156,24 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - ✅ alertas a Logística: paradas no programadas con RESPEL (15 min, ajustable) y desvíos (más de 5 km del trayecto,
     ajustable); quedan como evidencia, no se borran y se revisan con una explicación;
   - ✅ si Wialon falla, la operación sigue y hay alerta; al volver se pone al día solo;
-  - falta: el token de solo lectura de la cuenta real de Wialon (y la dirección, si es Wialon Local), y ubicar la planta y
-    las sedes que no tengan coordenadas.
+  - el token real quedó el 20-11-2026 solo en el `.env` del API (la cuenta entra por hosting.wialon.us: la API es
+    `hst-api.wialon.us`); 14 unidades. Con varias unidades de la misma placa (los equipos viejos 2G siguen en la cuenta)
+    se enlaza la única que reportó en los últimos 30 días;
+  - falta: ubicar la planta en Ajustes (lo hará la gerencia) y las sedes que no tengan coordenadas.
   98 pruebas de reglas y 460 e2e OK (con un Wialon simulado: las pruebas nunca tocan una cuenta real).
+- Módulo Comercial (20-11-2026), reemplaza a Bigin:
+  - ✅ prospectos con sus contactos, oportunidades por etapas (embudo), actividades y tareas con fecha;
+  - ✅ cotizaciones en PDF con número (COT-AAAA-NNNN) y código QR de verificación; enviada, ya no cambia;
+  - ✅ ganar una oportunidad crea el cliente con su sede principal y sus declaraciones con la tarifa cotizada (los
+    residuos quedan en borrador hasta completar su caracterización);
+  - ✅ formulario del sitio web: crea el prospecto y la tarea de responder, y avisa por correo a Comercial;
+  - ✅ importación de los CSV de Bigin (empresas, contactos y negocios) con vista previa y sin duplicar;
+  - ✅ alertas: solicitudes web por responder, tareas vencidas y cotizaciones sin respuesta;
+  - falta: exportar de Bigin los CSV reales e importarlos, y poner el formulario en el sitio web (ver docs/DESPLIEGUE.md).
+  111 pruebas de reglas y 474 e2e OK.
+- Publicación (20-11-2026): dominio `terravivasas.net` (Hostinger). TERRY-GO irá en `terrygo.terravivasas.net` (pantallas,
+  Cloudflare Pages) y `api-terrygo.terravivasas.net` (servidor en Render, base en Neon); pasos en docs/DESPLIEGUE.md.
+  `mantenimiento.terravivasas.net` es de otra aplicación (TV Mantenimiento), no de TERRY-GO.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

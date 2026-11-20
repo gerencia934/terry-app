@@ -14,6 +14,7 @@ import { ActorActual, Permiso, Publico, Zod, fechaColombia, type Actor } from '.
 import { veFinanzas } from '../finanzas/estado';
 import { DIAS_PARA_FACTURAR } from '../finanzas/finanzas.module';
 import { GpsService } from '../gps/gps.module';
+import { ComercialService } from '../comercial/comercial.module';
 
 const dias = (f: Date) => Math.ceil((f.getTime() - Date.now()) / 86_400_000);
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD').transform((x) => new Date(`${x}T00:00:00Z`));
@@ -82,11 +83,11 @@ function estadoDelActo(p: { licencia: string | null; licenciaIndefinida: boolean
   const d = Math.round((p.licenciaVence.getTime() - fechaColombia().getTime()) / 86_400_000);
   return d < 0 ? { estado: 'VENCIDA' as const, cubre: false, dias: d } : { estado: d <= 60 ? 'POR_VENCER' as const : 'VIGENTE' as const, cubre: true, dias: d };
 }
-export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas' | 'seguridad' | 'gps'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
+export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas' | 'seguridad' | 'gps' | 'comercial'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
 
 @Injectable()
 class CumplimientoService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly gps: GpsService) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly gps: GpsService, private readonly comercial: ComercialService) {}
 
   /** Disposiciones de la empresa por código (para ligar un acto o un gestor a lo que ampara). */
   private async disposicionesPorCodigo(a: Actor, codigos: string[], soloDeAliados = false) {
@@ -318,6 +319,8 @@ class CumplimientoService {
     }
     // GPS (Wialon), para Logística y Gerencia: paradas no programadas con RESPEL, desvíos sin revisar y si Wialon dejó de responder
     if (a.permisos.includes('*') || a.permisos.includes('rutas.programar')) out.push(...(await this.gps.alertas(a.empresaId)));
+    // Comercial (Comercial y Gerencia): solicitudes del sitio web por responder, tareas vencidas y cotizaciones sin respuesta
+    if (a.permisos.includes('*') || a.permisos.includes('comercial.gestionar')) out.push(...(await this.comercial.alertas(a.empresaId)));
     // Seguridad (solo el administrador): picos de ingresos fallidos, cuentas bloqueadas, descargas masivas y errores del servidor
     if (a.permisos.includes('*')) out.push(...(await this.alertasSeguridad(a)));
     const orden = { alta: 0, media: 1, info: 2 };
@@ -414,7 +417,7 @@ class CumplimientoService {
  */
 const QUIEN: Record<Alerta['tipo'], string[]> = {
   cumplimiento: ['permisos.gestionar'], flota: ['rutas.programar'], personal: ['rutas.programar'],
-  operacion: ['rutas.programar', 'solicitudes.aprobar', 'declaraciones.autorizar'], finanzas: ['finanzas.ver'], seguridad: [], gps: ['rutas.programar'],
+  operacion: ['rutas.programar', 'solicitudes.aprobar', 'declaraciones.autorizar'], finanzas: ['finanzas.ver'], seguridad: [], gps: ['rutas.programar'], comercial: ['comercial.gestionar'],
 };
 const leToca = (permisos: string[], tipo: Alerta['tipo']) => permisos.includes('*') || QUIEN[tipo].some((p) => permisos.includes(p));
 const NIVEL: Record<Alerta['nivel'], string> = { alta: 'URGENTE', media: 'PARA ATENDER', info: 'PARA SABER' };

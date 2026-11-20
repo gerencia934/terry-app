@@ -116,9 +116,9 @@ El sitio web sigue en Hostinger.
 
 Siigo y Wialon quedaron hechos el 19-11-2026. Las dos son de solo lectura: TERRY-GO consulta, guarda una copia y se pone
 al día solo cuando vuelven (Siigo, una vez al día y con un botón; Wialon, cada 30 a 60 segundos desde el último mensaje
-procesado). Si fallan, la operación sigue y se avisa en las alertas. El módulo Comercial (en reemplazo de Bigin) y la
-salida de Grinclic van en sus fases; lo que escriba en otro sistema usará una tabla de envíos pendientes (patrón
-*outbox*) con reintentos y registro de cada intercambio.
+procesado). Si fallan, la operación sigue y se avisa en las alertas. El módulo Comercial, que reemplaza a Bigin, quedó
+hecho el 20-11-2026 con la importación de los CSV de Bigin. La salida de Grinclic va en su fase; lo que escriba en otro
+sistema usará una tabla de envíos pendientes (patrón *outbox*) con reintentos y registro de cada intercambio.
 
 ## 8. Orden propuesto
 
@@ -156,7 +156,7 @@ salida de Grinclic van en sus fases; lo que escriba en otro sistema usará una t
    - portal de clientes (hecho el 19-11-2026: consulta, descarga, cargue de declaraciones y pedidos);
    - Wialon (hecho el 19-11-2026, probado con un simulador; falta el token de la cuenta real);
    - Siigo (hecho el 19-11-2026);
-   - módulo Comercial;
+   - módulo Comercial (hecho el 20-11-2026, con la importación de Bigin y el formulario del sitio web);
    - pruebas de penetración y de carga;
    - operación en paralelo y salida de Grinclic.
 

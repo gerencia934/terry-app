@@ -173,8 +173,12 @@ export class GpsService implements OnApplicationBootstrap, OnModuleDestroy {
     const soltados = new Set((await this.db.auditoria.findMany({ where: { entidad: 'vehiculo', accion: 'DESENLAZAR_WIALON', entidadId: { in: [...porVehiculo.keys()] } },
       select: { entidadId: true } })).map((x) => x.entidadId));
     let n = 0;
-    for (const [vehiculoId, us] of porVehiculo) {
-      if (us.length !== 1 || soltados.has(vehiculoId)) continue; // dos unidades con la misma placa: se enlaza a mano
+    const hace30Dias = Date.now() / 1000 - 30 * 86_400;
+    for (const [vehiculoId, todas] of porVehiculo) {
+      // Varias unidades con la misma placa (p. ej. el equipo viejo 2G que sigue en la cuenta): vale la única que reportó
+      // en los últimos 30 días; si no hay una sola, se enlaza a mano en Flota
+      const us = todas.length > 1 ? todas.filter((u) => typeof u.pos?.t === 'number' && u.pos.t > hace30Dias) : todas;
+      if (us.length !== 1 || soltados.has(vehiculoId)) continue;
       const v = vehiculos.find((x) => x.id === vehiculoId)!;
       const u = us[0];
       try {
