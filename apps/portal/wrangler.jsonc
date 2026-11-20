@@ -1,0 +1,19 @@
+// Portal Terry-App en Cloudflare Pages: pantallas (dist/) y servidor (functions/ → servidor/). Ver docs/ECOSISTEMA.md.
+// Secretos (solo en Cloudflare, nunca aquí): DATABASE_URL, PORTAL_SECRETO y PORTAL_CLAVE_PRIVADA.
+{
+  "$schema": "../../despliegue/cloudflare/node_modules/wrangler/config-schema.json",
+  "name": "terry-portal",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // La base está en Virginia: el servidor corre cerca de ella (cada ingreso hace varias consultas seguidas)
+  "placement": { "mode": "smart" },
+  "vars": {
+    "PORTAL_URL": "https://app.terravivasas.net",
+    "MODULOS_SSO": "residuos",
+    "MODULO_RESIDUOS_URL": "https://residuos.terravivasas.net",
+    "MODULO_MANTENIMIENTO_URL": "https://mantenimiento.terravivasas.net",
+    "MODULO_CRM_URL": "",
+    "MODULO_PLANTA_URL": ""
+  }
+}

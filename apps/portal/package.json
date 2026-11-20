@@ -1,0 +1,32 @@
+{
+  "name": "@terraviva/portal",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Portal Terry-App: entrada única y menú de módulos del ecosistema (docs/ECOSISTEMA.md).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "node --test test/cripto.test.ts test/portal.test.ts",
+    "esquema": "node scripts/esquema.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
+    "lucide-react": "0.468.0",
+    "qrcode": "1.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/qrcode": "1.5.6",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "pg": "8.23.1",
+    "postcss": "8.5.33",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.6.3",
+    "vite": "6.4.6"
+  }
+}

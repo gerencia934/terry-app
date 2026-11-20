@@ -65,6 +65,7 @@ jobs:
         if: steps.cuenta.outputs.lista == 'si'
         env:
           VITE_API_URL: /api/v1
+          VITE_PORTAL_URL: https://app.terravivasas.net
         run: |
           npm run build -w @terraviva/shared
           npm run build -w @terraviva/web
@@ -100,3 +101,69 @@ jobs:
             exit 1
           fi
           echo "::warning::El servidor aún no puede arrancar: faltan claves (DATABASE_URL o la política de datos POLITICA_DATOS_URL y POLITICA_DATOS_VERSION). Cárguelas y vuelva a publicar (docs/DESPLIEGUE.md)."
+
+  # Portal Terry-App (app.terravivasas.net): la entrada única del ecosistema. Va en un trabajo aparte: si falla la
+  # publicación de Residuos, el portal se publica igual, y al revés (docs/ECOSISTEMA.md).
+  portal:
+    name: Publicar el portal Terry-App
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: 'false'
+      VERSION: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: ¿Está conectada la cuenta de Cloudflare?
+        id: cuenta
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice title=Sin publicar::Faltan CLOUDFLARE_API_TOKEN y CLOUDFLARE_ACCOUNT_ID en los secretos de GitHub."
+            echo "lista=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "lista=si" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.cuenta.outputs.lista == 'si'
+        with:
+          ref: ${{ env.VERSION }}
+
+      - uses: actions/setup-node@v4
+        if: steps.cuenta.outputs.lista == 'si'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            despliegue/cloudflare/package-lock.json
+
+      - name: Instalar dependencias
+        if: steps.cuenta.outputs.lista == 'si'
+        run: |
+          npm ci
+          npm ci --prefix despliegue/cloudflare
+
+      - name: Compilar el portal
+        if: steps.cuenta.outputs.lista == 'si'
+        run: npm run build -w @terraviva/portal
+
+      - name: Publicar en Pages (pantallas y servidor; el proyecto se crea la primera vez)
+        if: steps.cuenta.outputs.lista == 'si'
+        working-directory: apps/portal
+        run: |
+          W=../../despliegue/cloudflare/node_modules/.bin/wrangler
+          if ! $W pages project list | grep -qw terry-portal; then
+            $W pages project create terry-portal --production-branch main
+          fi
+          $W pages deploy --branch main --commit-hash "$VERSION" --commit-dirty=true
+
+      - name: Revisar que el portal responda
+        if: steps.cuenta.outputs.lista == 'si'
+        run: |
+          for i in $(seq 1 18); do
+            if curl -sf --max-time 20 https://terry-portal.pages.dev/api/v1/salud; then echo; exit 0; fi
+            sleep 10
+          done
+          echo "::warning::El portal no respondió en terry-portal.pages.dev/api/v1/salud: revise sus claves (DATABASE_URL, PORTAL_SECRETO y PORTAL_CLAVE_PRIVADA) en Cloudflare."

@@ -3,12 +3,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Bell, Menu, X, Home, FileText, Tags, Truck, CalendarDays, ClipboardCheck, FileStack, Scale, BarChart3, Users, Car, UserCog,
   ListTree, ShieldCheck, Smartphone, Moon, Sun, Search, Upload, Download, Hourglass, Radar, Table2, Boxes, Settings,
-  Building2, Award, Milestone, FileSpreadsheet, Server, FlaskConical, Receipt, Handshake, type LucideIcon,
+  Building2, Award, Milestone, FileSpreadsheet, Server, FlaskConical, Receipt, Handshake, LayoutGrid, type LucideIcon,
 } from 'lucide-react';
 import { useRouter, type RouteName } from '../lib/router';
 import { cx } from '../lib/format';
 import { useAlertas } from '../lib/alertas';
-import { MODO_REAL, salir, salirDeTodos, sesionActual, tienePermiso } from '../lib/api';
+import { MODO_REAL, PORTAL_URL, salir, salirDeTodos, sesionActual, tienePermiso } from '../lib/api';
 import { VentanaDobleFactor } from './DobleFactor';
 import { Descargas } from './Descargas';
 import { MODULO } from './Marca';
@@ -129,6 +129,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className={cx('flex items-center gap-2 rounded-lg px-3 py-2 text-[12px]', MODO_REAL ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn')}>
           {MODO_REAL ? <Server size={14} /> : <FlaskConical size={14} />}{MODO_REAL ? 'Conectado al servidor' : 'Modo demostración'}
         </div>
+        {MODO_REAL && PORTAL_URL && (
+          <a href={PORTAL_URL} className="flex h-9 items-center gap-3 rounded-lg px-3 text-[13px] text-muted hover:bg-surface-2" title="Volver al portal Terry-App: Residuos, Mantenimiento, CRM y Planta">
+            <LayoutGrid size={16} />Portal Terry-App
+          </a>
+        )}
         <button onClick={() => go('campo')} className="flex h-9 items-center gap-3 rounded-lg px-3 text-[13px] text-muted hover:bg-surface-2"><Smartphone size={16} />App del conductor</button>
       </div>
     </div>

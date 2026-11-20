@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { Eye, EyeOff, ShieldCheck, ArrowLeft, MailCheck, KeyRound, Server, FlaskConical } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Eye, EyeOff, ShieldCheck, ArrowLeft, MailCheck, KeyRound, Server, FlaskConical, LayoutGrid, Loader2 } from 'lucide-react';
 import { Button, Field, Input } from '../components/ui';
 import { Logo } from '../components/AppShell';
 import { useRouter } from '../lib/router';
-import { API_URL, MODO_REAL, api, ingresar, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
+import { API_URL, MODO_REAL, PORTAL_URL, api, ingresar, ingresarConPortal, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
 import { Carrusel } from '../components/Carrusel';
 import { MarcaTerryApp } from '../components/Marca';
 
@@ -95,8 +95,42 @@ export function Login() {
         <div className="flex justify-end text-[13px]"><button type="button" onClick={() => go('recuperar')} className="font-medium text-brand hover:underline">Olvidé mi contraseña</button></div>
         <Button variant="primary" size="lg" type="submit" disabled={enviando}>{enviando ? 'Ingresando…' : 'Ingresar'}</Button>
         {!MODO_REAL && <Button type="button" size="lg" onClick={() => go('campo')}>Ver la app del conductor</Button>}
+        {MODO_REAL && PORTAL_URL && (
+          <a href={PORTAL_URL} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-line bg-surface px-5 text-base font-medium text-fg hover:bg-surface-2">
+            <LayoutGrid size={18} /> Entrar con mi cuenta Terry-App
+          </a>
+        )}
       </form>
       <Modo />
+    </AuthLayout>
+  );
+}
+
+/** Llegada desde el portal Terry-App con un pase (entrada única): entra sin pedir contraseña ni código otra vez. */
+export function EntradaPortal({ pase, alTerminar }: { pase: string; alTerminar: () => void }) {
+  const [err, setErr] = useState('');
+  const hecho = useRef(false);
+  const terminar = useRef(alTerminar);
+  terminar.current = alTerminar;
+  useEffect(() => {
+    if (hecho.current) return; // el pase sirve una sola vez
+    hecho.current = true;
+    ingresarConPortal(pase)
+      .then(() => { location.replace('#inicio'); terminar.current(); })
+      .catch((x) => setErr(x instanceof ErrorApi ? x.message : 'No se pudo entrar desde el portal. Intente de nuevo.'));
+  }, [pase]);
+  return (
+    <AuthLayout>
+      <MarcaTerryApp />
+      {err ? (
+        <div className="mt-8 flex flex-col gap-4">
+          <p className="rounded-lg bg-bad/10 px-3 py-2 text-[13px] text-bad" role="alert">{err}</p>
+          {PORTAL_URL && <a href={PORTAL_URL} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-base font-medium text-on-brand hover:bg-brand/90"><LayoutGrid size={18} /> Volver al portal Terry-App</a>}
+          <Button size="lg" onClick={() => { location.replace('#login'); terminar.current(); }}>Ingresar con la cuenta de Residuos</Button>
+        </div>
+      ) : (
+        <p className="mt-8 flex items-center gap-2 text-muted"><Loader2 size={18} className="animate-spin text-brand" /> Entrando desde el portal Terry-App…</p>
+      )}
     </AuthLayout>
   );
 }

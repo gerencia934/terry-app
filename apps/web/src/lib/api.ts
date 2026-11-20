@@ -90,6 +90,26 @@ export async function ingresar(email: string, clave: string): Promise<Sesion | D
   guardar(r);
   return r;
 }
+/** Dirección del portal Terry-App (entrada única del ecosistema; docs/ECOSISTEMA.md). Vacía: sin portal. */
+export const PORTAL_URL: string = (import.meta.env.VITE_PORTAL_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+// Pase del portal («…/#sso=…»): se lee una sola vez al abrir la app y se quita de la barra de direcciones antes de que el
+// enrutador la lea (no queda en el historial ni se comparte por error al copiar la dirección).
+const paseInicial = (() => {
+  if (typeof location === 'undefined') return '';
+  const m = location.hash.match(/^#sso=([A-Za-z0-9_.-]{40,4000})$/);
+  if (!m) return '';
+  history.replaceState(null, '', `${location.pathname}${location.search}#inicio`);
+  return m[1];
+})();
+export const paseDelPortal = () => paseInicial;
+/** Entrada única: cambia el pase del portal por una sesión de Residuos (si había otra sesión en este equipo, la cierra). */
+export async function ingresarConPortal(pase: string) {
+  const anterior = sesion;
+  const nueva = await api<Sesion>('/auth/portal', { cuerpo: { pase } });
+  guardar(nueva);
+  if (anterior && anterior.refreshToken !== nueva.refreshToken) void api('/auth/salir', { cuerpo: { refreshToken: anterior.refreshToken } }).catch(() => undefined);
+  return nueva;
+}
 /** Segundo paso: el código de la app de autenticación (o uno de respaldo). */
 export async function verificarDobleFactor(desafio: string, codigo: string) {
   guardar(await api<Sesion>('/auth/2fa/verificar', { cuerpo: { desafio, codigo } }));

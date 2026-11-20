@@ -3,12 +3,12 @@ import { Proteccion } from './components/Proteccion';
 import { ToastProvider } from './components/ui';
 import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
-import { MODO_REAL, tienePermiso, useSesion } from './lib/api';
+import { MODO_REAL, paseDelPortal, tienePermiso, useSesion } from './lib/api';
 import { FacturacionServidor } from './pages/FacturacionServidor';
 import { ComercialServidor } from './pages/ComercialServidor';
 import AceptarDatos from './pages/AceptarDatos';
 import { ConfigurarDobleFactor } from './pages/DobleFactor';
-import { Login, Recuperar, Restablecer } from './pages/Auth';
+import { EntradaPortal, Login, Recuperar, Restablecer } from './pages/Auth';
 import Inicio from './pages/Inicio';
 import Declaraciones from './pages/Declaraciones';
 import DeclaracionesServidor from './pages/DeclaracionesServidor';
@@ -37,7 +37,7 @@ import { TableroInicio } from './pages/TableroInicio';
 import { CatalogosServidor, InventarioServidor } from './pages/CatalogosServidor';
 import Verificar from './pages/Verificar';
 import { PortalApp } from './pages/portal/PortalApp';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { RouteName } from './lib/router';
 
 /** Cambia de ruta sin dejar la anterior en el historial. */
@@ -49,6 +49,9 @@ function IrA({ ruta }: { ruta: RouteName }) {
 function Screen() {
   const { route } = useRouter();
   const sesion = useSesion();
+  // Llegada desde el portal Terry-App con un pase (entrada única): primero se cambia por una sesión de Residuos
+  const [pase, setPase] = useState(paseDelPortal);
+  if (MODO_REAL && pase) return <EntradaPortal pase={pase} alTerminar={() => setPase('')} />;
   switch (route) {
     case 'login': return <Login />;
     case 'recuperar': return <Recuperar />;

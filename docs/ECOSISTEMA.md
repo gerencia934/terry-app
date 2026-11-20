@@ -1,0 +1,84 @@
+# Ecosistema Terry-App: «todo junto pero no unido»
+
+Un solo portal (`https://app.terravivasas.net`) da la entrada y el menú de módulos. Cada módulo sigue siendo su propia
+aplicación: sus pantallas, su servidor y su base de datos. Si un módulo falla, los demás siguen trabajando.
+
+| Módulo | Dirección | Código | Base de datos |
+|---|---|---|---|
+| Portal (Cuenta Terry-App) | `app.terravivasas.net` | `apps/portal` (este repositorio) | Neon, proyecto `terry-portal` |
+| Residuos | `residuos.terravivasas.net` | `apps/api` + `apps/web` (este repositorio) | Neon, proyecto `terra-residuos` |
+| Mantenimiento | `mantenimiento.terravivasas.net` | repositorio `terra-mantenimiento` | la suya |
+| CRM comercial | (próximamente) | — | la suya |
+| Planta | (próximamente) | — | la suya |
+
+## Reglas
+
+1. **Nadie comparte tablas.** Un módulo no lee la base de otro. Lo que necesita de otro módulo lo recibe por un aviso
+   y guarda su propia copia. Por ejemplo, Residuos guarda las coordenadas de la sede que capturó el CRM, para que el
+   conductor llegue aunque el CRM esté caído.
+2. **Los avisos se reintentan.** Quien envía guarda el aviso en su cola (en Residuos, la tabla `trabajos`) y lo
+   reintenta hasta que el otro responde. Quien recibe acepta el mismo aviso repetido sin duplicar nada (idempotencia
+   por un identificador del aviso).
+3. **Una consulta a otro módulo nunca bloquea.** Se espera como máximo 3 segundos. Si el otro módulo no responde, se
+   sigue con un aviso visible («no se pudo consultar Mantenimiento»), no con un error.
+4. **El portal no es indispensable.** Cada módulo conserva su propia entrada como respaldo. Quien ya está adentro
+   sigue trabajando aunque el portal se caiga.
+
+## Entrada única: el «pase»
+
+El portal autentica a la persona (contraseña y verificación en dos pasos obligatoria) y, cuando ella abre un módulo,
+le entrega un pase firmado que vale 60 segundos y sirve una sola vez.
+
+**Formato:** JWS compacto con firma Ed25519.
+- Encabezado: `{"alg":"EdDSA","typ":"JWT","kid":"portal-1"}`.
+- Contenido:
+
+| Campo | Valor |
+|---|---|
+| `iss` | `https://app.terravivasas.net` (en pruebas, la dirección del portal de pruebas) |
+| `aud` | el módulo: `residuos`, `mantenimiento`, `crm`, `planta` |
+| `sub` | correo de la persona, en minúsculas |
+| `nom` | nombre de la persona |
+| `amr` | `["pwd","otp"]`: entró con contraseña y con código de verificación |
+| `iat`, `exp` | emitido y vencimiento, en segundos; `exp = iat + 60` |
+| `jti` | UUID del pase |
+
+**Entrega:** el portal lleva el navegador a `https://<módulo>/#sso=<pase>`. El pase viaja en el fragmento, que el
+navegador no envía a ningún servidor ni deja en los registros.
+
+**Qué hace el módulo:**
+1. Lee `#sso=`, lo borra de la barra de direcciones y lo envía a su propio servidor. Residuos usa `POST /api/v1/auth/portal` con `{ "pase": "..." }`.
+2. El servidor verifica la firma con la clave pública del portal. La clave está en su configuración (`PORTAL_CLAVE_PUBLICA`, la «x» del JWK en base64url): no se descarga en cada ingreso.
+3. Revisa los campos: `iss` igual a `PORTAL_URL`, `aud` igual a su nombre, que no esté vencido (60 s, con 5 s de holgura) y `exp - iat ≤ 120`.
+4. Guarda el `jti` para no aceptar dos veces el mismo pase.
+5. Busca a su usuario local por el correo (`sub`). Debe estar activo. Los permisos y el rol siguen siendo los del módulo.
+6. Si el módulo exige verificación en dos pasos, acepta `amr` con `otp` como cumplida: no la vuelve a pedir en esa sesión, ni al renovarla.
+7. Crea su propia sesión, igual que con su ingreso normal. La política de datos de cada módulo se sigue aceptando dentro del módulo.
+
+Si el correo no existe en el módulo, responde 403: «Su cuenta Terry-App no tiene acceso a este módulo».
+
+**Claves:**
+- La privada vive solo como secreto del portal (`PORTAL_CLAVE_PRIVADA`, JWK).
+- La pública también se publica en `GET https://app.terravivasas.net/api/v1/clave-publica` (JWKS), por comodidad.
+- Cambiar la clave obliga a actualizar `PORTAL_CLAVE_PUBLICA` en cada módulo.
+- Las pruebas usan un par de claves propio que no sirve en producción.
+
+## Avisos entre módulos (contratos)
+
+| Aviso | De → a | Cómo |
+|---|---|---|
+| Vehículo en mantenimiento (bloqueo) | Mantenimiento → Residuos | `PUT/DELETE /api/v1/integraciones/mantenimiento/bloqueos/{id}` con `x-integracion-token` |
+| Disponibilidad del vehículo antes de programar | Residuos → Mantenimiento | `GET /api/v1/mto/integraciones/terrygo/vehiculos/:placa/disponibilidad` |
+| Ítems NO OK del preoperacional | Residuos → Mantenimiento | `POST /api/v1/mto/integraciones/terrygo/preoperacionales` |
+| Kilómetros de una ruta o tanqueo | Residuos → Mantenimiento | `POST /api/v1/mto/integraciones/terrygo/lecturas` |
+| Coordenadas de la sede (check-in comercial) | CRM → Residuos | (se define con el CRM) |
+| Vehículo que llega a planta (F-09) | Residuos → Planta | (se define con Planta) |
+
+Los contratos con Mantenimiento ya existen de su lado (ver su `docs/DESPLIEGUE.md`). Cada integración se autentica con
+su propio token, guardado solo en las variables de los dos servidores.
+
+## Salud
+
+- Cada módulo responde `GET /api/v1/salud` sin sesión.
+- El portal la consulta desde su servidor (3 s como máximo, con 30 s de memoria) para pintar cada cuadro del menú: disponible, sin respuesta o próximamente.
+- Un módulo caído sale en gris. Los demás siguen igual.

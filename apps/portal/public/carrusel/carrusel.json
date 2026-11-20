@@ -1,0 +1,26 @@
+{
+  "_ayuda": "Banners del inicio de sesión del portal (el mismo formato de Residuos y Mantenimiento). Para publicar uno nuevo: suba la imagen a esta carpeta (WebP o JPG, máximo 200 KB, vertical 4:5 u horizontal 16:9) y agregue un bloque aquí. Campos: etiqueta, titulo, texto, imagen (opcional), fondo (color de los bordes de la imagen), enlace (opcional), desde / hasta (opcional, AAAA-MM-DD).",
+  "segundos": 8,
+  "banners": [
+    {
+      "etiqueta": "Bienvenido",
+      "titulo": "Terry-App, toda la operación en un solo lugar",
+      "texto": "Una sola entrada a Residuos, Mantenimiento, CRM y Planta. Cada módulo trabaja por su cuenta: si uno se detiene, los demás siguen.",
+      "imagen": "terry-app.webp",
+      "fondo": "#1F5E3B"
+    },
+    {
+      "etiqueta": "Gestión de Residuos",
+      "titulo": "Cada residuo, de la sede del cliente al certificado",
+      "texto": "Solicitudes, rutas, manifiestos, recepción en planta y certificados en una sola cadena, lista para auditoría.",
+      "imagen": "terry-equipo.webp",
+      "fondo": "#216840"
+    },
+    {
+      "etiqueta": "Terra Viva",
+      "titulo": "Soluciones ambientales inteligentes",
+      "texto": "Sostenibilidad, transparencia, innovación y responsabilidad ambiental en cada servicio.",
+      "fondo": "#1F4E5F"
+    }
+  ]
+}

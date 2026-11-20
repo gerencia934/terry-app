@@ -185,6 +185,14 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - correo en pausa: se conecta con SMTP_HOST, SMTP_USER y SMTP_PASS (Gmail con contraseña de aplicación) sin tocar
     código; mientras tanto, las invitaciones vuelven al administrador como enlace para WhatsApp.
   111 pruebas de reglas y 481 e2e OK.
+- Ecosistema Terry-App, «todo junto pero no unido» (20-11-2026, pedido de la gerencia; contrato en `docs/ECOSISTEMA.md`):
+  - un portal en `app.terravivasas.net` (`apps/portal`: Pages con funciones y base propia en Neon) da una sola entrada,
+    con contraseña y verificación en dos pasos obligatoria, y el menú de módulos según la cuenta;
+  - cada módulo (Residuos, Mantenimiento, CRM y Planta) sigue con su servidor y su base. El portal entrega un pase
+    Ed25519 de 60 s y un solo uso; Residuos lo cambia por su propia sesión en `POST auth/portal`, sin volver a pedir el
+    código. Si el portal se cae, cada módulo conserva su entrada propia;
+  - orden acordado: portal y entrada única → check-in GPS → Planta → documentos del cliente en R2 → CRM aparte.
+  14 pruebas del portal y 484 e2e OK.
 - Publicación (20-11-2026, decisión de la gerencia): todo en la cuenta de Cloudflare de Terra Viva (plan Workers Paid),
   dominio `terravivasas.net` con el DNS en Hostinger. TERRY-GO queda en `residuos.terravivasas.net`:
   - las pantallas en Pages (`terra-residuos`); `/api` pasa al Worker `terra-residuos-api`;

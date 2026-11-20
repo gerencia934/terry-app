@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Identidad Terra Viva (portafolio 2026): verde bosque para títulos, verde hoja para acción,
+  lima como acento. Fondos blancos/gris verdoso. Layout: topbar + sidebar en escritorio,
+  hamburguesa + tarjetas en móvil, barra inferior en la vista de conductor.
+  Tokens en RGB para usar con opacidad en Tailwind.
+*/
+:root {
+  --bg: 245 248 245;
+  --surface: 255 255 255;
+  --surface-2: 239 244 240;
+  --line: 222 229 224;
+  --fg: 19 33 25;
+  --muted: 78 94 85;
+  --subtle: 122 137 128;
+  /* Manual de identidad: verde #1F5E3B, lima #7BC043, azul petróleo #1F4E5F y verde claro #D2FFAE */
+  --brand: 31 94 59;
+  --brand-strong: 22 70 43;
+  --brand-soft: 227 240 231;
+  --brand-ink: 31 94 59;
+  --brand-lime: 123 192 67;
+  --brand-teal: 31 78 95;
+  --brand-mint: 210 255 174;
+  --on-brand: 255 255 255;
+  --nav: 31 94 59;
+  --accent: 232 93 20;
+  --ok: 21 128 61;
+  --warn: 176 106 0;
+  --bad: 190 40 40;
+  --info: 37 99 180;
+  --chart-grid: 226 232 228;
+  --chart-1: 42 120 214;
+  --chart-2: 235 104 52;
+  --chart-3: 27 175 122;
+  --chart-4: 237 161 0;
+  --chart-5: 232 123 164;
+  --chart-6: 0 131 0;
+  /* Tablero (paleta de la marca validada contra daltonismo, modo claro): verde, azul, ámbar, rosa, lima y «otros» en gris */
+  --serie-1: 47 143 78;
+  --serie-2: 42 120 214;
+  --serie-3: 237 161 0;
+  --serie-4: 232 123 164;
+  --serie-5: 123 192 67;
+  --serie-otros: 167 176 171;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 13 19 16;
+    --surface: 20 28 24;
+    --surface-2: 27 37 32;
+    --line: 41 54 47;
+    --fg: 229 238 232;
+    --muted: 163 178 169;
+    --subtle: 118 133 124;
+    --brand: 123 192 67;
+    --brand-strong: 196 236 160;
+    --brand-soft: 27 52 35;
+    --brand-ink: 168 222 128;
+    --brand-lime: 140 205 85;
+    --brand-teal: 120 178 196;
+    --brand-mint: 210 255 174;
+    --on-brand: 8 28 14;
+    --nav: 15 46 27;
+    --accent: 240 116 48;
+    --ok: 80 196 116;
+    --warn: 232 172 64;
+    --bad: 240 112 112;
+    --info: 112 162 232;
+    --chart-grid: 41 54 47;
+    --chart-1: 57 135 229;
+    --chart-2: 217 89 38;
+    --chart-3: 25 158 112;
+    --chart-4: 201 133 0;
+    --chart-5: 213 81 129;
+    --chart-6: 12 163 12;
+  --serie-1: 36 163 90;
+  --serie-2: 57 135 229;
+  --serie-3: 201 133 0;
+  --serie-4: 213 81 129;
+  --serie-5: 104 168 52;
+  --serie-otros: 107 118 112;
+    --serie-1: 36 163 90;
+    --serie-2: 57 135 229;
+    --serie-3: 201 133 0;
+    --serie-4: 213 81 129;
+    --serie-5: 104 168 52;
+    --serie-otros: 107 118 112;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: 13 19 16;
+  --surface: 20 28 24;
+  --surface-2: 27 37 32;
+  --line: 41 54 47;
+  --fg: 229 238 232;
+  --muted: 163 178 169;
+  --subtle: 118 133 124;
+  --brand: 123 192 67;
+  --brand-strong: 196 236 160;
+  --brand-soft: 27 52 35;
+  --brand-ink: 168 222 128;
+  --brand-lime: 140 205 85;
+  --brand-teal: 120 178 196;
+  --brand-mint: 210 255 174;
+  --on-brand: 8 28 14;
+  --nav: 15 46 27;
+  --accent: 240 116 48;
+  --ok: 80 196 116;
+  --warn: 232 172 64;
+  --bad: 240 112 112;
+  --info: 112 162 232;
+  --chart-grid: 41 54 47;
+  --chart-1: 57 135 229;
+  --chart-2: 217 89 38;
+  --chart-3: 25 158 112;
+  --chart-4: 201 133 0;
+  --chart-5: 213 81 129;
+  --chart-6: 12 163 12;
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+  font-family: 'Open Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { font-family: Montserrat, ui-sans-serif, system-ui, sans-serif; text-wrap: balance; }
+.num { font-variant-numeric: tabular-nums; }
+.text-on-brand { color: rgb(var(--on-brand)); }
+:focus-visible { outline: 2px solid rgb(var(--brand)); outline-offset: 2px; border-radius: 6px; }
+
+.logo-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-light { display: none; }
+  :root:not([data-theme="light"]) .logo-dark { display: block; }
+}
+:root[data-theme="dark"] .logo-light { display: none; }
+:root[data-theme="dark"] .logo-dark { display: block; }
+
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.safe-x {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@keyframes sheet-up { from { transform: translateY(16px); opacity: .6 } to { transform: none; opacity: 1 } }
+@keyframes slide-in { from { transform: translateX(-12px); opacity: .6 } to { transform: none; opacity: 1 } }
+.anim-sheet { animation: sheet-up .18s ease-out; }
+.anim-slide { animation: slide-in .18s ease-out; }

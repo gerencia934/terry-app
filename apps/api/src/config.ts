@@ -21,6 +21,10 @@ const Esquema = z.object({
   // desarrollo y pruebas se usa la versión «borrador» y la pantalla de aceptación lo advierte.
   POLITICA_DATOS_VERSION: z.string().trim().max(20).default(''),
   POLITICA_DATOS_URL: z.string().trim().default(''),
+  // Entrada única del ecosistema Terry-App (docs/ECOSISTEMA.md): dirección del portal y su clave pública Ed25519 (la «x»
+  // del JWK, en base64url). Sin ellas el pase del portal no se acepta y solo sirve la entrada propia de Residuos.
+  PORTAL_URL: z.string().trim().default(''),
+  PORTAL_CLAVE_PUBLICA: z.string().trim().regex(/^([A-Za-z0-9_-]{43})?$/, 'PORTAL_CLAVE_PUBLICA debe ser la «x» de un JWK Ed25519 (43 caracteres base64url)').default(''),
   NODE_ENV: z.string().default('development'),
   // Archivos (firmas, fotos, PDF). En desarrollo, carpeta local; en producción se cambia a S3 / R2.
   ALMACENAMIENTO_DIR: z.string().default('almacenamiento'),

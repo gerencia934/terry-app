@@ -51,25 +51,40 @@ Todo queda dentro del presupuesto aprobado (hasta US$150 al mes).
 
 ## Estado al 20-11-2026
 
-Hecho desde este computador (Cloudflare y Neon autorizados por la gerencia):
-- proyecto de Pages `terra-residuos` (`terra-residuos.pages.dev`) con las pantallas y la función `/api`;
-- Worker `terra-residuos-api` provisional (responde «se está instalando») con sus claves: DATABASE_URL, JWT_SECRET, R2,
-  Siigo, Wialon y VAPID. La primera publicación desde GitHub lo reemplaza por el del contenedor; las claves se conservan;
-- Neon: proyecto `terra-residuos` (Virginia, PostgreSQL 16), usuario `terraviva_app` sin permiso para saltarse la RLS,
-  base `terrygo` con las 29 migraciones, catálogos y el usuario administrador. Su acceso inicial está en
-  `docs/privado/acceso-produccion.txt` (fuera de git);
-- R2: bucket `terra-residuos-archivos` en el oriente de Norteamérica.
+En línea desde el 20-11-2026 en `https://residuos.terravivasas.net`:
+- el contenedor arranca en unos 24 s y luego responde en 0,5 s;
+- Wialon y la sincronización diaria de Siigo funcionan;
+- Neon está en el plan pago (*Launch*);
+- R2 usa las llaves del bucket `terra-residuos-archivos`;
+- la política de datos 1.0 está en el Drive (SGI › 02. GESTIÓN COMERCIAL › 2.5 POLÍTICA DE CLIENTES).
+
+Cuidado al cambiar claves en el panel de Cloudflare: el panel puede guardar versiones del Worker sin implementarlas. Por
+eso, revise `npx wrangler deployments list` y `npx wrangler versions list`. Si la última versión no está implementada:
+`npx wrangler versions secret bulk <archivo.json>` y luego `npx wrangler versions deploy <id>@100% --yes`.
 
 Falta:
-1. **R2:** las llaves actuales solo sirven para el bucket de pruebas. En Cloudflare, **R2 › Manage API tokens › Create API
-   token** → permiso *Object Read & Write*, solo el bucket `terra-residuos-archivos`. Las dos llaves (*Access Key ID* y
-   *Secret Access Key*) se cargan en el Worker como `R2_ACCESS_KEY_ID` y `R2_SECRET_ACCESS_KEY`.
-2. **GitHub:** `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` (paso 2 de la sección siguiente).
-3. **Dominio:** `residuos.terravivasas.net` en Pages y el CNAME en Hostinger (paso 5).
-4. **Política de datos:** `POLITICA_DATOS_URL` y `POLITICA_DATOS_VERSION`. Sin ellas el servidor no arranca.
-5. **Neon:** pasar la organización al plan pago (*Launch*) antes de salir al aire. Con el gratuito, la base se detiene
-   cuando se acaban las horas del mes.
-6. **Correo** (cuando se decida): sección 7.
+- el primer ingreso de la gerencia (clave en `docs/privado/acceso-produccion.txt`);
+- compartir la política con enlace de solo lectura cuando la gerencia apruebe el texto;
+- el correo, cuando se decida (sección 7).
+
+## Portal Terry-App (entrada única del ecosistema)
+
+El portal (`apps/portal`) da una sola entrada a todos los módulos y les entrega un pase firmado. El contrato está en
+[ECOSISTEMA.md](ECOSISTEMA.md).
+
+| Parte | Dónde |
+|---|---|
+| Pantallas y servidor | Cloudflare Pages, proyecto `terry-portal`: funciones en `functions/` y código en `servidor/` |
+| Base | Neon, proyecto `terry-portal` (Virginia, PostgreSQL 16), base `portal`, usuario `portal_app` (solo datos) |
+| Claves (solo en Cloudflare) | `DATABASE_URL`, `PORTAL_SECRETO` (pimienta y cifrado) y `PORTAL_CLAVE_PRIVADA` (firma de los pases) |
+| Clave pública | En `PORTAL_CLAVE_PUBLICA` de cada módulo (para Residuos, en `despliegue/cloudflare/api/wrangler.jsonc`) |
+| Publicación | Trabajo «Publicar el portal Terry-App» de `publicar.yml`, aparte del de Residuos |
+| Dirección | `app.terravivasas.net`: ya está agregada en Pages; falta el CNAME `app` → `terry-portal.pages.dev` en Hostinger |
+
+La primera cuenta (administrador) se creó con un enlace de 72 horas, guardado en `docs/privado/acceso-portal.txt`.
+Las demás cuentas se crean desde el portal, en **Cuentas**: el enlace sale para copiarlo o enviarlo por WhatsApp.
+
+Cada persona debe existir en cada módulo con el mismo correo. Su rol y sus permisos se siguen dando dentro del módulo.
 
 ## 2. Lo que hace la gerencia (cuentas a nombre de la empresa, con doble factor)
 

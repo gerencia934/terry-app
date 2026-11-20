@@ -1,7 +1,7 @@
 // Prueba de punta a punta del API contra una base de datos real.
 // Requiere el API corriendo (API_URL) y la base sembrada con prisma/seed.mjs.
 //   API_URL=http://localhost:3000/api/v1 ADMIN_EMAIL=... ADMIN_PASSWORD=... node test/e2e.mjs
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, createPrivateKey, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import http from 'node:http';
 import ExcelJS from 'exceljs';
 import { PrismaClient } from '@prisma/client';
@@ -2223,6 +2223,63 @@ prueba('Súper Informe: un solo Excel (resumen, «Informe general V2» con la es
   && JSON.stringify(encabezadosSI) === JSON.stringify(['Fecha', 'Manifiesto', 'FACTURA ', 'ORDEN O.', 'Tipo', 'Cliente', 'Sucursal', 'Cantidad', 'Unidad', 'Vehículo/Placa', 'RECAUDO', 'Observaciones'])
   && rellenoSI === 'FF1D7E4D' && filasSI > 0 && resumenSI.startsWith('SÚPER INFORME DE CUMPLIMIENTO INTEGRAL') && !!auditSI,
   JSON.stringify({ siSinPermiso, status: si.status, hojasSI, tituloSI, fechaSI, encabezadosSI, rellenoSI, filasSI, resumenSI, trabajo: si.trabajo }).slice(0, 700));
+
+// 17. Entrada única del ecosistema Terry-App (docs/ECOSISTEMA.md): pase del portal firmado con Ed25519, de 60 segundos y
+// de un solo uso. La prueba firma como el portal con una clave de prueba (PORTAL_CLAVE_PRIVADA_PRUEBA, generada en cada
+// corrida); el API la verifica con PORTAL_CLAVE_PUBLICA.
+if (!process.env.PORTAL_CLAVE_PRIVADA_PRUEBA) console.log('  (sin PORTAL_CLAVE_PRIVADA_PRUEBA: se omiten las pruebas de la entrada única)');
+else {
+  const privadaPortal = createPrivateKey({ key: JSON.parse(process.env.PORTAL_CLAVE_PRIVADA_PRUEBA), format: 'jwk' });
+  const PORTAL = process.env.PORTAL_URL ?? 'https://app.terravivasas.net';
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const pase = (cambios = {}, clave = privadaPortal) => {
+    const ahora = Math.floor(Date.now() / 1000);
+    const h = b64({ alg: 'EdDSA', typ: 'JWT', kid: 'portal-1' });
+    const p = b64({ iss: PORTAL, aud: 'residuos', sub: ADMIN.email.toUpperCase(), nom: 'Gerencia', amr: ['pwd', 'otp'], iat: ahora, exp: ahora + 60, jti: randomUUID(), ...cambios });
+    return `${h}.${p}.${sign(null, Buffer.from(`${h}.${p}`), clave).toString('base64url')}`;
+  };
+  // Desde IP propias (el API confía en un proxy): el techo de ingresos por IP de la sección 12 no las alcanza
+  const entrar = async (p, ip = '198.51.100.17') => {
+    const r = await fetch(`${API}/auth/portal`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': ip }, body: JSON.stringify({ pase: p }) });
+    return { status: r.status, json: await r.json().catch(() => ({})) };
+  };
+  const opcPortal = (await llamar('GET', '/auth/opciones')).json;
+  const p1 = pase();
+  const s1 = await entrar(p1);
+  const repetido = (await entrar(p1)).status;
+  const ahoraP = Math.floor(Date.now() / 1000);
+  const rechazos = {
+    otroModulo: (await entrar(pase({ aud: 'mantenimiento' }))).status,
+    vencido: (await entrar(pase({ iat: ahoraP - 600, exp: ahoraP - 540 }))).status,
+    muyLargo: (await entrar(pase({ exp: ahoraP + 3600 }))).status,
+    otroPortal: (await entrar(pase({ iss: 'https://otro.portal' }))).status,
+    firmaFalsa: (await entrar(pase({}, generateKeyPairSync('ed25519').privateKey))).status,
+  };
+  const basura = (await entrar('a'.repeat(50))).status;
+  const sinUsuario = await entrar(pase({ sub: 'nadie@sin-cuenta.co' }));
+  const ren = s1.status === 200 ? await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: s1.json.refreshToken } }) : { status: 0, json: {} };
+  const sesionPortal = s1.status === 200 ? await db.sesion.findUnique({ where: { id: s1.json.refreshToken.split('.')[0] } }) : null;
+  const sesionRenovada = ren.status === 200 ? await db.sesion.findUnique({ where: { id: ren.json.refreshToken.split('.')[0] } }) : null;
+  const auditPortal = await db.auditoria.findFirst({ where: { accion: 'LOGIN', despues: { path: ['dobleFactor'], equals: 'PORTAL' } }, orderBy: { fecha: 'desc' } });
+  prueba('Entrada única: el pase del portal abre sesión una sola vez (el correo sin importar mayúsculas), se renueva como sesión del portal y queda en la auditoría',
+    opcPortal.portal === PORTAL && s1.status === 200 && !!s1.json.accessToken && s1.json.usuario.email === ADMIN.email && repetido === 401
+      && ren.status === 200 && sesionPortal?.viaPortal === true && sesionRenovada?.viaPortal === true && !!auditPortal,
+    JSON.stringify({ opcPortal, s1: s1.status, m: s1.json?.mensaje, repetido, ren: ren.status, via: [sesionPortal?.viaPortal, sesionRenovada?.viaPortal], audit: !!auditPortal }));
+  prueba('…rechaza el pase de otro módulo, vencido, demasiado largo, de otro portal, con otra firma o malformado; si el correo no existe en Residuos, 403 SIN_ACCESO',
+    Object.values(rechazos).every((x) => x === 401) && [400, 401].includes(basura) && sinUsuario.status === 403 && sinUsuario.json.codigo === 'SIN_ACCESO',
+    JSON.stringify({ rechazos, basura, sinUsuario: [sinUsuario.status, sinUsuario.json?.codigo] }));
+  // Con la verificación en dos pasos obligatoria: el pase debe traer «otp»; con él, Residuos no la vuelve a pedir
+  const adminU = await db.usuario.findUnique({ where: { email: ADMIN.email }, select: { empresaId: true, totpSecreto: true } });
+  const empresaU = await db.empresa.findUnique({ where: { id: adminU.empresaId }, select: { configuracion: true } });
+  await db.empresa.update({ where: { id: adminU.empresaId }, data: { configuracion: { ...(empresaU.configuracion ?? {}), dobleFactorObligatorio: true } } });
+  const sinOtp = (await entrar(pase({ amr: ['pwd'] }), '198.51.100.18')).status;
+  const conOtp = await entrar(pase(), '198.51.100.18');
+  const protegida = conOtp.status === 200 ? (await llamar('GET', '/informes/inicio', { token: conOtp.json.accessToken })).status : 0;
+  await db.empresa.update({ where: { id: adminU.empresaId }, data: { configuracion: empresaU.configuracion ?? {} } });
+  prueba('…con la verificación en dos pasos obligatoria exige el «otp» del portal y no la vuelve a pedir en Residuos',
+    sinOtp === 403 && conOtp.status === 200 && conOtp.json.usuario.requiereConfigurar2fa === false && protegida === 200,
+    JSON.stringify({ sinOtp, conOtp: [conOtp.status, conOtp.json?.usuario?.requiereConfigurar2fa], protegida, totp: !!adminU.totpSecreto }));
+}
 
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);

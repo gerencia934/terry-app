@@ -420,6 +420,7 @@ model Usuario {
   solicitudesCreadas      Solicitud[]
   resetTokens             PasswordReset[]
   sesiones                Sesion[]
+  pasesPortal             PasePortal[]
   intentosFallidos        Int                      @default(0) @map("intentos_fallidos")
   bloqueadoHasta          DateTime?                @map("bloqueado_hasta") @db.Timestamptz
   auditoria               Auditoria[]
@@ -462,10 +463,24 @@ model Sesion {
   creadaEn   DateTime  @default(now()) @map("creada_en") @db.Timestamptz
   expiraEn   DateTime  @map("expira_en") @db.Timestamptz
   revocadaEn DateTime? @map("revocada_en") @db.Timestamptz
+  /// Abierta con el pase del portal Terry-App: la verificación en dos pasos la hizo el portal (docs/ECOSISTEMA.md)
+  viaPortal  Boolean   @default(false) @map("via_portal")
   usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
   @@index([usuarioId])
   @@map("sesiones")
+}
+
+/// Pases del portal Terry-App ya usados: cada uno sirve una sola vez (se guardan hasta un día después de vencer).
+model PasePortal {
+  jti       String   @id @db.Uuid
+  usuarioId String?  @map("usuario_id") @db.Uuid
+  usadoEn   DateTime @default(now()) @map("usado_en") @db.Timestamptz
+  expiraEn  DateTime @map("expira_en") @db.Timestamptz
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([expiraEn], map: "ix_pases_portal_expira")
+  @@map("pases_portal")
 }
 
 model PasswordReset {

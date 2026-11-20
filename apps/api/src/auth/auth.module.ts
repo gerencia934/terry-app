@@ -20,12 +20,17 @@ const meta = (req: Request) => ({ ip: req.ip, ua: req.headers['user-agent'] });
 const AceptarDatos = z.object({ version: z.string().min(1).max(20) });
 const Codigo = z.object({ codigo: z.string().trim().min(6, 'Escriba el código').max(12) });
 const Verificar2fa = Codigo.extend({ desafio: z.string().min(20).max(2000) });
+const PasePortal = z.object({ pase: z.string().min(40).max(4000) });
 
 @Controller('auth')
 class AuthController {
   constructor(private readonly auth: AuthService) {}
   @Publico() @LimiteCredenciales(10) @Post('login') @HttpCode(200)
   login(@Body(new Zod(Login)) b: z.infer<typeof Login>, @Req() req: Request) { return this.auth.login(b.email, b.clave, meta(req)); }
+
+  /** Entrada única: pase firmado del portal Terry-App (docs/ECOSISTEMA.md). */
+  @Publico() @LimiteCredenciales(10) @Post('portal') @HttpCode(200)
+  portal(@Body(new Zod(PasePortal)) b: z.infer<typeof PasePortal>, @Req() req: Request) { return this.auth.ingresarConPase(b.pase, meta(req)); }
 
   // Renovar no lleva correo: cuenta por IP. Holgado porque en una oficina todos renuevan desde la misma IP.
   @Publico() @Throttle({ default: { limit: 120, ttl: 60_000 } }) @Post('renovar') @HttpCode(200)

@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Correo } from '../common/servicios';
 import type { Actor } from '../common/http';
 import type { Config } from '../config';
+import { verificarPase } from './portal';
 import { cifrar, codigoRespaldo, descifrar, desdeBase32, normalRespaldo, pasoDelCodigo, secretoNuevo, uriOtp } from './totp';
 
 const MAX_INTENTOS = 5;
@@ -70,11 +71,40 @@ export class AuthService {
     return this.completarIngreso(u, meta);
   }
 
-  private async completarIngreso(u: Usuario, meta: Meta, dobleFactor?: 'TOTP' | 'RESPALDO') {
+  private async completarIngreso(u: Usuario, meta: Meta, dobleFactor?: 'TOTP' | 'RESPALDO' | 'PORTAL', viaPortal = false) {
     await this.db.usuario.update({ where: { id: u.id }, data: { intentosFallidos: 0, bloqueadoHasta: null, ultimoLogin: new Date() } });
     await this.audit.registrar({ id: u.id }, 'usuario', u.id, 'LOGIN', undefined, { ip: meta.ip, ...(dobleFactor ? { dobleFactor } : {}) });
     await this.avisarIngresoNuevo(u, meta);
-    return this.emitir(u.id, meta);
+    return this.emitir(u.id, meta, viaPortal);
+  }
+
+  /**
+   * Entrada única del ecosistema (docs/ECOSISTEMA.md): pase firmado por el portal Terry-App, de 60 segundos y de un solo
+   * uso. El portal ya pidió contraseña y verificación en dos pasos; aquí se exige un usuario activo con el mismo correo,
+   * y su rol y sus permisos siguen siendo los de Residuos.
+   */
+  async ingresarConPase(pase: string, meta: Meta) {
+    const invalido = new UnauthorizedException({ mensaje: 'El pase del portal no es válido o ya venció. Vuelva a entrar desde el portal Terry-App.' });
+    const d = verificarPase(pase, { portal: this.cfg.get('PORTAL_URL', { infer: true }), clavePublica: this.cfg.get('PORTAL_CLAVE_PUBLICA', { infer: true }), modulo: 'residuos' });
+    if (!d) {
+      await this.audit.registrar(null, 'usuario', 'portal', 'INGRESO_FALLIDO', undefined, { motivo: 'pase del portal inválido', ip: meta.ip });
+      throw invalido;
+    }
+    const u = await this.db.usuario.findUnique({ where: { email: d.sub.trim().toLowerCase() }, include: { empresa: { select: { configuracion: true } } } });
+    // Cada pase sirve una sola vez: si llegan dos con el mismo, solo uno gana (lo decide la llave primaria)
+    try { await this.db.pasePortal.create({ data: { jti: d.jti, usuarioId: u?.id ?? null, expiraEn: new Date(d.exp * 1000) } }); }
+    catch { throw invalido; }
+    this.db.pasePortal.deleteMany({ where: { expiraEn: { lt: new Date(Date.now() - 86_400_000) } } }).catch(() => undefined);
+    if (!u || !u.activo) {
+      await this.audit.registrar(u ? { id: u.id } : null, 'usuario', u?.id ?? 'desconocido', 'INGRESO_FALLIDO', undefined, { motivo: u ? 'usuario inactivo' : 'sin usuario en Residuos', via: 'portal' });
+      throw new ForbiddenException({ mensaje: 'Su cuenta Terry-App no tiene acceso a Gestión de Residuos. Pídale al administrador que lo cree aquí con el mismo correo.', codigo: 'SIN_ACCESO' });
+    }
+    if (u.bloqueadoHasta && u.bloqueadoHasta > new Date()) throw new ForbiddenException({ mensaje: 'Cuenta bloqueada temporalmente por intentos fallidos. Intente de nuevo en unos minutos.' });
+    if (this.obligatorio(u) && !d.amr.includes('otp')) {
+      await this.audit.registrar({ id: u.id }, 'usuario', u.id, 'INGRESO_FALLIDO', undefined, { motivo: 'pase sin verificación en dos pasos', via: 'portal' });
+      throw new ForbiddenException({ mensaje: 'Para entrar a Residuos, el portal debe confirmar la verificación en dos pasos.' });
+    }
+    return this.completarIngreso(u, meta, 'PORTAL', true);
   }
 
   /** Segundo paso del ingreso: el código de la app de autenticación o un código de respaldo. */
@@ -210,18 +240,19 @@ export class AuthService {
   }
 
   /** Crea una sesión: token de acceso corto (JWT) + token de renovación opaco «sesionId.secreto». */
-  private async emitir(usuarioId: string, meta: { ip?: string; ua?: string }) {
+  private async emitir(usuarioId: string, meta: { ip?: string; ua?: string }, viaPortal = false) {
     const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId }, include: { rol: { include: { permisos: { include: { permiso: true } } } }, empresa: true, clientePortal: { select: { id: true, razonSocial: true, nit: true, activo: true } } } });
     const secreto = randomBytes(32).toString('base64url');
-    const sesion = await this.db.sesion.create({ data: { usuarioId, tokenHash: sha256(secreto), ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), expiraEn: new Date(Date.now() + this.cfg.get('REFRESH_DIAS', { infer: true }) * 86_400_000) } });
+    const sesion = await this.db.sesion.create({ data: { usuarioId, tokenHash: sha256(secreto), ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), viaPortal, expiraEn: new Date(Date.now() + this.cfg.get('REFRESH_DIAS', { infer: true }) * 86_400_000) } });
     // Un usuario del portal no lleva permisos de oficina, aunque su rol los tuviera
     const permisos = u.clienteId ? [] : u.rol.permisos.map((p) => p.permiso.codigo);
     // Ley 1581: sin la versión vigente de la política aceptada, el token solo sirve para aceptarla (ver el guard)
     const version = this.cfg.get('POLITICA_DATOS_VERSION', { infer: true });
     const aceptada = u.datosPoliticaVersion === version;
-    // Verificación en dos pasos obligatoria y aún sin configurar: el token solo sirve para configurarla (ver el guard)
+    // Verificación en dos pasos obligatoria y aún sin configurar: el token solo sirve para configurarla (ver el guard).
+    // Con el pase del portal no aplica: la verificación la hizo el portal, también para las renovaciones de esa sesión.
     const obligatorio = this.obligatorio(u);
-    const pendiente2fa = obligatorio && !u.totpSecreto;
+    const pendiente2fa = obligatorio && !u.totpSecreto && !viaPortal;
     const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id, dat: aceptada,
       ...(u.clienteId ? { cli: u.clienteId, pp: u.perfilPortal } : {}), ...(pendiente2fa ? { c2f: true } : {}) });
     return {
@@ -247,7 +278,7 @@ export class AuthService {
     const u = await this.db.usuario.findUnique({ where: { id: s.usuarioId } });
     if (!u?.activo) throw new UnauthorizedException({ mensaje: 'Usuario inactivo.' });
     await this.db.sesion.update({ where: { id: s.id }, data: { revocadaEn: new Date() } });
-    return this.emitir(s.usuarioId, meta);
+    return this.emitir(s.usuarioId, meta, s.viaPortal);
   }
 
   /** Acepta la política de datos vigente: queda registrada (versión, fecha, IP) y se entrega una sesión nueva. */
@@ -303,7 +334,7 @@ export class AuthService {
   }
 
   /** Lo que la pantalla de ingreso necesita saber antes de entrar (sin datos de nadie). */
-  opciones() { return { correo: this.correo.configurado }; }
+  opciones() { return { correo: this.correo.configurado, portal: this.cfg.get('PORTAL_URL', { infer: true }) || null }; }
 
   /** Siempre responde igual para no revelar si el correo existe. */
   async solicitarRecuperacion(email: string) {

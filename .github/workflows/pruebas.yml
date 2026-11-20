@@ -61,12 +61,19 @@ jobs:
         run: |
           JWT="$(openssl rand -hex 48)"
           CLAVE="Ci-$(openssl rand -hex 10)-9"
+          # Par de claves del portal Terry-App solo para esta corrida: el API verifica con la pública y la prueba firma
+          # los pases con la privada (la de producción vive solo en Cloudflare)
+          read -r PUBLICA PRIVADA < <(node -e "const j=require('crypto').generateKeyPairSync('ed25519').privateKey.export({format:'jwk'});console.log(j.x+' '+JSON.stringify(j))")
           echo "::add-mask::$JWT"
           echo "::add-mask::$CLAVE"
+          echo "::add-mask::$PRIVADA"
           {
             echo "JWT_SECRET=$JWT"
             echo "SEED_ADMIN_PASSWORD=$CLAVE"
             echo "ADMIN_PASSWORD=$CLAVE"
+            echo "PORTAL_URL=https://app.terravivasas.net"
+            echo "PORTAL_CLAVE_PUBLICA=$PUBLICA"
+            echo "PORTAL_CLAVE_PRIVADA_PRUEBA=$PRIVADA"
           } >> "$GITHUB_ENV"
 
       - name: Compilar las reglas compartidas
@@ -94,6 +101,15 @@ jobs:
 
       - name: Compilar la app web
         run: npm run build -w @terraviva/web
+
+      - name: Portal Terry-App (entrada única del ecosistema) - pruebas y compilación
+        env:
+          # Base desechable propia: el portal no comparte base con ningún módulo (docs/ECOSISTEMA.md)
+          PORTAL_DB_URL: postgresql://terraviva:terraviva@localhost:5432/terry_portal_pruebas
+        run: |
+          psql "$ADMIN_DB_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE terry_portal_pruebas"
+          npm run test -w @terraviva/portal
+          npm run build -w @terraviva/portal
 
       - name: Encender el API
         working-directory: apps/api
