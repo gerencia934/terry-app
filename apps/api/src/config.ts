@@ -50,6 +50,15 @@ const Esquema = z.object({
   // Sincronización diaria (a esta hora de Colombia, una vez por día aunque haya varias copias del API)
   SIIGO_SINCRONIZAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   SIIGO_HORA: sinVacio(z.coerce.number().int().min(0).max(23).default(6)),
+  // Wialon (GPS de la flota): API remota con un token de SOLO LECTURA, solo en el .env del API. Vacío = sin Wialon
+  // (la operación sigue igual: las etapas las marca el conductor). Wialon Local usa otra dirección.
+  WIALON_URL: z.string().trim().url().default('https://hst-api.wialon.com'),
+  WIALON_TOKEN: z.string().trim().default(''),
+  // NIT de la empresa dueña de la cuenta de Wialon. Vacío = la única empresa de la instalación.
+  WIALON_EMPRESA_NIT: z.string().trim().default(''),
+  // Consulta automática cada tantos segundos (30 a 300); false = solo con el botón «Actualizar» (pruebas)
+  WIALON_CONSULTAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
+  WIALON_INTERVALO: sinVacio(z.coerce.number().int().min(30).max(300).default(60)),
   // Cola de trabajos (ZIP, Excel): esta copia del API los procesa (en producción puede haber una copia solo para eso)
   TRABAJOS_PROCESAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   TRABAJOS_SIMULTANEOS: sinVacio(z.coerce.number().int().min(1).max(8).default(2)),

@@ -316,6 +316,9 @@ model Empresa {
   facturasSiigo           FacturaSiigo[]
   manifiestosFinanzas     ManifiestoFinanzas[]
   sincronizacionesSiigo   SincronizacionSiigo[]
+  eventosGps              EventoGps[]
+  wialonEstado            WialonEstado?
+
   @@map("empresas")
 }
 
@@ -418,16 +421,17 @@ model Usuario {
   declaracionesAprobadas  Declaracion[]            @relation("DeclAprobadaPor")
   declaracionesAceptadas  Declaracion[]            @relation("DeclAceptadaPor")
   declaracionesRevision   Declaracion[]            @relation("DeclRevisionPedidaPor")
+  eventosGpsRevisados     EventoGps[]              @relation("EventoGpsRevisor")
   carguesRevertidos       CargueMasivo[]           @relation("CargueRevertidoPor")
   cumplimientos           ObligacionCumplimiento[] @relation("CumplimientoUsuario")
   declaracionesCreadas    Declaracion[]            @relation("DeclCreadaPor")
-
-  @@index([empresaId])
   trabajos                Trabajo[] // lo que pidió preparar (sus descargas)
-  certificadosComerciales CertificadoComercial[] @relation("CertificadoComercialSolicitante")
+  certificadosComerciales CertificadoComercial[]   @relation("CertificadoComercialSolicitante")
   facturasEnlazadas       FacturaManifiesto[]
   manifiestosLiberados    ManifiestoFinanzas[]
   sincronizacionesSiigo   SincronizacionSiigo[]
+
+  @@index([empresaId])
   @@map("usuarios")
 }
 
@@ -464,37 +468,37 @@ model PasswordReset {
 // ENTIDADES BASE
 // ---------------------------------------------------------------------
 model Cliente {
-  id               String          @id @default(uuid()) @db.Uuid
-  empresaId        String          @map("empresa_id") @db.Uuid
-  nit              String          @db.VarChar(15)
-  dv               String?         @db.Char(1)
-  razonSocial      String          @map("razon_social") @db.VarChar(200)
-  tipo             TipoCliente     @default(DIRECTO)
-  sector           String?         @db.VarChar(60) // de la lista SECTORES (@terraviva/shared); un valor antiguo se respeta hasta editarlo
-  tipoNegociacion  TipoNegociacion @default(COBRO) @map("tipo_negociacion")
-  formaPago        FormaPago       @default(CONTADO) @map("forma_pago")
-  emailFacturacion String?         @map("email_facturacion") @db.VarChar(150)
-  representanteLegal String?       @map("representante_legal") @db.VarChar(150) // constancia de RCD (Anexo II)
-  asesorId         String?         @map("asesor_id") @db.Uuid // asesor comercial (aparece en conciliaciones)
-  activo           Boolean         @default(true)
+  id                 String              @id @default(uuid()) @db.Uuid
+  empresaId          String              @map("empresa_id") @db.Uuid
+  nit                String              @db.VarChar(15)
+  dv                 String?             @db.Char(1)
+  razonSocial        String              @map("razon_social") @db.VarChar(200)
+  tipo               TipoCliente         @default(DIRECTO)
+  sector             String?             @db.VarChar(60) // de la lista SECTORES (@terraviva/shared); un valor antiguo se respeta hasta editarlo
+  tipoNegociacion    TipoNegociacion     @default(COBRO) @map("tipo_negociacion")
+  formaPago          FormaPago           @default(CONTADO) @map("forma_pago")
+  emailFacturacion   String?             @map("email_facturacion") @db.VarChar(150)
+  representanteLegal String?             @map("representante_legal") @db.VarChar(150) // constancia de RCD (Anexo II)
+  asesorId           String?             @map("asesor_id") @db.Uuid // asesor comercial (aparece en conciliaciones)
+  activo             Boolean             @default(true)
   // Inactivo siempre con su motivo y fecha (CHECK en la base); al reactivarlo se limpian y la auditoría conserva la historia
   motivoInactivacion MotivoInactivacion? @map("motivo_inactivacion")
   notaInactivacion   String?             @map("nota_inactivacion") @db.VarChar(500) // interna: el portal no la muestra
   inactivadoEn       DateTime?           @map("inactivado_en") @db.Timestamptz
   reglaCertificado   ReglaCertificado    @default(AL_VENCER) @map("regla_certificado") // solo la ven y cambian Comercial, Facturación y Gerencia
-  camposExtra      Json            @default("{}") @map("campos_extra")
+  camposExtra        Json                @default("{}") @map("campos_extra")
 
-  empresa        Empresa        @relation(fields: [empresaId], references: [id])
-  asesor         Usuario?       @relation("ClienteAsesor", fields: [asesorId], references: [id])
-  sucursales     Sucursal[]
-  declaraciones  Declaracion[]
-  solicitudes    Solicitud[]
-  manifiestos    Manifiesto[]
-  actas          Acta[]
-  cargues        CargueMasivo[]
-  usuariosPortal Usuario[]      @relation("UsuarioPortal")
+  empresa                 Empresa                @relation(fields: [empresaId], references: [id])
+  asesor                  Usuario?               @relation("ClienteAsesor", fields: [asesorId], references: [id])
+  sucursales              Sucursal[]
+  declaraciones           Declaracion[]
+  solicitudes             Solicitud[]
+  manifiestos             Manifiesto[]
+  actas                   Acta[]
+  cargues                 CargueMasivo[]
+  usuariosPortal          Usuario[]              @relation("UsuarioPortal")
   certificadosComerciales CertificadoComercial[]
-  facturasSiigo  FacturaSiigo[]
+  facturasSiigo           FacturaSiigo[]
 
   @@unique([empresaId, nit])
   @@map("clientes")
@@ -621,21 +625,24 @@ model Bodega {
 }
 
 model Vehiculo {
-  id            String       @id @default(uuid()) @db.Uuid
-  empresaId     String       @map("empresa_id") @db.Uuid
-  bodegaId      String?      @map("bodega_id") @db.Uuid
-  placa         String       @unique @db.VarChar(7)
-  marca         String?      @db.VarChar(40)
-  color         String       @default("#1E7838") @db.VarChar(7) // color en el calendario de programación
-  tipo          String       @db.VarChar(40) // furgón RESPEL, vactor, volqueta, estacas
-  capacidad     Decimal      @db.Decimal(10, 2)
-  unidadCap     UnidadMedida @default(KG) @map("unidad_cap")
-  volumenM3     Decimal?     @map("volumen_m3") @db.Decimal(8, 2)
-  proveedorId   String?      @map("proveedor_id") @db.Uuid // NULL = propio; si no, el transportador que cobra flete
-  soatVence     DateTime?    @map("soat_vence") @db.Date
-  rtmVence      DateTime?    @map("rtm_vence") @db.Date
-  polizaRcVence DateTime?    @map("poliza_rc_vence") @db.Date
-  activo        Boolean      @default(true)
+  id             String       @id @default(uuid()) @db.Uuid
+  empresaId      String       @map("empresa_id") @db.Uuid
+  bodegaId       String?      @map("bodega_id") @db.Uuid
+  placa          String       @unique @db.VarChar(7)
+  marca          String?      @db.VarChar(40)
+  color          String       @default("#1E7838") @db.VarChar(7) // color en el calendario de programación
+  tipo           String       @db.VarChar(40) // furgón RESPEL, vactor, volqueta, estacas
+  capacidad      Decimal      @db.Decimal(10, 2)
+  unidadCap      UnidadMedida @default(KG) @map("unidad_cap")
+  volumenM3      Decimal?     @map("volumen_m3") @db.Decimal(8, 2)
+  proveedorId    String?      @map("proveedor_id") @db.Uuid // NULL = propio; si no, el transportador que cobra flete
+  soatVence      DateTime?    @map("soat_vence") @db.Date
+  rtmVence       DateTime?    @map("rtm_vence") @db.Date
+  polizaRcVence  DateTime?    @map("poliza_rc_vence") @db.Date
+  activo         Boolean      @default(true)
+  // Unidad de Wialon (GPS de la flota): se enlaza sola si el nombre de la unidad trae la placa, o a mano en Flota
+  wialonUnidadId Int?         @map("wialon_unidad_id")
+  wialonNombre   String?      @map("wialon_nombre") @db.VarChar(100)
 
   empresa          Empresa          @relation(fields: [empresaId], references: [id])
   bodega           Bodega?          @relation(fields: [bodegaId], references: [id])
@@ -644,6 +651,9 @@ model Vehiculo {
   rutas            Ruta[]
   preoperacionales Preoperacional[]
   manifiestos      Manifiesto[]
+  gps              VehiculoGps?
+  rutasGps         RutaGps[]
+  eventosGps       EventoGps[]
 
   @@map("vehiculos")
 }
@@ -1119,6 +1129,9 @@ model Ruta {
   eventos          RutaEvento[]
   preoperacionales Preoperacional[]
   manifiestos      Manifiesto[]
+  gps              RutaGps?
+  paradasGps       ParadaGps[]
+  eventosGps       EventoGps[]
 
   @@unique([empresaId, codigo])
   @@index([fechaProgramada, vehiculoId])
@@ -1140,6 +1153,7 @@ model RutaParada {
   ruta     Ruta       @relation(fields: [rutaId], references: [id], onDelete: Cascade)
   sucursal Sucursal   @relation(fields: [sucursalId], references: [id])
   items    RutaItem[]
+  gps      ParadaGps?
 
   @@unique([rutaId, orden])
   @@map("ruta_paradas")
@@ -1189,6 +1203,7 @@ model RutaRastreo {
   velocidadKmh Decimal? @map("velocidad_kmh") @db.Decimal(5, 1)
   registradoEn DateTime @map("registrado_en") @db.Timestamptz // hora del teléfono (puede llegar tarde sin señal)
   recibidoEn   DateTime @default(now()) @map("recibido_en") @db.Timestamptz
+  fuente       String   @default("CELULAR") @db.VarChar(8) // CELULAR | WIALON (el mismo punto de Wialon no se repite)
 
   ruta     Ruta      @relation(fields: [rutaId], references: [id], onDelete: Cascade)
   vehiculo Vehiculo? @relation(fields: [vehiculoId], references: [id])
@@ -1442,41 +1457,41 @@ model ConciliacionItem {
 /// Al emitirla se guarda en «contenido» una copia fija de lo certificado (cantidades, tratamientos y
 /// permisos vigentes), para que el certificado no cambie si después cambian los datos.
 model Acta {
-  id                 String     @id @default(uuid()) @db.Uuid
-  empresaId          String     @map("empresa_id") @db.Uuid
-  numero             String     @default("") @db.VarChar(20) // consecutivo: lo asigna la base al crear
-  tipo               TipoActa
-  origen             OrigenActa @default(GENERADA)
-  clienteId          String     @map("cliente_id") @db.Uuid
-  destinoId          String     @map("destino_id") @db.Uuid
-  periodoDesde       DateTime   @map("periodo_desde") @db.Date
-  periodoHasta       DateTime   @map("periodo_hasta") @db.Date
-  estado             EstadoActa @default(BORRADOR)
-  codigoVerificacion String     @unique @default(dbgenerated("encode(gen_random_bytes(12), 'hex'::text)")) @map("codigo_verificacion") @db.VarChar(32) // va en el QR
-  contenido          Json? // copia fija de lo certificado, al emitir
-  emitidaEn          DateTime?  @map("emitida_en") @db.Timestamptz
-  emitidaPorId       String?    @map("emitida_por") @db.Uuid
-  pdfUrl             String?    @map("pdf_url")
-  pdfSha256          String?    @map("pdf_sha256") @db.Char(64) // integridad del PDF emitido
+  id                    String     @id @default(uuid()) @db.Uuid
+  empresaId             String     @map("empresa_id") @db.Uuid
+  numero                String     @default("") @db.VarChar(20) // consecutivo: lo asigna la base al crear
+  tipo                  TipoActa
+  origen                OrigenActa @default(GENERADA)
+  clienteId             String     @map("cliente_id") @db.Uuid
+  destinoId             String     @map("destino_id") @db.Uuid
+  periodoDesde          DateTime   @map("periodo_desde") @db.Date
+  periodoHasta          DateTime   @map("periodo_hasta") @db.Date
+  estado                EstadoActa @default(BORRADOR)
+  codigoVerificacion    String     @unique @default(dbgenerated("encode(gen_random_bytes(12), 'hex'::text)")) @map("codigo_verificacion") @db.VarChar(32) // va en el QR
+  contenido             Json? // copia fija de lo certificado, al emitir
+  emitidaEn             DateTime?  @map("emitida_en") @db.Timestamptz
+  emitidaPorId          String?    @map("emitida_por") @db.Uuid
+  pdfUrl                String?    @map("pdf_url")
+  pdfSha256             String?    @map("pdf_sha256") @db.Char(64) // integridad del PDF emitido
   // Certificado por generador (clientes GESTOR): la razón social del certificado es la del generador
-  generadorNit       String?    @map("generador_nit") @db.VarChar(15)
-  generadorNombre    String?    @map("generador_nombre") @db.VarChar(200)
-  archivoUrl         String?    @map("archivo_url") // acta CARGADA de un gestor aliado
-  cargadaPorId       String?    @map("cargada_por") @db.Uuid
-  motivoAnulacion    String?    @map("motivo_anulacion") @db.VarChar(300)
-  anuladaEn          DateTime?  @map("anulada_en") @db.Timestamptz
+  generadorNit          String?    @map("generador_nit") @db.VarChar(15)
+  generadorNombre       String?    @map("generador_nombre") @db.VarChar(200)
+  archivoUrl            String?    @map("archivo_url") // acta CARGADA de un gestor aliado
+  cargadaPorId          String?    @map("cargada_por") @db.Uuid
+  motivoAnulacion       String?    @map("motivo_anulacion") @db.VarChar(300)
+  anuladaEn             DateTime?  @map("anulada_en") @db.Timestamptz
   // Portal: con una factura vencida y sin pagar el cliente no descarga el certificado, salvo que la oficina lo libere
-  descargaLiberadaEn    DateTime? @map("descarga_liberada_en") @db.Timestamptz
-  descargaLiberadaPorId String?   @map("descarga_liberada_por") @db.Uuid
-  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  descargaLiberadaEn    DateTime?  @map("descarga_liberada_en") @db.Timestamptz
+  descargaLiberadaPorId String?    @map("descarga_liberada_por") @db.Uuid
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz
 
-  empresa    Empresa            @relation(fields: [empresaId], references: [id])
-  cliente    Cliente            @relation(fields: [clienteId], references: [id])
-  destino    Proveedor          @relation(fields: [destinoId], references: [id])
-  emitidaPor Usuario?           @relation("ActaEmitidaPor", fields: [emitidaPorId], references: [id])
-  cargadaPor Usuario?           @relation("ActaCargadaPor", fields: [cargadaPorId], references: [id])
-  descargaLiberadaPor Usuario?  @relation("ActaDescargaLiberada", fields: [descargaLiberadaPorId], references: [id])
-  items      ConciliacionItem[]
+  empresa             Empresa            @relation(fields: [empresaId], references: [id])
+  cliente             Cliente            @relation(fields: [clienteId], references: [id])
+  destino             Proveedor          @relation(fields: [destinoId], references: [id])
+  emitidaPor          Usuario?           @relation("ActaEmitidaPor", fields: [emitidaPorId], references: [id])
+  cargadaPor          Usuario?           @relation("ActaCargadaPor", fields: [cargadaPorId], references: [id])
+  descargaLiberadaPor Usuario?           @relation("ActaDescargaLiberada", fields: [descargaLiberadaPorId], references: [id])
+  items               ConciliacionItem[]
 
   @@unique([empresaId, numero])
   @@map("actas")
@@ -1542,6 +1557,101 @@ model ErrorServidor {
   @@index([fecha(sort: Desc)], map: "ix_errores_servidor_fecha")
   @@index([firma, fecha(sort: Desc)], map: "ix_errores_servidor_firma")
   @@map("errores_servidor")
+}
+
+/// Última posición de cada vehículo traída de Wialon (se reescribe en cada consulta; no es evidencia).
+model VehiculoGps {
+  vehiculoId    String   @id @map("vehiculo_id") @db.Uuid
+  unidadId      Int      @map("unidad_id")
+  latitud       Decimal  @db.Decimal(9, 6)
+  longitud      Decimal  @db.Decimal(9, 6)
+  velocidadKmh  Decimal? @map("velocidad_kmh") @db.Decimal(5, 1)
+  rumbo         Int?     @db.SmallInt
+  posicionEn    DateTime @map("posicion_en") @db.Timestamptz // hora del GPS
+  actualizadoEn DateTime @default(now()) @map("actualizado_en") @db.Timestamptz
+
+  vehiculo Vehiculo @relation(fields: [vehiculoId], references: [id])
+
+  @@map("vehiculos_gps")
+}
+
+/// Resumen GPS de una ruta con Wialon: salida y llegada a la planta, kilómetros, puntos y estado de los detectores.
+model RutaGps {
+  rutaId         String    @id @map("ruta_id") @db.Uuid
+  vehiculoId     String    @map("vehiculo_id") @db.Uuid
+  unidadId       Int       @map("unidad_id")
+  procesadoHasta DateTime  @map("procesado_hasta") @db.Timestamptz // hora del último mensaje de Wialon procesado
+  puntos         Int       @default(0)
+  km             Decimal   @default(0) @db.Decimal(9, 2)
+  salidaPlanta   DateTime? @map("salida_planta") @db.Timestamptz
+  llegadaPlanta  DateTime? @map("llegada_planta") @db.Timestamptz
+  estado         Json      @default("{}")
+  cerrada        Boolean   @default(false) // la ruta terminó y ya se procesó su último tramo
+  actualizadoEn  DateTime  @default(now()) @map("actualizado_en") @db.Timestamptz
+
+  ruta     Ruta     @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  vehiculo Vehiculo @relation(fields: [vehiculoId], references: [id])
+
+  @@map("rutas_gps")
+}
+
+/// Llegada, salida y tiempo en sitio de una parada según la geocerca de la sede (Wialon).
+model ParadaGps {
+  paradaId        String    @id @map("parada_id") @db.Uuid
+  rutaId          String    @map("ruta_id") @db.Uuid
+  llegada         DateTime? @db.Timestamptz
+  salida          DateTime? @db.Timestamptz
+  dentroDesde     DateTime? @map("dentro_desde") @db.Timestamptz // visita en curso
+  segundosEnSitio Int       @default(0) @map("segundos_en_sitio")
+  actualizadoEn   DateTime  @default(now()) @map("actualizado_en") @db.Timestamptz
+
+  parada RutaParada @relation(fields: [paradaId], references: [id], onDelete: Cascade)
+  ruta   Ruta       @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+
+  @@index([rutaId], map: "ix_paradas_gps_ruta")
+  @@map("paradas_gps")
+}
+
+/// Parada no programada con RESPEL o desvío de la ruta (Wialon): evidencia. Solo se cierra o se marca revisado (regla en la base).
+model EventoGps {
+  id          Int       @id @default(autoincrement())
+  empresaId   String    @map("empresa_id") @db.Uuid
+  rutaId      String    @map("ruta_id") @db.Uuid
+  vehiculoId  String    @map("vehiculo_id") @db.Uuid
+  tipo        String    @db.VarChar(25) // PARADA_NO_PROGRAMADA | DESVIO
+  inicio      DateTime  @db.Timestamptz
+  fin         DateTime? @db.Timestamptz
+  latitud     Decimal   @db.Decimal(9, 6)
+  longitud    Decimal   @db.Decimal(9, 6)
+  conRespel   Boolean   @default(false) @map("con_respel")
+  detalle     Json      @default("{}")
+  revisadoPor String?   @map("revisado_por") @db.Uuid
+  revisadoEn  DateTime? @map("revisado_en") @db.Timestamptz
+  nota        String?   @db.VarChar(300)
+  creadoEn    DateTime  @default(now()) @map("creado_en") @db.Timestamptz
+
+  empresa  Empresa  @relation(fields: [empresaId], references: [id])
+  ruta     Ruta     @relation(fields: [rutaId], references: [id])
+  vehiculo Vehiculo @relation(fields: [vehiculoId], references: [id])
+  revisor  Usuario? @relation("EventoGpsRevisor", fields: [revisadoPor], references: [id])
+
+  @@index([rutaId, inicio], map: "ix_eventos_gps_ruta")
+  @@map("eventos_gps")
+}
+
+/// Conexión con Wialon de cada empresa: último intento, último bien, error y unidades de la cuenta.
+model WialonEstado {
+  empresaId      String    @id @map("empresa_id") @db.Uuid
+  ultimoIntento  DateTime? @map("ultimo_intento") @db.Timestamptz
+  ultimoOk       DateTime? @map("ultimo_ok") @db.Timestamptz
+  fallosSeguidos Int       @default(0) @map("fallos_seguidos")
+  error          String?   @db.VarChar(300)
+  ocupadoHasta   DateTime? @map("ocupado_hasta") @db.Timestamptz // evita que dos copias del API procesen a la vez
+  detalle        Json      @default("{}")
+
+  empresa Empresa @relation(fields: [empresaId], references: [id])
+
+  @@map("wialon_estado")
 }
 
 /// Factura de venta traída de Siigo Nube (copia local para cruzarla con los manifiestos).

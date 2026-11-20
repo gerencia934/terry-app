@@ -1830,6 +1830,182 @@ prueba('correo diario: a cada quien las alertas de su rol (Comercial ve facturac
   && deRol('Administrador').some((x) => x.tipos.includes('seguridad')) && !deRol('Conductor').length && !deRol('Cliente (portal)').length,
   JSON.stringify(resumen.json).slice(0, 500));
 
+console.log('\n14. GPS de la flota con Wialon (simulado: las pruebas nunca tocan una cuenta real)');
+// Wialon simulado en el puerto 3998: el API apunta a él con WIALON_URL y el token «token-prueba-wialon»
+const wialon = { sesiones: 0, sid: null, vencerSesion: false, caido: false, unidades: [], mensajes: {} };
+const wialonSimulado = http.createServer((req, res) => {
+  let b = ''; req.on('data', (c) => { b += c; });
+  req.on('end', () => {
+    const json = (codigo, cuerpo) => { res.writeHead(codigo, { 'content-type': 'application/json' }); res.end(JSON.stringify(cuerpo)); };
+    if (wialon.caido) { json(503, {}); return; }
+    const u = new URL(req.url, 'http://wialon');
+    if (req.method !== 'POST' || u.pathname !== '/wialon/ajax.html') { json(404, {}); return; }
+    const f = new URLSearchParams(b);
+    const svc = f.get('svc'), params = JSON.parse(f.get('params') || '{}');
+    if (svc === 'token/login') {
+      if (params.token !== 'token-prueba-wialon') { json(200, { error: 4 }); return; }
+      wialon.sesiones++; wialon.sid = `sesion-${wialon.sesiones}`;
+      json(200, { eid: wialon.sid, user: { nm: 'terraviva' } }); return;
+    }
+    if (!wialon.sid || f.get('sid') !== wialon.sid) { json(200, { error: 1 }); return; }
+    if (wialon.vencerSesion) { wialon.vencerSesion = false; wialon.sid = null; json(200, { error: 1 }); return; }
+    const ahoraS = Math.floor(Date.now() / 1000);
+    const msjs = (id) => (wialon.mensajes[id] ?? []).filter((m) => m.t <= ahoraS);
+    if (svc === 'core/search_items') {
+      json(200, { searchSpec: params.spec, dataFlags: params.flags, totalItemsCount: wialon.unidades.length, indexFrom: 0, indexTo: 0,
+        items: wialon.unidades.map((x) => { const m = msjs(x.id).at(-1); return { nm: x.nm, cls: 2, id: x.id, mu: 0, pos: m ? { t: m.t, ...m.pos } : null }; }) });
+      return;
+    }
+    if (svc === 'messages/load_interval') {
+      const ms = msjs(params.itemId).filter((m) => m.t >= params.timeFrom && m.t <= params.timeTo);
+      json(200, { count: ms.length, messages: ms.map((m) => ({ t: m.t, f: 1, tp: 'ud', pos: m.pos, i: 0, o: 0, p: {} })) });
+      return;
+    }
+    if (svc === 'messages/unload') { json(200, {}); return; }
+    json(200, { error: 5 });
+  });
+});
+await new Promise((ok) => wialonSimulado.listen(3998, ok));
+wialonSimulado.unref();
+const placaVeh = (placa) => db.vehiculo.findUnique({ where: { placa } });
+const [lpm, ups, mdf] = await Promise.all(['LPM482', 'UPS485', 'MDF180'].map(placaVeh));
+const segs = (d) => (d ? Math.round(new Date(d).getTime() / 1000) : null);
+
+// Geocercas: la planta (Ajustes › Datos de la empresa) y la sede del cliente
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { gps: { plantaLatitud: 4.6, plantaLongitud: -60 } } });
+const gpsFuera = r.status;
+r = await llamar('PATCH', '/empresa/configuracion', { token: T8, cuerpo: { gps: { plantaLatitud: 7.3, plantaLongitud: -73.9, radioPlantaM: 400, radioSedeM: 200, minutosParada: 15, kmDesvio: 5 } } });
+prueba('GPS: la ubicación de la planta va en Ajustes con las reglas de las geocercas (fuera de Colombia → 400)', gpsFuera === 400 && r.status === 200, `${gpsFuera} ${r.status}`);
+await db.sucursal.update({ where: { id: suc.id }, data: { latitud: 7.4, longitud: -73.85 } });
+
+// Ruta de hoy con RESPEL en el LPM482: salió hace 110 minutos (las etapas se ponen en el pasado para simular el viaje)
+const hoyGps = fechaEn(0);
+const peligrosa = await db.declaracion.findFirst({ where: { clienteId: suc.clienteId, esPeligroso: true, estado: 'AUTORIZADA', activa: true } });
+const solGps = (await llamar('POST', '/solicitudes', { token: T8, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: hoyGps,
+  items: [{ declaracionId: peligrosa?.id, cantidadEstimada: 300 }] } })).json;
+const rutaGps = (await llamar('POST', '/rutas', { token: T8, cuerpo: { codigo: `R-GPS-${Date.now() % 100000}`, fechaProgramada: hoyGps, vehiculoId: lpm.id, conductorId: yo.id, solicitudes: [solGps.id] } })).json;
+await llamar('POST', '/preoperacionales', { token: T8, cuerpo: { vehiculoId: lpm.id, rutaId: rutaGps.id, fechaProgramada: hoyGps, km: 50000, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
+r = await llamar('PATCH', `/rutas/${rutaGps.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 50000 } });
+prueba('GPS: ruta de hoy con residuos peligrosos en un vehículo de la flota, en camino', !!peligrosa && !!rutaGps.id && r.status === 200, JSON.stringify([solGps, rutaGps, r.json]).slice(0, 300));
+const T0 = Math.floor(Date.now() / 1000) - 110 * 60;
+const [etProgramada, etSitio, etDescargado] = [estados.json.find((e) => e.orden === 1), estados.json.find((e) => e.orden === 3), estados.json.find((e) => e.esFinal && !e.cancela)];
+await db.ruta.update({ where: { id: rutaGps.id }, data: { horaSalida: new Date(T0 * 1000) } });
+await db.rutaEvento.updateMany({ where: { rutaId: rutaGps.id, estadoRecorridoId: etProgramada.id }, data: { desde: new Date((T0 - 1800) * 1000) } });
+await db.rutaEvento.updateMany({ where: { rutaId: rutaGps.id, estadoRecorridoId: enCamino.id }, data: { desde: new Date(T0 * 1000) } });
+await db.rutaEvento.createMany({ data: [{ rutaId: rutaGps.id, estadoRecorridoId: etSitio.id, desde: new Date((T0 + 21 * 60) * 1000) },
+  { rutaId: rutaGps.id, estadoRecorridoId: enCamino.id, desde: new Date((T0 + 52 * 60) * 1000) }] });
+// El viaje en Wialon: planta (P) → sede del cliente (S, 31 min) → 8,8 km fuera del trayecto → 20 min quieto (D) → planta
+const P = { y: 7.3, x: -73.9 }, S = { y: 7.4, x: -73.85 }, D = { y: 7.4, x: -73.77 };
+const entre = (a, b, f) => ({ y: a.y + (b.y - a.y) * f, x: a.x + (b.x - a.x) * f });
+const viaje = [];
+const msj = (min, l, s) => viaje.push({ t: T0 + min * 60, pos: { y: l.y, x: l.x, s, c: 90, z: 100, sc: 9 } });
+msj(-10, P, 0); msj(-5, P, 0); msj(-1, P, 0);
+for (let m = 2; m <= 20; m++) msj(m, entre(P, S, (m - 1) / 20), 45);
+for (const m of [21, 26, 31, 36, 41, 46, 50]) msj(m, S, 0);
+for (const [m, f] of [[52, 0.2], [54, 0.4], [56, 0.6], [58, 0.8], [60, 1]]) msj(m, entre(S, D, f), 50);
+for (const m of [62, 67, 72, 77, 82]) msj(m, D, 0);
+for (let k = 0; k < 10; k++) msj(84 + 2 * k, entre(D, P, 0.1 * (k + 1)), 60);
+msj(104, P, 0); msj(108, P, 0);
+wialon.unidades = [{ id: 7001, nm: 'LPM482 - JMC Furgón' }, { id: 7002, nm: 'UPS 485' }, { id: 7003, nm: 'Camioneta gerencia' }, { id: 7004, nm: 'Furgon USD855' }, { id: 7005, nm: 'USD-855 respaldo' }];
+wialon.mensajes = { 7001: viaje, 7002: [{ t: T0, pos: { y: 7.1, x: -73.1, s: 0, c: 0 } }] };
+
+r = await llamar('POST', '/gps/actualizar', { token: tLog, cuerpo: {} });
+const [lpmGps, upsGps, usdGps] = await Promise.all(['LPM482', 'UPS485', 'USD855'].map(placaVeh));
+prueba('Wialon: ingresa con el token y las unidades que traen la placa se enlazan solas (dos unidades con la misma placa, no)',
+  r.status === 201 && r.json.unidades === 5 && r.json.enlazadas === 2 && r.json.errores === 0 && lpmGps.wialonUnidadId === 7001 && upsGps.wialonUnidadId === 7002 && usdGps.wialonUnidadId === null
+  && (await db.auditoria.count({ where: { entidad: 'vehiculo', entidadId: lpm.id, accion: 'ENLAZAR_WIALON', usuarioId: null } })) === 1, JSON.stringify(r.json));
+const vg = await db.vehiculoGps.findUnique({ where: { vehiculoId: lpm.id } });
+prueba('…y queda la última posición de cada vehículo (en vivo)', !!vg && Number(vg.latitud) === 7.3 && Number(vg.longitud) === -73.9 && segs(vg.posicionEn) === T0 + 108 * 60, JSON.stringify(vg));
+const rg = await db.rutaGps.findUnique({ where: { rutaId: rutaGps.id } });
+const pg = await db.paradaGps.findFirst({ where: { rutaId: rutaGps.id } });
+prueba('recorrido real: salida y llegada a la planta por geocerca y kilómetros por GPS', !!rg && segs(rg.salidaPlanta) === T0 + 120 && segs(rg.llegadaPlanta) === T0 + 102 * 60
+  && Number(rg.km) > 36 && Number(rg.km) < 41 && !rg.cerrada, JSON.stringify(rg));
+prueba('…llegada, salida y tiempo en sitio de la parada (geocerca de la sede)', !!pg && segs(pg.llegada) === T0 + 21 * 60 && segs(pg.salida) === T0 + 52 * 60
+  && pg.segundosEnSitio === 31 * 60 && !pg.dentroDesde, JSON.stringify(pg));
+const puntosW = await db.rutaRastreo.findMany({ where: { rutaId: rutaGps.id, fuente: 'WIALON' }, orderBy: { registradoEn: 'asc' } });
+prueba('…el recorrido se guarda solo en las etapas con rastreo (la regla del celular): nada antes de salir ni mientras estuvo donde el generador',
+  puntosW.length === 41 && rg.puntos === 41 && segs(puntosW[0].registradoEn) === T0 + 120
+  && !puntosW.some((p) => segs(p.registradoEn) >= T0 + 21 * 60 && segs(p.registradoEn) < T0 + 52 * 60), String(puntosW.length));
+const evs = await db.eventoGps.findMany({ where: { rutaId: rutaGps.id }, orderBy: { inicio: 'asc' } });
+const desvio = evs.find((e) => e.tipo === 'DESVIO'), paradaNp = evs.find((e) => e.tipo === 'PARADA_NO_PROGRAMADA');
+prueba('alertas del GPS: el desvío (más de 5 km del trayecto planta → paradas → planta) y la parada no programada con RESPEL quedan como evidencia',
+  evs.length === 2 && segs(desvio?.inicio) === T0 + 56 * 60 && segs(desvio.fin) === T0 + 90 * 60 && desvio.detalle.distanciaKm > 8 && desvio.conRespel
+  && segs(paradaNp?.inicio) === T0 + 62 * 60 && segs(paradaNp.fin) === T0 + 84 * 60 && paradaNp.conRespel && paradaNp.detalle.minutos === 22, JSON.stringify(evs));
+r = await llamar('POST', '/gps/actualizar', { token: tLog, cuerpo: {} });
+prueba('…volver a consultar no repite puntos, eventos ni kilómetros', r.status === 201 && r.json.puntos === 0 && r.json.eventos === 0
+  && (await db.rutaRastreo.count({ where: { rutaId: rutaGps.id, fuente: 'WIALON' } })) === 41 && (await db.eventoGps.count({ where: { rutaId: rutaGps.id } })) === 2
+  && Number((await db.rutaGps.findUnique({ where: { rutaId: rutaGps.id } })).km) === Number(rg.km), JSON.stringify(r.json));
+const [alLog, alComGps] = await Promise.all([llamar('GET', '/alertas', { token: tLog }), llamar('GET', '/alertas', { token: tcom })]);
+const gpsLog = alLog.json.filter?.((x) => x.tipo === 'gps') ?? [];
+prueba('…llegan como alertas a Logística hasta que alguien las revise (Comercial no las ve); y las rutas en curso sin GPS enlazado se avisan',
+  gpsLog.some((x) => /LPM482 estuvo 22 min detenido fuera de ruta con RESPEL/.test(x.titulo)) && gpsLog.some((x) => /LPM482 fue a 8,8 km de su ruta con RESPEL/.test(x.titulo))
+  && !alComGps.json.some?.((x) => x.tipo === 'gps') && alLog.json.some?.((x) => x.tipo === 'flota' && /sin GPS de Wialon/.test(x.titulo) && x.detalle.includes('USD855')),
+  JSON.stringify(alLog.json.filter?.((x) => x.tipo === 'gps' || /Wialon/.test(x.titulo))));
+
+r = await llamar('GET', `/gps/seguimiento?fecha=${hoyGps}`, { token: tLog });
+const sg = r.json.rutas?.[rutaGps.id];
+prueba('Seguimiento: posición de cada vehículo y, por ruta, kilómetros, minutos en la parada y eventos', r.status === 200 && r.json.configurado === true
+  && r.json.vehiculos?.some((v) => v.placa === 'LPM482' && v.lat === 7.3) && sg?.km > 36 && sg.paradas[pg.paradaId]?.minutos === 31 && sg.eventos.length === 2
+  && r.json.planta?.radioM === 400, JSON.stringify(r.json).slice(0, 400));
+const [segCond, segPortal, segCom] = await Promise.all([llamar('GET', `/gps/seguimiento?fecha=${hoyGps}`, { token: tc }), llamar('GET', '/gps/estado', { token: tPA }), llamar('GET', '/gps/estado', { token: tcom })]);
+prueba('…el GPS lo ven Logística y Gerencia: ni el conductor, ni Comercial, ni el portal de clientes', segCond.status === 403 && segPortal.status === 403 && segCom.status === 403,
+  `${segCond.status} ${segPortal.status} ${segCom.status}`);
+r = await llamar('GET', `/rutas/${rutaGps.id}/gps`, { token: tLog });
+const rastreoGps = await llamar('GET', `/rutas/${rutaGps.id}/rastreo`, { token: tLog });
+prueba('detalle de la ruta: ubicación de la parada y de la planta, y el recorrido con su fuente (Wialon o celular)', r.status === 200 && r.json.vehiculoEnlazado === true
+  && r.json.sitios?.[0]?.lat === 7.4 && r.json.planta?.lat === 7.3 && rastreoGps.json.length === 41 && rastreoGps.json.every((p) => p.fuente === 'WIALON'), JSON.stringify(r.json).slice(0, 300));
+
+// Revisión de los eventos: queda la explicación, quién y cuándo; no se cambia ni se borra
+const revCond = await llamar('PATCH', `/gps/eventos/${paradaNp.id}`, { token: tc, cuerpo: { nota: 'Yo mismo' } });
+const revCorta = await llamar('PATCH', `/gps/eventos/${paradaNp.id}`, { token: tLog, cuerpo: { nota: 'ok' } });
+const rev = await llamar('PATCH', `/gps/eventos/${paradaNp.id}`, { token: tLog, cuerpo: { nota: 'Tanqueo autorizado en la estación de la vía' } });
+const rev2 = await llamar('PATCH', `/gps/eventos/${paradaNp.id}`, { token: tLog, cuerpo: { nota: 'Otra explicación' } });
+let borrarEvento = 'se borró';
+try { await db.$executeRaw`DELETE FROM eventos_gps WHERE id = ${desvio.id}`; } catch (e) { borrarEvento = /no se borran/.test(String(e.message)) ? 'no' : String(e.message); }
+r = await llamar('GET', '/alertas', { token: tLog });
+prueba('revisar un evento: Logística deja la explicación (queda quién y cuándo), no se cambia después, no se borra y sale de las alertas',
+  revCond.status === 403 && revCorta.status === 400 && rev.status === 200 && rev2.status === 409 && borrarEvento === 'no'
+  && !r.json.some((x) => x.tipo === 'gps' && /detenido/.test(x.titulo)) && r.json.some((x) => x.tipo === 'gps' && /de su ruta/.test(x.titulo))
+  && (await db.auditoria.count({ where: { entidad: 'evento_gps', entidadId: String(paradaNp.id), accion: 'REVISAR' } })) === 1,
+  JSON.stringify([revCond.status, revCorta.status, rev.status, rev2.status, borrarEvento]));
+
+// Flota: enlazar a mano la unidad que no trae la placa, y soltar una
+const enl = await llamar('PATCH', `/vehiculos/${mdf.id}/wialon`, { token: tLog, cuerpo: { unidadId: 7003 } });
+const ocupada = await llamar('PATCH', `/vehiculos/${mdf.id}/wialon`, { token: tLog, cuerpo: { unidadId: 7001 } });
+const unidadNoEsta = await llamar('PATCH', `/vehiculos/${mdf.id}/wialon`, { token: tLog, cuerpo: { unidadId: 9999 } });
+const suelta = await llamar('PATCH', `/vehiculos/${ups.id}/wialon`, { token: tLog, cuerpo: { unidadId: null } });
+prueba('Flota: la unidad que no trae la placa se enlaza a mano (una unidad, un vehículo) y se puede soltar; queda en la auditoría',
+  enl.status === 200 && enl.json.unidadNombre === 'Camioneta gerencia' && ocupada.status === 409 && /LPM482/.test(ocupada.json.mensaje) && unidadNoEsta.status === 400
+  && suelta.status === 200 && (await placaVeh('UPS485')).wialonUnidadId === null && !(await db.vehiculoGps.findUnique({ where: { vehiculoId: ups.id } }))
+  && (await db.auditoria.count({ where: { entidad: 'vehiculo', entidadId: ups.id, accion: 'DESENLAZAR_WIALON' } })) === 1, JSON.stringify([enl.json, ocupada.json, unidadNoEsta.json]));
+const sesionesAntes = wialon.sesiones;
+wialon.vencerSesion = true;
+r = await llamar('POST', '/gps/actualizar', { token: tLog, cuerpo: {} });
+prueba('si la sesión de Wialon vence, vuelve a ingresar sola; y un vehículo soltado a mano no se vuelve a enlazar solo', r.status === 201 && wialon.sesiones === sesionesAntes + 1
+  && (await placaVeh('UPS485')).wialonUnidadId === null, `${r.status} ${wialon.sesiones - sesionesAntes}`);
+
+// Wialon se cae: se avisa y la operación sigue; al volver se pone al día solo
+wialon.caido = true;
+const caidas = [];
+for (let i = 0; i < 3; i++) caidas.push((await llamar('POST', '/gps/actualizar', { token: tLog, cuerpo: {} })).status);
+const [estCaido, alCaido] = [await llamar('GET', '/gps/estado', { token: tLog }), await llamar('GET', '/alertas', { token: tLog })];
+r = await llamar('PATCH', `/rutas/${rutaGps.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: etDescargado.id, kmFinal: 50040 } });
+prueba('si Wialon no responde: se avisa en las alertas (sin «error interno» ni correo de errores) y la operación sigue (la ruta se cierra igual)',
+  caidas.every((s) => s === 424) && estCaido.json.conectado === false && estCaido.json.fallosSeguidos === 3 && /Wialon/.test(estCaido.json.error ?? '')
+  && alCaido.json.some((x) => x.tipo === 'gps' && x.nivel === 'alta' && /Wialon no responde|no ha podido conectarse/.test(x.titulo)) && r.status === 200
+  && (await db.errorServidor.count({ where: { ruta: { contains: '/gps/' } } })) === 0, JSON.stringify([caidas, estCaido.json.error]));
+wialon.caido = false;
+await db.ruta.update({ where: { id: rutaGps.id }, data: { horaLlegadaPlanta: new Date(Date.now() - 15 * 60_000) } }); // terminó hace 15 min (pasó la espera)
+r = await llamar('POST', '/gps/actualizar', { token: tLog, cuerpo: {} });
+const [rgFin, estOk, alOk] = [await db.rutaGps.findUnique({ where: { rutaId: rutaGps.id } }), await llamar('GET', '/gps/estado', { token: tLog }), await llamar('GET', '/alertas', { token: tLog })];
+prueba('…cuando vuelve se pone al día solo: la ruta terminada queda cerrada con su recorrido y la alerta de conexión desaparece', r.status === 201 && rgFin?.cerrada === true
+  && estOk.json.conectado === true && estOk.json.fallosSeguidos === 0 && estOk.json.vehiculos.find((v) => v.placa === 'MDF180')?.unidadNombre === 'Camioneta gerencia'
+  && !alOk.json.some((x) => x.tipo === 'gps' && /Wialon/.test(x.titulo)), JSON.stringify([r.json, rgFin?.cerrada, estOk.json.fallosSeguidos]));
+const [estOtra, actOtra] = [await llamar('GET', '/gps/estado', { token: tOtra }), await llamar('POST', '/gps/actualizar', { token: tOtra, cuerpo: {} })];
+prueba('la cuenta de Wialon es solo de su empresa: otra empresa de la instalación la ve sin configurar y sin unidades', estOtra.status === 200 && estOtra.json.configurado === false
+  && estOtra.json.unidades.length === 0 && actOtra.status === 400, JSON.stringify([estOtra.json.configurado, actOtra.status]));
+wialonSimulado.close();
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

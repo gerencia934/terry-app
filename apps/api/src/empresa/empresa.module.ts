@@ -30,9 +30,16 @@ const Configuracion = z.object({
   dobleFactorObligatorio: z.boolean().optional(),
   // Cartera: en el portal, retener la descarga de los certificados con facturas vencidas y sin pagar (sí, si falta)
   cartera: z.object({ retenerCertificados: z.boolean(), diasGracia: z.number().int().min(0).max(365) }).partial().optional(),
-  // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   // Correo diario de alertas por rol: si va (sí, si falta) y a qué hora de Colombia (7, si falta)
   resumenDiario: z.object({ activo: z.boolean(), hora: z.number().int().min(0).max(23) }).partial().optional(),
+  // GPS (Wialon): ubicación de la planta (geocerca de llegada y salida) y reglas de las geocercas y alertas. Coordenadas
+  // dentro de Colombia; null borra la ubicación de la planta.
+  gps: z.object({
+    plantaLatitud: z.number().min(-5).max(15).nullable(), plantaLongitud: z.number().min(-82).max(-66).nullable(),
+    radioPlantaM: z.number().int().min(50).max(5000), radioSedeM: z.number().int().min(50).max(2000),
+    minutosParada: z.number().int().min(5).max(240), kmDesvio: z.number().min(1).max(100),
+  }).partial().optional(),
+  // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   bascula: z.object({
     identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,
     laboratorio: z.string().trim().max(120), vigenteHasta: fechaOVacia,

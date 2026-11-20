@@ -37,7 +37,7 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 - Copias en otra región.
 - Monitoreo (Sentry o similar).
 - Prueba de penetración.
-- Llaves de Siigo y Wialon.
+- Llaves de Siigo (entregadas el 19-11-2026) y token de solo lectura de Wialon (pendiente).
 - Textos de la política de datos.
 - Proteger la rama `main` y exigir 2FA en GitHub: lo hace el dueño de la cuenta.
 
@@ -114,9 +114,11 @@ El sitio web sigue en Hostinger.
 
 ## 7. Integraciones
 
-Siigo, Wialon, el módulo Comercial (en reemplazo de Bigin) y la salida de Grinclic van en sus fases (pasos 4 a 7).
-Todas usarán una tabla de envíos pendientes (patrón *outbox*) con reintentos y registro de cada intercambio. Así,
-si Siigo o Wialon fallan, la operación sigue.
+Siigo y Wialon quedaron hechos el 19-11-2026. Las dos son de solo lectura: TERRY-GO consulta, guarda una copia y se pone
+al día solo cuando vuelven (Siigo, una vez al día y con un botón; Wialon, cada 30 a 60 segundos desde el último mensaje
+procesado). Si fallan, la operación sigue y se avisa en las alertas. El módulo Comercial (en reemplazo de Bigin) y la
+salida de Grinclic van en sus fases; lo que escriba en otro sistema usará una tabla de envíos pendientes (patrón
+*outbox*) con reintentos y registro de cada intercambio.
 
 ## 8. Orden propuesto
 
@@ -152,8 +154,8 @@ si Siigo o Wialon fallan, la operación sigue.
    - monitoreo (alertas, avisos de errores y correo diario hechos el 19-11-2026; falta el de la infraestructura).
 5. **Siguientes pasos:**
    - portal de clientes (hecho el 19-11-2026: consulta, descarga, cargue de declaraciones y pedidos);
-   - Wialon;
-   - Siigo;
+   - Wialon (hecho el 19-11-2026, probado con un simulador; falta el token de la cuenta real);
+   - Siigo (hecho el 19-11-2026);
    - módulo Comercial;
    - pruebas de penetración y de carga;
    - operación en paralelo y salida de Grinclic.

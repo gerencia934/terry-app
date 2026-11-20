@@ -2,7 +2,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarPlus, RefreshCw, Route, Ban, Download, Truck, CircleAlert, Clock3, CheckCircle2 } from 'lucide-react';
 import { MonthCalendar, ResponsiveTable, FilterBar, type CalEvent, type Column } from '../../components/data';
-import { Badge, Button, ColorBadge, Field, Input, Kpi, PageHeader, Select, Sheet, Tabs, useToast, Empty } from '../../components/ui';
+import { Badge, Button, Card, ColorBadge, Field, Input, Kpi, PageHeader, Select, Sheet, Tabs, useToast, Empty } from '../../components/ui';
+import { EventoGpsFila, MapaGps, PosicionLinea, hace, kmTexto, posicionVieja, textoEvento, type SeguimientoGps } from '../../components/gps';
+import type { CapasMapa } from '../../components/Mapa';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha, fmtFechaCorta } from '../../lib/format';
 import { cant, finDeMes, horaCo, horaColumna, hoyCo, msg, sumarDias, useApi } from '../../lib/servidor';
@@ -287,13 +289,34 @@ export function SeguimientoServidor() {
   const hoy = hoyCo();
   const cat = useCatalogos();
   const rutas = useApi<RutaApi[]>(`/rutas?desde=${hoy}&hasta=${hoy}`);
+  // GPS de Wialon (Logística y Gerencia): posición de cada vehículo, kilómetros, llegadas por geocerca y eventos
+  const veGps = tienePermiso('rutas.programar');
+  const gps = useApi<SeguimientoGps>(veGps ? `/gps/seguimiento?fecha=${hoy}` : null);
   const [sel, setSel] = useState<string | null>(null);
   useEffect(() => { const t = setInterval(rutas.recargar, 60_000); return () => clearInterval(t); }, [rutas.recargar]);
+  useEffect(() => { if (!veGps) return undefined; const t = setInterval(gps.recargar, 30_000); return () => clearInterval(t); }, [gps.recargar, veGps]);
   const lista = rutas.datos ?? [];
   const inicial = Math.min(...(cat?.etapas.map((e) => e.orden) ?? [1]));
   const enCurso = lista.filter((r) => r.estadoRecorrido && !r.estadoRecorrido.esFinal && r.estadoRecorrido.orden > inicial);
   const terminadas = lista.filter((r) => r.estadoRecorrido?.esFinal);
   const sinRecursos = lista.filter((r) => !r.vehiculoId || !r.conductorId);
+  const g = gps.datos?.configurado ? gps.datos : null;
+  const porRevisar = g ? lista.flatMap((r) => (g.rutas[r.id]?.eventos ?? []).filter((e) => !e.revisadoEn).map((e) => ({ e, r }))) : [];
+  const capas = useMemo<CapasMapa>(() => {
+    if (!g) return {};
+    const sedes = new Map<string, { lat: number; lng: number; etiqueta: string }>();
+    for (const r of lista) for (const p of r.paradas) {
+      if (p.sucursal.latitud && p.sucursal.longitud) sedes.set(`${p.sucursal.latitud},${p.sucursal.longitud}`, { lat: Number(p.sucursal.latitud), lng: Number(p.sucursal.longitud), etiqueta: `${p.sucursal.cliente.razonSocial} · ${p.sucursal.nombre}` });
+    }
+    return {
+      vehiculos: g.vehiculos.map((v) => ({ id: v.id, lat: v.lat, lng: v.lng, color: v.color, etiqueta: v.placa, viejo: posicionVieja(v.posicionEn),
+        detalle: `${hace(v.posicionEn)}${v.velocidad !== null ? ` · ${v.velocidad > 3 ? `${Math.round(v.velocidad)} km/h` : 'detenido'}` : ''}` })),
+      sitios: [...(g.planta ? [{ lat: g.planta.lat, lng: g.planta.lng, radioM: g.planta.radioM, etiqueta: 'Planta PSA Los Pinos', tipo: 'planta' as const }] : []),
+        ...[...sedes.values()].map((s) => ({ ...s, radioM: g.radioSedeM, tipo: 'sede' as const }))],
+      eventos: porRevisar.filter((x) => !x.e.fin).map((x) => ({ lat: x.e.lat, lng: x.e.lng, etiqueta: `${x.r.vehiculo?.placa ?? ''} · ${textoEvento(x.e)}` })),
+    };
+  }, [g, lista]); // eslint-disable-line react-hooks/exhaustive-deps
+  const abrirDeVehiculo = (id: string) => { const r = enCurso.find((x) => x.vehiculoId === id) ?? lista.find((x) => x.vehiculoId === id); if (r) setSel(r.id); };
   return (
     <>
       <PageHeader eyebrow="Logística" title="Seguimiento" subtitle={`Rutas del ${fmtFecha(hoy)} según las etapas que marca la app del conductor. Se actualiza cada minuto.`}
@@ -305,11 +328,29 @@ export function SeguimientoServidor() {
         <Kpi label="Sin vehículo o conductor" value={String(sinRecursos.length)} icon={<CircleAlert size={16} />} />
       </div>
       {rutas.error && <p className="mb-3 rounded-xl bg-bad/10 p-3 text-bad">{rutas.error}</p>}
+      {veGps && gps.datos && (g ? (
+        <div className="mb-4 grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <div className="flex min-w-0 flex-col gap-1.5 xl:col-span-2">
+            <MapaGps capas={capas} alto={380} onVehiculo={abrirDeVehiculo} />
+            <p className="text-[12px] text-muted">{g.error ? <span className="text-warn">Wialon no responde: {g.error} La operación sigue con las etapas del conductor.</span> : `Posiciones de Wialon, actualizadas ${hace(g.ultimoOk)}. Toque un vehículo para ver su ruta.`}
+              {!g.planta && ' La planta no está ubicada: indíquela en Ajustes › Datos de la empresa para marcar la salida y la llegada.'}</p>
+          </div>
+          <Card title={`Para revisar (${porRevisar.length})`}>
+            {porRevisar.length
+              ? <div className="flex max-h-[380px] flex-col gap-2 overflow-y-auto">{porRevisar.map(({ e, r }) => <EventoGpsFila key={e.id} e={e} placa={r.vehiculo?.placa} ruta={r.codigo} onRevisado={gps.recargar} />)}</div>
+              : <p className="text-[13px] text-muted">Hoy no hay paradas no programadas con RESPEL ni desvíos por revisar.</p>}
+          </Card>
+        </div>
+      ) : <p className="mb-4 rounded-xl bg-surface-2 px-4 py-2.5 text-[13px] text-muted">El GPS de Wialon no está conectado en el servidor: las rutas se siguen por las etapas que marca el conductor en la app.</p>)}
       {!rutas.datos ? <p className="p-6 text-center text-muted">Cargando…</p> : !lista.length ? <Empty>No hay rutas programadas para hoy.</Empty> : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {lista.map((r) => {
             const atendidas = r.paradas.filter((p) => p.estado !== 'PENDIENTE').length;
             const pct = r.paradas.length ? Math.round((atendidas * 100) / r.paradas.length) : 0;
+            const gr = g?.rutas[r.id];
+            const pos = g && r.vehiculoId && enCurso.includes(r) ? g.vehiculos.find((v) => v.id === r.vehiculoId) : undefined;
+            const enSitio = gr ? r.paradas.find((p) => gr.paradas[p.id]?.enSitio) : undefined;
+            const abierto = gr?.eventos.find((e) => !e.fin && !e.revisadoEn);
             return (
               <button key={r.id} onClick={() => setSel(r.id)} className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 text-left hover:border-brand/50">
                 <div className="flex items-start justify-between gap-2">
@@ -321,6 +362,14 @@ export function SeguimientoServidor() {
                   <span>Salida {horaCo(r.horaSalida)}</span>
                   {r.kmInicial !== null && <span className="num">Km {cant(r.kmInicial)}</span>}
                 </div>
+                {(pos || gr?.km != null || enSitio) && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
+                    {pos && <PosicionLinea p={pos} enlace={false} />}
+                    {gr?.km != null && <span className="num">{kmTexto(gr.km)} km por GPS</span>}
+                    {enSitio && <span className="text-info">En sitio: {enSitio.sucursal.cliente.razonSocial} ({gr!.paradas[enSitio.id].minutos} min)</span>}
+                  </div>
+                )}
+                {abierto && <p className="rounded-lg bg-bad/10 px-2.5 py-1.5 text-[12px] font-medium text-bad">{textoEvento(abierto)}</p>}
                 <div>
                   <div className="mb-1 flex justify-between text-[12px] text-muted"><span>Paradas atendidas</span><span className="num">{atendidas} de {r.paradas.length}</span></div>
                   <div className="h-2 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} /></div>
@@ -330,7 +379,7 @@ export function SeguimientoServidor() {
           })}
         </div>
       )}
-      <RutaDetalle ruta={lista.find((r) => r.id === sel) ?? null} cat={cat} onClose={() => setSel(null)} onCambio={rutas.recargar} />
+      <RutaDetalle ruta={lista.find((r) => r.id === sel) ?? null} cat={cat} onClose={() => setSel(null)} onCambio={() => { rutas.recargar(); gps.recargar(); }} />
     </>
   );
 }

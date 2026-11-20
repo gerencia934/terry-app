@@ -2,13 +2,14 @@
 // - Inspecciones: vista de oficina de los preoperacionales que diligencian los conductores en la app de campo.
 // - Flota: vehículos con sus vencimientos (SOAT, revisión técnico-mecánica, póliza), crear y editar; nada se borra.
 import { useState, type FormEvent } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Loader2, Pencil, Plus, Smartphone, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Loader2, Pencil, Plus, RefreshCw, Satellite, Smartphone, XCircle } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, Card, ColorBadge, DefList, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
 import { ImagenProtegida, PieLista, fechaHoraCo, hoyCo, useApi, usePaginado } from '../lib/servidor';
 import { useRouter } from '../lib/router';
 import { cx, diasEntre, fmtFecha, fmtNum } from '../lib/format';
+import { hace, type EstadoGps } from '../components/gps';
 
 interface Vehiculo {
   id: string; placa: string; marca: string | null; color: string; tipo: string; capacidad: string; unidadCap: string; volumenM3: string | null; activo: boolean;
@@ -137,9 +138,23 @@ function DetalleInspeccion({ id }: { id: string }) {
 // ---------------------------- FLOTA ----------------------------
 export function FlotaServidor() {
   const { go } = useRouter();
+  const toast = useToast();
   const puede = tienePermiso('rutas.programar');
   const vehiculos = useApi<Vehiculo[]>('/vehiculos');
   const [panel, setPanel] = useState<null | { id?: string }>(null);
+  // GPS de Wialon: estado de la conexión, unidades de la cuenta y la unidad de cada vehículo
+  const gps = useApi<EstadoGps>(puede ? '/gps/estado' : null);
+  const [actualizando, setActualizando] = useState(false);
+  const actualizar = async () => {
+    setActualizando(true);
+    try {
+      const r = await api<{ unidades: number; enlazadas: number; omitido?: boolean }>('/gps/actualizar', { cuerpo: {} });
+      toast(r.omitido ? 'Wialon se está consultando en este momento: en un minuto verá los datos.' : `Wialon respondió: ${r.unidades} ${r.unidades === 1 ? 'unidad' : 'unidades'}${r.enlazadas ? `, ${r.enlazadas} enlazada${r.enlazadas === 1 ? '' : 's'} por la placa` : ''}.`, 'ok');
+    } catch (e) { toast(mensajeError(e, 'No se pudo consultar Wialon.'), 'warn'); }
+    gps.recargar();
+    setActualizando(false);
+  };
+  const g = gps.datos?.configurado ? gps.datos : null;
   const activos = (vehiculos.datos ?? []).filter((v) => v.activo);
   const hoy = hoyCo();
   const porVencer = activos.filter((v) => [v.soatVence, v.rtmVence, v.polizaRcVence].some((f) => !f || diasEntre(hoy, f.slice(0, 10)) <= 30)).length;
@@ -152,12 +167,31 @@ export function FlotaServidor() {
     { key: 's', header: 'SOAT', render: (v) => <Vence f={v.soatVence} />, priority: 2 },
     { key: 'r', header: 'Revisión técnico-mecánica', render: (v) => <Vence f={v.rtmVence} />, priority: 2 },
     { key: 'po', header: 'Póliza RC', render: (v) => <Vence f={v.polizaRcVence} />, priority: 1 },
+    ...(g ? [{ key: 'g', header: 'GPS (Wialon)', priority: 2, render: (v: Vehiculo) => {
+      const x = g.vehiculos.find((y) => y.id === v.id);
+      return x?.unidadId
+        ? <span className="block max-w-[180px] text-[13px]"><span className="block truncate">{x.unidadNombre ?? `Unidad ${x.unidadId}`}</span><span className="text-[12px] text-muted">{x.posicion ? `Posición ${hace(x.posicion.posicionEn)}` : 'Sin posición todavía'}</span></span>
+        : <Badge tone="neutral">Sin enlazar</Badge>;
+    } } as Column<Vehiculo>] : []),
     { key: 'e', header: 'Estado', render: (v) => <Badge tone={v.activo ? 'ok' : 'neutral'}>{v.activo ? 'Activo' : 'Inactivo'}</Badge>, priority: 2 },
   ];
   return (
     <>
       <PageHeader eyebrow="Ajustes" title="Flota" subtitle="Vehículos con su color en la programación y el control de vencimientos: el sistema avisa 30 días antes. Nada se borra: un vehículo se inactiva."
         actions={<><Button onClick={() => go('importar')}>Importar</Button>{puede && <Button variant="primary" onClick={() => setPanel({})}><Plus size={16} /> Nuevo vehículo</Button>}</>} />
+      {g && (() => {
+        const enlazados = g.vehiculos.filter((v) => v.unidadId).length;
+        const tono = g.conectado ? 'bg-ok/10 text-ok' : g.ultimoOk || g.fallosSeguidos ? 'bg-warn/10 text-warn' : 'bg-surface-2 text-muted';
+        return (
+          <div className={cx('mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-[13px]', tono)}>
+            <span className="flex items-start gap-2"><Satellite size={16} className="mt-px shrink-0" />
+              {g.conectado ? `GPS de Wialon conectado: ${g.unidades.length} ${g.unidades.length === 1 ? 'unidad' : 'unidades'} en la cuenta, ${enlazados} ${enlazados === 1 ? 'enlazada' : 'enlazadas'} a vehículos. Posiciones ${hace(g.ultimoOk)}.`
+                : g.ultimoOk || g.fallosSeguidos ? `Wialon no responde${g.ultimoOk ? ` desde hace ${hace(g.ultimoOk).replace('hace ', '')}` : ''}: ${g.error ?? 'sin respuesta'} La operación sigue con las etapas del conductor.`
+                : 'Conectando con Wialon: en un minuto aparecen las unidades y las posiciones.'}</span>
+            <Button size="sm" disabled={actualizando} onClick={actualizar}><RefreshCw size={14} className={actualizando ? 'animate-spin' : ''} /> Actualizar ahora</Button>
+          </div>
+        );
+      })()}
       {vehiculos.datos && porVencer > 0 && <p className="mb-3 flex items-start gap-2 rounded-xl bg-warn/10 px-4 py-2.5 text-[13px] text-warn"><AlertTriangle size={16} className="mt-px shrink-0" />{porVencer} {porVencer === 1 ? 'vehículo activo tiene' : 'vehículos activos tienen'} un documento vencido, por vencer en 30 días o sin fecha registrada.</p>}
       {vehiculos.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{vehiculos.error}</p>
         : !vehiculos.datos ? <p className="p-6 text-center text-muted">Cargando…</p>
@@ -165,14 +199,17 @@ export function FlotaServidor() {
             cardTitle={(v) => <span className="num">{v.placa} · {v.tipo}</span>} cardBadge={(v) => <Badge tone={v.activo ? 'ok' : 'neutral'}>{v.activo ? 'Activo' : 'Inactivo'}</Badge>}
             cardMeta={(v) => `SOAT ${fecha(v.soatVence)} · RTM ${fecha(v.rtmVence)}`} empty="No hay vehículos. Créelos aquí o impórtelos desde Excel." />}
       <Sheet open={!!panel} onClose={() => setPanel(null)} title={panel?.id ? 'Editar vehículo' : 'Nuevo vehículo'}>
-        {panel && <FormVehiculo v={panel.id ? vehiculos.datos?.find((x) => x.id === panel.id) : undefined} listo={() => { setPanel(null); vehiculos.recargar(); }} />}
+        {panel && <FormVehiculo v={panel.id ? vehiculos.datos?.find((x) => x.id === panel.id) : undefined} gps={g} listo={() => { setPanel(null); vehiculos.recargar(); gps.recargar(); }} />}
       </Sheet>
     </>
   );
 }
 
-function FormVehiculo({ v, listo }: { v?: Vehiculo; listo: () => void }) {
+function FormVehiculo({ v, gps, listo }: { v?: Vehiculo; gps?: EstadoGps | null; listo: () => void }) {
   const toast = useToast();
+  const actual = v ? gps?.vehiculos.find((x) => x.id === v.id) : undefined;
+  const unidadAntes = actual?.unidadId ? String(actual.unidadId) : '';
+  const [unidad, setUnidad] = useState(unidadAntes);
   const transportadores = useApi<{ id: string; razonSocial: string; nit: string }[]>('/vehiculos/transportadores');
   const [x, setX] = useState({
     placa: v?.placa ?? '', marca: v?.marca ?? '', tipo: v?.tipo ?? '', capacidad: v ? String(Number(v.capacidad)) : '', unidadCap: v?.unidadCap ?? 'KG', volumenM3: v?.volumenM3 ? String(Number(v.volumenM3)) : '',
@@ -188,6 +225,7 @@ function FormVehiculo({ v, listo }: { v?: Vehiculo; listo: () => void }) {
     const datos = { marca: x.marca, tipo: x.tipo, capacidad, unidadCap: x.unidadCap, volumenM3: volumen, color: x.color, proveedorId: x.proveedorId || null, soatVence: x.soatVence, rtmVence: x.rtmVence, polizaRcVence: x.polizaRcVence };
     try {
       if (v) await api(`/vehiculos/${v.id}`, { metodo: 'PATCH', cuerpo: { ...datos, activo: x.activo } });
+      if (v && gps && unidad !== unidadAntes) await api(`/vehiculos/${v.id}/wialon`, { metodo: 'PATCH', cuerpo: { unidadId: unidad ? Number(unidad) : null } });
       else await api('/vehiculos', { metodo: 'POST', cuerpo: { ...datos, placa: x.placa } });
       toast(v ? (v.activo && !x.activo ? `${v.placa} inactivo: ya no se ofrece para programar rutas.` : 'Vehículo actualizado.') : 'Vehículo creado.');
       listo();
@@ -213,6 +251,18 @@ function FormVehiculo({ v, listo }: { v?: Vehiculo; listo: () => void }) {
         <Field label="Técnico-mecánica vence" id="fv-r"><Input id="fv-r" type="date" value={x.rtmVence} onChange={set('rtmVence')} /></Field>
         <Field label="Póliza RC vence" id="fv-po"><Input id="fv-po" type="date" value={x.polizaRcVence} onChange={set('polizaRcVence')} /></Field>
       </div>
+      {v && gps && (
+        <Field label="Unidad de Wialon (GPS)" id="fv-w" hint="Se enlaza sola si el nombre de la unidad en Wialon trae la placa; si no, elíjala aquí.">
+          <Select id="fv-w" value={unidad} onChange={(e) => setUnidad(e.target.value)}>
+            <option value="">Sin enlazar</option>
+            {actual?.unidadId && !gps.unidades.some((u) => u.id === actual.unidadId) && <option value={actual.unidadId}>{actual.unidadNombre ?? actual.unidadId} (ya no está en la cuenta)</option>}
+            {gps.unidades.map((u) => {
+              const otro = gps.vehiculos.find((y) => y.unidadId === u.id && y.id !== v.id);
+              return <option key={u.id} value={u.id} disabled={!!otro}>{u.nombre}{otro ? ` (en ${otro.placa})` : ''}</option>;
+            })}
+          </Select>
+        </Field>
+      )}
       {v && (
         <label className="flex items-start gap-2 rounded-lg border border-line p-3 text-[13px]">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={x.activo} onChange={(e) => setX((s) => ({ ...s, activo: e.target.checked }))} />

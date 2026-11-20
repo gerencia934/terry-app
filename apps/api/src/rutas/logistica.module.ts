@@ -155,7 +155,7 @@ class LogisticaService {
       where: { empresaId: a.empresaId, vehiculoId: f.vehiculoId, zonaId: f.zonaId, conductorId: f.conductorId, fechaProgramada: rango(f) }, orderBy: [{ fechaProgramada: 'asc' }, { codigo: 'asc' }], take: 1000,
       include: { vehiculo: { select: { placa: true, marca: true, color: true } }, conductor: { select: { nombre: true } }, auxiliar: { select: { nombre: true } }, zona: { select: { nombre: true } }, estadoRecorrido: true,
         paradas: { orderBy: { orden: 'asc' }, include: {
-          sucursal: { select: { codigo: true, nombre: true, direccion: true, cliente: { select: { razonSocial: true } } } },
+          sucursal: { select: { codigo: true, nombre: true, direccion: true, latitud: true, longitud: true, cliente: { select: { razonSocial: true } } } },
           items: { where: { liberado: false }, include: { solicitudItem: { select: { id: true, estado: true, cantidadEstimada: true, solicitud: { select: { numero: true } }, declaracion: { select: { nombre: true, codigoInterno: true } } } } } },
         } } },
     });
@@ -263,7 +263,7 @@ class LogisticaService {
   async verRastreo(a: Actor, id: string) {
     await this.rutaPropia(a, id);
     return this.db.rutaRastreo.findMany({ where: { rutaId: id }, orderBy: { registradoEn: 'asc' }, take: 20000,
-      select: { latitud: true, longitud: true, precisionM: true, velocidadKmh: true, registradoEn: true } });
+      select: { latitud: true, longitud: true, precisionM: true, velocidadKmh: true, registradoEn: true, fuente: true } });
   }
 
   /** Líneas pendientes por programar: solicitudes aprobadas de carga, con su contador de pendientes. */

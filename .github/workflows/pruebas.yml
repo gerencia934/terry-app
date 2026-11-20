@@ -108,6 +108,11 @@ jobs:
           # El correo diario no corre solo durante las pruebas; el error de prueba del monitoreo, sí existe
           RESUMEN_DIARIO: 'false'
           PRUEBAS_ERRORES: 'true'
+          # Wialon simulado por la prueba de punta a punta (puerto 3998): nunca se usa una cuenta real; sin consulta automática
+          WIALON_URL: http://localhost:3998
+          WIALON_TOKEN: token-prueba-wialon
+          WIALON_EMPRESA_NIT: 901089780-8
+          WIALON_CONSULTAR: 'false'
         run: |
           nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for i in $(seq 1 30); do

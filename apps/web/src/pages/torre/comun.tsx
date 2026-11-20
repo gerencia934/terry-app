@@ -1,11 +1,12 @@
 // Torre de control (oficina, modo servidor): tipos, catálogos y detalle de ruta compartidos.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { MapPin, Pencil, FileStack, Trash2, Save, X } from 'lucide-react';
 import { Badge, Button, ColorBadge, DefList, EstadoBadge, Field, Input, Select, Sheet, useToast } from '../../components/ui';
 import { alCambiarSesion, api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { fmtCOP, fmtFecha } from '../../lib/format';
 import { cant, fechaHoraCo, horaCo, horaColumna, msg, useApi } from '../../lib/servidor';
+import { EventoGpsFila, MapaGps, PosicionLinea, kmTexto, textoEvento, type RutaGpsDetalle } from '../../components/gps';
 
 // ---------- Tipos del API ----------
 export interface Vehiculo { id: string; placa: string; marca: string | null; color: string; tipo: string; capacidad: string; unidadCap: string; proveedorId: string | null; activo: boolean }
@@ -22,7 +23,7 @@ export interface LineaRuta {
 }
 export interface Parada {
   id: string; orden: number; estado: 'PENDIENTE' | 'ATENDIDA' | 'NO_ATENDIDA'; horaLlegada: string | null; observaciones: string | null;
-  sucursal: { codigo: string | null; nombre: string; direccion: string | null; cliente: { razonSocial: string } }; items: LineaRuta[];
+  sucursal: { codigo: string | null; nombre: string; direccion: string | null; latitud?: string | null; longitud?: string | null; cliente: { razonSocial: string } }; items: LineaRuta[];
 }
 export interface RutaApi {
   id: string; codigo: string; fechaProgramada: string; horaProgramada: string | null; zonaId: string | null; vehiculoId: string | null; conductorId: string | null; auxiliarId: string | null;
@@ -132,7 +133,10 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
   const [gps, setGps] = useState<PuntoGps | 'sin' | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const mfs = useApi<{ filas: MfFila[] }>(ruta ? `/manifiestos?rutaId=${ruta.id}&porPagina=100` : null);
-  useEffect(() => { setEditar(false); setQuitar(null); setGps(null); setF(ruta ? formDeRuta(ruta) : null); }, [ruta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // GPS de Wialon (Logística y Gerencia): kilómetros, planta, llegada y salida de cada parada, eventos y recorrido
+  const gpsR = useApi<RutaGpsDetalle>(ruta && tienePermiso('rutas.programar') ? `/rutas/${ruta.id}/gps` : null);
+  const [recorrido, setRecorrido] = useState<[number, number][] | null>(null);
+  useEffect(() => { setEditar(false); setQuitar(null); setGps(null); setRecorrido(null); setF(ruta ? formDeRuta(ruta) : null); }, [ruta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ruta) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
   const final = !!ruta.estadoRecorrido?.esFinal;
@@ -151,6 +155,10 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
   const verGps = async () => {
     try { const ps = await api<PuntoGps[]>(`/rutas/${ruta.id}/rastreo`); setGps(ps.length ? ps[ps.length - 1] : 'sin'); } catch (e) { toast(msg(e), 'warn'); }
   };
+  const verRecorrido = async () => {
+    try { const ps = await api<PuntoGps[]>(`/rutas/${ruta.id}/rastreo`); setRecorrido(ps.map((p) => [Number(p.latitud), Number(p.longitud)])); } catch (e) { toast(msg(e), 'warn'); }
+  };
+  const g = gpsR.datos?.configurado && (gpsR.datos.vehiculoEnlazado || gpsR.datos.km !== null) ? gpsR.datos : null;
   const irManifiesto = (id: string) => { try { sessionStorage.setItem(MF_OFICINA, id); } catch { /* sin almacenamiento */ } go('manifiestos'); };
 
   return (
@@ -190,6 +198,10 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
                   </div>
                   <EstadoBadge estado={p.estado} />
                 </div>
+                {g?.paradas[p.id]
+                  ? <p className="mt-1 text-[12px] text-muted">GPS: llegó {horaCo(g.paradas[p.id].llegada)}{g.paradas[p.id].enSitio ? ', sigue en el sitio' : g.paradas[p.id].salida ? ` · salió ${horaCo(g.paradas[p.id].salida)}` : ''} · {g.paradas[p.id].minutos} min en sitio</p>
+                  : g && g.sitios.find((s) => s.paradaId === p.id)?.lat === null
+                    ? <p className="mt-1 text-[12px] text-subtle">La sede no tiene ubicación: el GPS no marca su llegada. Agréguela en Clientes.</p> : null}
                 <ul className="mt-2 flex flex-col gap-1.5">
                   {p.items.map((it) => (
                     <li key={it.id} className="flex items-center justify-between gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[13px]">
@@ -217,12 +229,40 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
           </section>
 
           <section className="flex flex-col gap-2">
-            <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Ubicación</h3>
-            {gps === null && <Button size="sm" className="self-start" onClick={verGps}><MapPin size={15} /> Ver la última ubicación</Button>}
-            {gps === 'sin' && <p className="text-[13px] text-subtle">Sin puntos GPS: el rastreo funciona solo en las etapas con rastreo y con la app abierta.</p>}
-            {gps && gps !== 'sin' && (
-              <p className="text-[13px]">{fechaHoraCo(gps.registradoEn)}{gps.velocidadKmh ? ` · ${cant(gps.velocidadKmh)} km/h` : ''} ·{' '}
-                <a className="font-medium text-brand underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${gps.latitud},${gps.longitud}`}>abrir en el mapa</a></p>
+            <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">{g ? 'GPS y recorrido' : 'Ubicación'}</h3>
+            {g ? (
+              <>
+                <DefList items={[
+                  ['Kilómetros por GPS', g.km !== null ? `${kmTexto(g.km)} km` : 'Aún sin datos'],
+                  ['Salida de planta', g.salidaPlanta ? fechaHoraCo(g.salidaPlanta) : '—'],
+                  ['Llegada a planta', g.llegadaPlanta ? fechaHoraCo(g.llegadaPlanta) : '—'],
+                  ...(g.posicion && !final ? [['Vehículo ahora', <PosicionLinea p={g.posicion} />]] as [string, ReactNode][] : []),
+                ]} />
+                {!g.planta && <p className="text-[12px] text-subtle">La planta no está ubicada en Ajustes › Datos de la empresa: no se marcan la salida ni la llegada a planta.</p>}
+                {g.eventos.map((e) => <EventoGpsFila key={e.id} e={e} onRevisado={gpsR.recargar} />)}
+                {recorrido ? (
+                  <>
+                    <MapaGps alto={300} capas={{
+                      recorrido,
+                      sitios: [...(g.planta ? [{ lat: g.planta.lat, lng: g.planta.lng, radioM: g.planta.radioM, etiqueta: 'Planta PSA Los Pinos', tipo: 'planta' as const }] : []),
+                        ...g.sitios.filter((s) => s.lat !== null && s.lng !== null).map((s) => ({ lat: s.lat!, lng: s.lng!, radioM: g.radioSedeM, etiqueta: `${s.orden}. ${s.nombre}`, tipo: 'sede' as const }))],
+                      eventos: g.eventos.map((e) => ({ lat: e.lat, lng: e.lng, etiqueta: textoEvento(e) })),
+                      vehiculos: g.posicion && !final ? [{ id: 'v', lat: g.posicion.lat, lng: g.posicion.lng, color: ruta.vehiculo?.color ?? '#1E7838', etiqueta: ruta.vehiculo?.placa ?? '' }] : [],
+                    }} />
+                    {recorrido.length < 2 && <p className="text-[12px] text-subtle">Aún no hay recorrido guardado: se guarda en las etapas con rastreo («En camino»).</p>}
+                  </>
+                ) : <Button size="sm" className="self-start" onClick={verRecorrido}><MapPin size={15} /> Ver el recorrido en el mapa</Button>}
+              </>
+            ) : (
+              <>
+                {gpsR.datos?.configurado && ruta.vehiculoId && <p className="text-[12px] text-subtle">El vehículo no está enlazado a Wialon (Ajustes › Flota): se ve solo la ubicación que manda el celular del conductor.</p>}
+                {gps === null && <Button size="sm" className="self-start" onClick={verGps}><MapPin size={15} /> Ver la última ubicación</Button>}
+                {gps === 'sin' && <p className="text-[13px] text-subtle">Sin puntos GPS: el rastreo funciona solo en las etapas con rastreo y con la app abierta.</p>}
+                {gps && gps !== 'sin' && (
+                  <p className="text-[13px]">{fechaHoraCo(gps.registradoEn)}{gps.velocidadKmh ? ` · ${cant(gps.velocidadKmh)} km/h` : ''} ·{' '}
+                    <a className="font-medium text-brand underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${gps.latitud},${gps.longitud}`}>abrir en el mapa</a></p>
+                )}
+              </>
             )}
           </section>
         </div>

@@ -1,11 +1,12 @@
 // Datos de la empresa para los documentos: firma y certificaciones del certificado, nota de calibración de la báscula,
 // numeración (TV / PSAP, para continuar la serie del sistema anterior) y textos legales del certificado con versiones.
 import { useEffect, useState } from 'react';
-import { History, Mail, Plus, Save, Send, ShieldCheck, Trash2, X } from 'lucide-react';
+import { History, Mail, Plus, Satellite, Save, Send, ShieldCheck, Trash2, X } from 'lucide-react';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha } from '../../lib/format';
 import { msg, useApi } from '../../lib/servidor';
+import { enlaceMapa, hace, type EstadoGps } from '../../components/gps';
 
 interface Certificacion { norma: string; numero: string; entidad?: string; vence?: string }
 interface Bascula { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string }
@@ -23,6 +24,8 @@ interface Config {
   certificadoComercial?: { cargo?: string; correo?: string };
   /** Correo diario de alertas por rol: si va (sí, si falta) y a qué hora (7:00, si falta). */
   resumenDiario?: { activo?: boolean; hora?: number };
+  /** GPS (Wialon): ubicación de la planta y reglas de las geocercas y alertas. */
+  gps?: { plantaLatitud?: number | null; plantaLongitud?: number | null; radioPlantaM?: number; radioSedeM?: number; minutosParada?: number; kmDesvio?: number };
 }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
@@ -60,6 +63,58 @@ function ResumenDiarioCard({ c, setC, edita, guardar }: { c: Config; setC: (f: (
         </Field>
       </div>
       {edita && <Button size="sm" className="mt-3" disabled={enviando} onClick={enviarAhora}><Send size={14} /> Enviar el resumen de hoy ahora</Button>}
+    </Card>
+  );
+}
+
+/** GPS de la flota (Wialon): ubicación de la planta (marca salidas y llegadas) y reglas de las geocercas y alertas. Guarda solo esta parte. */
+function GpsCard({ c, setC, edita }: { c: Config; setC: (f: (s: Config) => Config) => void; edita: boolean }) {
+  const toast = useToast();
+  const estado = useApi<EstadoGps>(tienePermiso('rutas.programar') ? '/gps/estado' : null);
+  const desde = (g: Config['gps']) => ({
+    lat: g?.plantaLatitud != null ? String(g.plantaLatitud) : '', lng: g?.plantaLongitud != null ? String(g.plantaLongitud) : '',
+    radioPlantaM: String(g?.radioPlantaM ?? 400), radioSedeM: String(g?.radioSedeM ?? 200), minutosParada: String(g?.minutosParada ?? 15), kmDesvio: String(g?.kmDesvio ?? 5),
+  });
+  const [f, setF] = useState(() => desde(c.gps));
+  useEffect(() => { setF(desde(c.gps)); }, [c.gps]);
+  const n = (x: string) => Number(x.trim().replace(',', '.'));
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const guardar = async () => {
+    const lat = f.lat.trim() ? n(f.lat) : null, lng = f.lng.trim() ? n(f.lng) : null;
+    if ((lat === null) !== (lng === null)) { toast('Escriba la latitud y la longitud de la planta, o deje las dos vacías.', 'warn'); return; }
+    if (lat !== null && lng !== null && !(lat >= -5 && lat <= 15 && lng >= -82 && lng <= -66)) { toast('Esa ubicación no queda en Colombia: revise la latitud y la longitud (la longitud es negativa).', 'warn'); return; }
+    const gps = { plantaLatitud: lat, plantaLongitud: lng, radioPlantaM: Math.round(n(f.radioPlantaM)), radioSedeM: Math.round(n(f.radioSedeM)), minutosParada: Math.round(n(f.minutosParada)), kmDesvio: n(f.kmDesvio) };
+    const fuera = [[gps.radioPlantaM, 50, 5000, 'El radio de la planta va de 50 a 5.000 m'], [gps.radioSedeM, 50, 2000, 'El radio de las sedes va de 50 a 2.000 m'],
+      [gps.minutosParada, 5, 240, 'La parada no programada va de 5 a 240 minutos'], [gps.kmDesvio, 1, 100, 'El desvío va de 1 a 100 km']].find(([v, a, b]) => !((v as number) >= (a as number) && (v as number) <= (b as number)));
+    if (fuera) { toast(`${fuera[3]}.`, 'warn'); return; }
+    try { await api('/empresa/configuracion', { metodo: 'PATCH', cuerpo: { gps } }); setC((s) => ({ ...s, gps })); toast('Ajustes del GPS guardados.', 'ok'); }
+    catch (e) { toast(msg(e), 'warn'); }
+  };
+  const conPosicion = (estado.datos?.vehiculos ?? []).filter((v) => v.posicion);
+  return (
+    <Card title="GPS de la flota (Wialon)" action={edita && <Button size="sm" variant="primary" onClick={() => void guardar()}><Save size={14} /> Guardar</Button>}>
+      <p className="mb-3 flex items-start gap-2 text-[13px] text-muted"><Satellite size={16} className="mt-0.5 shrink-0 text-brand" />
+        Con la ubicación de la planta, el GPS marca la salida y la llegada de cada ruta; la llegada y la salida de cada parada salen de la ubicación de la sede (en Clientes). Las paradas no programadas con RESPEL y los desvíos llegan como alertas a Logística.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Latitud de la planta" id="gps-lat" hint="Por ejemplo 7,3466"><Input id="gps-lat" inputMode="decimal" disabled={!edita} value={f.lat} onChange={set('lat')} /></Field>
+        <Field label="Longitud de la planta" id="gps-lng" hint="Por ejemplo -73,8986 (en Colombia es negativa)"><Input id="gps-lng" inputMode="decimal" disabled={!edita} value={f.lng} onChange={set('lng')} /></Field>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px]">
+        {edita && conPosicion.length > 0 && (
+          <label className="flex flex-wrap items-center gap-2"><span className="text-muted">O tome la posición de un vehículo que esté en la planta:</span>
+            <Select className="w-auto" value="" onChange={(e) => { const v = conPosicion.find((x) => x.id === e.target.value); if (v?.posicion) setF((s) => ({ ...s, lat: v.posicion!.lat.toFixed(6), lng: v.posicion!.lng.toFixed(6) })); }}>
+              <option value="">Elegir vehículo…</option>
+              {conPosicion.map((v) => <option key={v.id} value={v.id}>{v.placa} ({hace(v.posicion!.posicionEn)})</option>)}
+            </Select></label>
+        )}
+        {f.lat.trim() && f.lng.trim() && Number.isFinite(n(f.lat)) && Number.isFinite(n(f.lng)) && <a className="text-brand underline" target="_blank" rel="noreferrer" href={enlaceMapa(n(f.lat), n(f.lng))}>Ver la ubicación en el mapa</a>}
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Field label="Radio de la planta (m)" id="gps-rp"><Input id="gps-rp" inputMode="numeric" disabled={!edita} value={f.radioPlantaM} onChange={set('radioPlantaM')} /></Field>
+        <Field label="Radio de cada sede (m)" id="gps-rs"><Input id="gps-rs" inputMode="numeric" disabled={!edita} value={f.radioSedeM} onChange={set('radioSedeM')} /></Field>
+        <Field label="Parada no programada (min)" id="gps-mp" hint="Quieto fuera de ruta con RESPEL"><Input id="gps-mp" inputMode="numeric" disabled={!edita} value={f.minutosParada} onChange={set('minutosParada')} /></Field>
+        <Field label="Desvío (km)" id="gps-kd" hint="Lejos del trayecto planta → paradas"><Input id="gps-kd" inputMode="decimal" disabled={!edita} value={f.kmDesvio} onChange={set('kmDesvio')} /></Field>
+      </div>
     </Card>
   );
 }
@@ -173,6 +228,8 @@ export function EmpresaServidor() {
         </Card>
 
         <ResumenDiarioCard c={c} setC={setC} edita={edita} guardar={guardarConfig} />
+
+        <GpsCard c={c} setC={setC} edita={edita} />
 
         <Card title="Numeración de documentos">
           <p className="mb-3 text-[13px] text-muted">Para continuar la numeración del sistema anterior, escriba en «Último número» el último que se usó allá (por ejemplo, 1830 para seguir en TV1831). El último número solo puede subir.</p>

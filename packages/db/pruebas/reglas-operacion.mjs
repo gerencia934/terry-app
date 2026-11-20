@@ -278,6 +278,30 @@ prueba('un trabajo nuevo queda pendiente en la cola', pendiente.estado === 'PEND
 const actaViva = await db.acta.findFirst({ where: { empresaId: E, estado: { not: 'ANULADA' } } });
 if (actaViva) await rechaza('liberar la descarga de un certificado deja quién y cuándo', () => db.acta.update({ where: { id: actaViva.id }, data: { descargaLiberadaEn: new Date() } }), /chk_acta_liberada/);
 
+console.log('\n13. GPS de la flota (Wialon): la evidencia no se borra');
+const [otroVehiculo] = await db.vehiculo.findMany({ where: { empresaId: E, id: { not: vehiculo.id } }, take: 1 });
+const unidad = 900000 + Number(sufijo.slice(-3));
+await db.vehiculo.update({ where: { id: vehiculo.id }, data: { wialonUnidadId: unidad } });
+await rechaza('una unidad de Wialon es de un solo vehículo', () => db.vehiculo.update({ where: { id: otroVehiculo.id }, data: { wialonUnidadId: unidad } }), /Unique constraint|ux_vehiculos_wialon/);
+await db.vehiculo.update({ where: { id: vehiculo.id }, data: { wialonUnidadId: null } });
+const tWialon = new Date(enCamino.getTime() + 10);
+await db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.41, longitud: -73.52, registradoEn: tWialon, fuente: 'WIALON' } });
+await rechaza('el mismo punto de Wialon no se guarda dos veces', () =>
+  db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.41, longitud: -73.52, registradoEn: tWialon, fuente: 'WIALON' } }), /Unique constraint|ux_rastreo_wialon/);
+await rechaza('…y cada punto dice de dónde vino (celular o Wialon)', () =>
+  db.rutaRastreo.create({ data: { rutaId: ruta2.id, latitud: 7.41, longitud: -73.52, registradoEn: new Date(tWialon.getTime() + 1), fuente: 'OTRO' } }), /chk_rastreo_fuente/);
+const evGps = await db.eventoGps.create({ data: { empresaId: E, rutaId: ruta2.id, vehiculoId: vehiculo.id, tipo: 'PARADA_NO_PROGRAMADA', inicio: new Date(Date.now() - 3600e3),
+  latitud: 7.4, longitud: -73.5, conRespel: true } });
+await rechaza('un evento del GPS (parada no programada o desvío) no se borra', () => db.eventoGps.delete({ where: { id: evGps.id } }), /no se borran/);
+await rechaza('…ni se cambia cuándo pasó', () => db.eventoGps.update({ where: { id: evGps.id }, data: { inicio: new Date() } }), /no se cambia/);
+await rechaza('…ni su tipo', () => db.eventoGps.update({ where: { id: evGps.id }, data: { tipo: 'DESVIO' } }), /no se cambia/);
+await rechaza('marcarlo revisado pide la explicación', () => db.eventoGps.update({ where: { id: evGps.id }, data: { revisadoPor: admin.id, revisadoEn: new Date(), nota: ' ' } }), /chk_egps_revision/);
+await db.eventoGps.update({ where: { id: evGps.id }, data: { fin: new Date(), revisadoPor: admin.id, revisadoEn: new Date(), nota: 'Tanqueo autorizado' } });
+await rechaza('cerrado, su hora de fin no cambia', () => db.eventoGps.update({ where: { id: evGps.id }, data: { fin: new Date(Date.now() + 1000) } }), /ya se cerr/);
+await rechaza('revisado, la revisión no cambia', () => db.eventoGps.update({ where: { id: evGps.id }, data: { nota: 'Otra explicación' } }), /ya fue revisado/);
+await rechaza('solo hay dos tipos de evento: parada no programada y desvío', () =>
+  db.eventoGps.create({ data: { empresaId: E, rutaId: ruta2.id, vehiculoId: vehiculo.id, tipo: 'OTRO', inicio: new Date(), latitud: 7.4, longitud: -73.5 } }), /chk_egps_tipo/);
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

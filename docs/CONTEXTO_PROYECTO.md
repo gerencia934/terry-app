@@ -147,6 +147,18 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - decisión: la separación por empresa en la base para el personal queda para cuando haya más de una empresa (hoy el
     API filtra cada consulta por empresa y las pruebas lo verifican).
   88 pruebas de reglas y 441 e2e OK.
+- GPS de la flota con Wialon (19-11-2026), solo lectura con un token que va únicamente en el `.env` del API:
+  - ✅ posición en vivo de cada vehículo (cada 30 a 60 s) en el mapa de Seguimiento y en el detalle de la ruta;
+  - ✅ placa ↔ unidad: se enlaza sola si el nombre de la unidad trae la placa; si no, se elige en Flota;
+  - ✅ salida y llegada a la planta (ubicada en Ajustes) y llegada, salida y tiempo en sitio de cada parada (ubicación de
+    la sede en Clientes), por geocerca;
+  - ✅ recorrido real y kilómetros de cada ruta, guardados como evidencia (solo en las etapas con rastreo);
+  - ✅ alertas a Logística: paradas no programadas con RESPEL (15 min, ajustable) y desvíos (más de 5 km del trayecto,
+    ajustable); quedan como evidencia, no se borran y se revisan con una explicación;
+  - ✅ si Wialon falla, la operación sigue y hay alerta; al volver se pone al día solo;
+  - falta: el token de solo lectura de la cuenta real de Wialon (y la dirección, si es Wialon Local), y ubicar la planta y
+    las sedes que no tengan coordenadas.
+  98 pruebas de reglas y 460 e2e OK (con un Wialon simulado: las pruebas nunca tocan una cuenta real).
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.
