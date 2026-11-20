@@ -15,10 +15,13 @@ RUN npx prisma generate --schema packages/db/prisma/schema.prisma \
 
 FROM node:22-bookworm-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+# tini queda como proceso 1 y le pasa las señales al servidor: al publicar una versión nueva, Cloudflare (o Docker)
+# manda SIGTERM y el servidor cierra con calma (termina lo que está haciendo y suelta la base) en vez de cortarse.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl tini && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 COPY --from=build /app /app
 EXPOSE 3000
 HEALTHCHECK CMD node -e "fetch('http://localhost:3000/api/v1/salud').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-# Aplica migraciones pendientes y arranca
-CMD ["sh", "-c", "npx prisma migrate deploy --schema packages/db/prisma/schema.prisma && node apps/api/dist/main.js"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+# Aplica migraciones pendientes y arranca (exec: el servidor reemplaza al shell y recibe las señales)
+CMD ["sh", "-c", "npx prisma migrate deploy --schema packages/db/prisma/schema.prisma && exec node apps/api/dist/main.js"]

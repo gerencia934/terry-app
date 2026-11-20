@@ -32,8 +32,8 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 9. **Pruebas automáticas en GitHub** con cada cambio.
 
 **Lo que necesita decisión o contratación de la gerencia** (no se puede hacer solo con código):
-- Nube administrada.
-- Cloudflare.
+- Nube administrada y Cloudflare: decidido el 20-11-2026 (Cloudflare Workers Paid con contenedor, Pages y R2; base en
+  Neon). Ver §6 y docs/DESPLIEGUE.md.
 - Copias en otra región.
 - Monitoreo (Sentry o similar).
 - Prueba de penetración.
@@ -80,10 +80,10 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 | 2FA (TOTP) obligatorio para internos, opcional para clientes | ✅ TOTP (Google o Microsoft Authenticator, Authy) con 10 códigos de respaldo. Obligatorio para el personal en producción (y antes, si la empresa lo activa en Ajustes); opcional en el portal. Ver §9 | — |
 | Sesiones revocables y cierre en todos los dispositivos | ✅ Ver §9 | — |
 | Aviso por correo de ingreso nuevo | ✅ Ver §9 | — |
-| Cloudflare, HSTS y base sin acceso público | ❌ (infraestructura) | En el despliegue |
+| Cloudflare, HSTS y base sin acceso público | ⚠️ Cloudflare delante y HSTS listos para el despliegue (20-11-2026). La base en Neon solo acepta usuario y clave por TLS; no se puede limitar por IP porque las salidas de Cloudflare no tienen IP fija | Revisar las opciones de red privada de Neon |
 | Permisos por rol | ✅ | — |
 | Exportaciones solo para roles autorizados y registradas | ✅ Permiso propio y registro de cada exportación (§9) | — |
-| Secretos en el gestor del proveedor | ⚠️ Hoy en `.env` local (bien para desarrollo) | En producción, gestor de secretos |
+| Secretos en el gestor del proveedor | ⚠️ Hoy en `.env` local (bien para desarrollo). En producción van como claves cifradas del Worker en Cloudflare (docs/DESPLIEGUE.md) | Cargarlas al publicar |
 | Pull requests con pruebas en GitHub Actions, Dependabot, CodeQL | ✅ Flujos en `.github/` (§9) | — |
 | Rama `main` protegida y 2FA en GitHub | ❌ | Lo configura el dueño de la cuenta en GitHub |
 | Registro de errores, alertas y monitoreo | ✅ (19-11-2026): errores en `errores_servidor` con aviso por correo, correo diario de alertas por rol y alertas de seguridad (picos de ingresos fallidos, cuentas bloqueadas, descargas masivas, errores). Falta el monitoreo externo de la infraestructura (al desplegar) | Sentry opcional por variable de entorno; alertas por picos de ingresos fallidos, descargas masivas y errores 5xx |
@@ -101,14 +101,20 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 
 Hoy hay `Dockerfile` y `docker-compose.yml`, suficientes para desarrollo y para una primera instalación.
 
-**Propuesta para producción:**
-- Dirección: `app.terravivasas.com`.
-- Base de datos: PostgreSQL administrado con PITR, por ejemplo DigitalOcean Managed Databases o AWS RDS.
-- API: contenedores (dos copias como mínimo) detrás de un balanceador.
-- Archivos: almacenamiento S3 privado con bloqueo de objeto.
-- Perímetro: Cloudflare delante.
-- Ambientes: dos, `staging` y `produccion`.
-- Despliegue automático desde GitHub, con vuelta a la versión anterior.
+**Decisión de la gerencia (20-11-2026):** todo en la cuenta de Cloudflare de Terra Viva (plan Workers Paid). Los pasos
+están en docs/DESPLIEGUE.md.
+- Dirección: `https://residuos.terravivasas.net` (el DNS sigue en Hostinger, con un CNAME a Pages).
+- Pantallas: Cloudflare Pages. `/api` pasa al Worker del servidor; pantallas y servidor quedan en la misma dirección.
+- API: la misma imagen Docker, en un contenedor de Cloudflare de 1 vCPU y 3 GiB.
+  - Siempre encendido: un aviso cada minuto, y si se cae se vuelve a encender.
+  - Corre en el oriente de Norteamérica, junto a la base.
+  - Una sola copia por ahora: el API ya admite varias (candados en la base) para cuando haga falta.
+- Base de datos: Neon, PostgreSQL 16 administrado con PITR, en AWS Virginia.
+- Archivos: Cloudflare R2, privado, con enlaces firmados. El bloqueo de objeto queda pendiente.
+- Perímetro: Cloudflare delante, con HSTS.
+- Ambientes: `produccion` ahora; `staging` con una rama de Neon y otro Worker y proyecto de Pages.
+- Despliegue automático desde GitHub cuando las pruebas pasan en `main`. Para volver a la versión anterior se
+  revierte el cambio en `main` y GitHub publica de nuevo.
 
 El sitio web sigue en Hostinger.
 

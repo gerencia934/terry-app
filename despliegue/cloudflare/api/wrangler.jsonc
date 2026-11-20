@@ -1,0 +1,47 @@
+// Servidor de TERRY-GO en Cloudflare (Workers Paid): el API de siempre (apps/api/Dockerfile) corre en un contenedor que
+// controla un Durable Object. Este Worker no tiene dirección pública: solo lo llama el proyecto de Pages
+// «terra-residuos» (residuos.terravivasas.net/api/...) por un enlace de servicio. Ver docs/DESPLIEGUE.md.
+//
+// Lo que no es secreto va en «vars». Las claves (base de datos, R2, Siigo, Wialon, correo) se guardan como secretos del
+// Worker («wrangler secret put» o el tablero de Cloudflare) y nunca en este repositorio. El Durable Object le pasa al
+// contenedor todas las variables y claves del Worker.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "terra-residuos-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // Sin dirección pública (*.workers.dev ni vistas previas): se entra solo por residuos.terravivasas.net
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "name": "terra-residuos-api",
+      "class_name": "ServidorApi",
+      "scheduling_policy": "durable_object",
+      "images": {
+        // La imagen se construye desde la raíz del repositorio (como en las pruebas de GitHub)
+        "api": { "dockerfile": "../../../apps/api/Dockerfile", "build_context": "../../.." }
+      }
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "SERVIDOR", "class_name": "ServidorApi" }] },
+  "exports": { "ServidorApi": { "type": "durable-object", "storage": "sqlite" } },
+  // Un aviso cada minuto mantiene el servidor encendido: Wialon, Siigo, el correo diario y la cola de trabajos corren
+  // solos. Si el contenedor se cae, el siguiente aviso lo vuelve a encender.
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "NODE_ENV": "production",
+    "PORT": "3000",
+    "TZ": "America/Bogota",
+    "WEB_URL": "https://residuos.terravivasas.net",
+    // Las pantallas están en la misma dirección; el sitio web de Terra Viva usa el formulario de prospectos
+    "CORS_ORIGINS": "https://residuos.terravivasas.net,https://terravivasas.net,https://www.terravivasas.net",
+    "ALMACENAMIENTO": "s3",
+    "SMTP_PORT": "587",
+    "SIIGO_EMPRESA_NIT": "901089780-8",
+    "WIALON_URL": "https://hst-api.wialon.us",
+    "WIALON_EMPRESA_NIT": "901089780-8",
+    "FORMULARIO_WEB_EMPRESA_NIT": "901089780-8"
+  }
+}

@@ -11,6 +11,7 @@ import type { Config } from './config';
 async function arrancar() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
   const cfg = app.get(ConfigService<Config, true>);
+  // Un salto: en Cloudflare, la función de Pages pone en X-Forwarded-For solo la IP real de quien entra (CF-Connecting-IP)
   app.set('trust proxy', 1);
   app.useBodyParser('json', { limit: '1mb' }); // la firma táctil viaja como imagen PNG en el cuerpo
   app.use(helmet());

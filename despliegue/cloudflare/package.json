@@ -1,0 +1,15 @@
+{
+  "name": "terry-go-cloudflare",
+  "private": true,
+  "description": "Publicación de TERRY-GO en Cloudflare: el servidor en un contenedor y las pantallas en Pages (ver docs/DESPLIEGUE.md). No es parte de los espacios de trabajo de npm: se instala aparte, solo para publicar.",
+  "scripts": {
+    "tipos": "cd api && wrangler types --strict-vars false && cd ../web && wrangler types --strict-vars false",
+    "revisar": "npm run tipos && tsc -p api && tsc -p web",
+    "prueba": "node api/prueba/servidor.prueba.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "5.6.3",
+    "wrangler": "4.165.0"
+  }
+}

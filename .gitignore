@@ -9,3 +9,8 @@ node_modules/
 apps/api/almacenamiento/
 *.tsbuildinfo
 docs/privado/
+
+# Publicación en Cloudflare (despliegue/cloudflare): tipos generados, estado local y claves de prueba
+.wrangler/
+worker-configuration.d.ts
+.dev.vars

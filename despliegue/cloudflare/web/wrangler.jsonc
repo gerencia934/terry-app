@@ -1,0 +1,11 @@
+// Pantallas de TERRY-GO en Cloudflare Pages: proyecto «terra-residuos», con dominio residuos.terravivasas.net (registro
+// CNAME en Hostinger hacia terra-residuos.pages.dev). Las pantallas son archivos fijos (apps/web/dist); todo lo que
+// empieza por /api lo pasa la función de functions/api al Worker del servidor («terra-residuos-api»). Así pantallas y
+// servidor quedan en la misma dirección. Ver docs/DESPLIEGUE.md.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "terra-residuos",
+  "pages_build_output_dir": "../../../apps/web/dist",
+  "compatibility_date": "2026-11-01",
+  "services": [{ "binding": "API", "service": "terra-residuos-api" }]
+}

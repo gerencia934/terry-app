@@ -171,9 +171,13 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - ✅ alertas: solicitudes web por responder, tareas vencidas y cotizaciones sin respuesta;
   - falta: exportar de Bigin los CSV reales e importarlos, y poner el formulario en el sitio web (ver docs/DESPLIEGUE.md).
   111 pruebas de reglas y 474 e2e OK.
-- Publicación (20-11-2026): dominio `terravivasas.net` (Hostinger). TERRY-GO irá en `terrygo.terravivasas.net` (pantallas,
-  Cloudflare Pages) y `api-terrygo.terravivasas.net` (servidor en Render, base en Neon); pasos en docs/DESPLIEGUE.md.
-  `mantenimiento.terravivasas.net` es de otra aplicación (TV Mantenimiento), no de TERRY-GO.
+- Publicación (20-11-2026, decisión de la gerencia): todo en la cuenta de Cloudflare de Terra Viva (plan Workers Paid),
+  dominio `terravivasas.net` con el DNS en Hostinger. TERRY-GO queda en `residuos.terravivasas.net`:
+  - las pantallas en Pages (`terra-residuos`); `/api` pasa al Worker `terra-residuos-api`;
+  - ese Worker enciende el servidor de siempre en un contenedor de Cloudflare, siempre encendido y cerca de la base;
+  - la base en Neon (PostgreSQL, Virginia), porque D1 no sirve;
+  - GitHub publica solo cuando las pruebas pasan en `main`.
+  Pasos en docs/DESPLIEGUE.md. `mantenimiento.terravivasas.net` es de otra aplicación (TV Mantenimiento), no de TERRY-GO.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

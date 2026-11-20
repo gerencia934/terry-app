@@ -138,3 +138,89 @@ jobs:
       - name: Registro del API (solo si algo falló)
         if: failure()
         run: tail -n 200 "$RUNNER_TEMP/api.log" || true
+
+  # La publicación en Cloudflare (despliegue/cloudflare, docs/DESPLIEGUE.md): se revisa en cada cambio, sin publicar nada.
+  nube:
+    name: Publicación en Cloudflare (imagen y Worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: terraviva
+          POSTGRES_PASSWORD: terraviva
+          POSTGRES_DB: terraviva_ci
+          TZ: America/Bogota
+          PGTZ: America/Bogota
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U terraviva -d terraviva_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Base desechable del contenedor de pruebas (no son credenciales reales)
+      ADMIN_DB_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            despliegue/cloudflare/package-lock.json
+
+      - name: Herramientas de Cloudflare
+        run: npm ci --prefix despliegue/cloudflare
+
+      - name: Tipos del Worker y de la función de Pages, y lógica del contenedor (simulado)
+        working-directory: despliegue/cloudflare
+        run: |
+          npm run revisar
+          npm run prueba
+
+      - name: Construir la imagen del servidor (la misma que corre en Cloudflare)
+        run: docker build -f apps/api/Dockerfile -t terry-go-api .
+
+      - name: Usuario de la base sin privilegios especiales (como en Neon)
+        run: |
+          psql "$ADMIN_DB_URL" -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE terraviva_app LOGIN PASSWORD 'terraviva_app' NOSUPERUSER NOBYPASSRLS NOCREATEROLE" \
+            -c "CREATE DATABASE terraviva_app OWNER terraviva_app"
+
+      - name: Encender la imagen como en producción (aplica las migraciones) y revisar que responda
+        run: |
+          docker run -d --name api --network host \
+            -e NODE_ENV=production -e PORT=3000 -e TZ=America/Bogota \
+            -e DATABASE_URL=postgresql://terraviva_app:terraviva_app@localhost:5432/terraviva_app \
+            -e JWT_SECRET="$(openssl rand -hex 48)" \
+            -e POLITICA_DATOS_URL=https://terravivasas.net/politica-datos -e POLITICA_DATOS_VERSION=ci \
+            -e ALMACENAMIENTO=local -e SIIGO_SINCRONIZAR=false -e WIALON_CONSULTAR=false -e RESUMEN_DIARIO=false \
+            terry-go-api
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:3000/api/v1/salud; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs api
+          exit 1
+
+      - name: Apagado ordenado, como al publicar una versión nueva (SIGTERM)
+        run: |
+          inicio=$(date +%s)
+          docker stop -t 30 api
+          codigo=$(docker inspect api --format '{{.State.ExitCode}}')
+          echo "El servidor cerró en $(( $(date +%s) - inicio )) s con código $codigo"
+          docker logs api 2>&1 | tail -5
+          # 137 = lo cerraron a la fuerza porque no atendió la señal de apagado
+          test "$codigo" != "137"
+
+      - name: Revisar el Worker como si se publicara (sin publicar)
+        working-directory: despliegue/cloudflare/api
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/worker"
+
+      - name: Revisar la función de Pages
+        working-directory: despliegue/cloudflare/web
+        run: npx wrangler pages functions build --outdir "$RUNNER_TEMP/funciones"
