@@ -11,7 +11,7 @@
     "esquema": "node scripts/esquema.mjs"
   },
   "dependencies": {
-    "@neondatabase/serverless": "1.2.0",
+    "@neondatabase/serverless": "1.2.1",
     "lucide-react": "0.468.0",
     "qrcode": "1.5.4",
     "react": "18.3.1",
@@ -22,7 +22,7 @@
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.4",
-    "autoprefixer": "10.4.20",
+    "autoprefixer": "10.6.2",
     "pg": "8.23.1",
     "postcss": "8.5.33",
     "tailwindcss": "3.4.17",

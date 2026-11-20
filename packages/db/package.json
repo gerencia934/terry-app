@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@prisma/client": "6.19.0",
-    "@node-rs/argon2": "2.0.2",
+    "@node-rs/argon2": "2.2.2",
     "@terraviva/shared": "0.2.0"
   }
 }
