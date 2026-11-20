@@ -1513,6 +1513,37 @@ model Trabajo {
   @@map("trabajos")
 }
 
+/// Tarea que corre una vez al día por empresa (correo de alertas): la llave decide qué copia del API la hace.
+model TareaDiaria {
+  empresaId   String    @map("empresa_id") @db.Uuid
+  tarea       String    @db.VarChar(40)
+  dia         DateTime  @db.Date
+  iniciadaEn  DateTime  @default(now()) @map("iniciada_en") @db.Timestamptz
+  terminadaEn DateTime? @map("terminada_en") @db.Timestamptz
+  detalle     Json      @default("{}")
+
+  @@id([empresaId, tarea, dia])
+  @@map("tareas_diarias")
+}
+
+/// Error inesperado del servidor (respondió «Error interno»): para el aviso al administrador y la alerta de seguridad.
+model ErrorServidor {
+  id        BigInt   @id @default(autoincrement())
+  fecha     DateTime @default(now()) @db.Timestamptz
+  empresaId String?  @map("empresa_id") @db.Uuid
+  usuarioId String?  @map("usuario_id") @db.Uuid
+  metodo    String   @db.VarChar(10)
+  ruta      String   @db.VarChar(300)
+  mensaje   String   @db.VarChar(500)
+  firma     String   @db.Char(16) // agrupa los repetidos
+  avisado   Boolean  @default(false)
+  ip        String?  @db.VarChar(64)
+
+  @@index([fecha(sort: Desc)], map: "ix_errores_servidor_fecha")
+  @@index([firma, fecha(sort: Desc)], map: "ix_errores_servidor_firma")
+  @@map("errores_servidor")
+}
+
 /// Factura de venta traída de Siigo Nube (copia local para cruzarla con los manifiestos).
 model FacturaSiigo {
   id                 String             @id @default(uuid()) @db.Uuid
@@ -1650,6 +1681,7 @@ model Auditoria {
   @@index([entidad, entidadId])
   @@index([fecha], map: "ix_auditoria_fecha")
   @@index([usuarioId, fecha], map: "ix_auditoria_usuario")
+  @@index([accion, fecha(sort: Desc)], map: "ix_auditoria_accion_fecha")
   @@map("auditoria")
 }
 

@@ -53,6 +53,10 @@ export class Zod implements PipeTransform {
   }
 }
 
+/** Error inesperado (5xx) que se entrega al monitoreo (MonitoreoModule lo guarda y avisa al administrador). */
+export interface ErrorInesperado { metodo: string; ruta: string; mensaje: string; origen?: string; empresaId?: string; usuarioId?: string; ip?: string }
+export const avisoErrores: { registrar?: (e: ErrorInesperado) => void } = {};
+
 /** Traduce errores de base de datos a respuestas HTTP claras. */
 @Catch()
 export class FiltroErrores implements ExceptionFilter {
@@ -86,7 +90,12 @@ export class FiltroErrores implements ExceptionFilter {
       this.log.error(`RLS bloqueó ${req.method} ${req.url}`, err.stack);
       status = 403; cuerpo = { mensaje: 'No tiene acceso a ese registro.' };
     }
-    if (status >= 500) this.log.error(`${req.method} ${req.url}`, err instanceof Error ? err.stack : String(err));
+    if (status >= 500) {
+      this.log.error(`${req.method} ${req.url}`, err instanceof Error ? err.stack : String(err));
+      const actor = (req as Request & { actor?: { id?: string; empresaId?: string } }).actor;
+      avisoErrores.registrar?.({ metodo: req.method, ruta: req.originalUrl ?? req.url, mensaje: err instanceof Error ? err.message : String(err),
+        origen: err instanceof Error ? err.stack?.split('\n')[1]?.trim() : undefined, empresaId: actor?.empresaId, usuarioId: actor?.id, ip: req.ip });
+    }
     res.status(status).json(cuerpo);
   }
 }

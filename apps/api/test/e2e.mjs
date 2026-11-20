@@ -1801,6 +1801,35 @@ prueba('techo por IP: muchos correos distintos desde una IP terminan en 429 (roc
 r = await llamar('GET', '/auth/yo', { token: T8 });
 prueba('…y quien ya tiene sesión sigue trabajando (con sesión se cuenta por usuario, no por IP)', r.status === 200, String(r.status));
 
+console.log('\n13. Alertas de seguridad, avisos de errores y correo diario');
+const [alAdmin, alHseqSeg] = await Promise.all([llamar('GET', '/alertas', { token: T8 }), llamar('GET', '/alertas', { token: thseq })]);
+prueba('alerta de seguridad: el pico de ingresos fallidos (cada intento queda en la auditoría) lo ve el administrador; HSEQ, ninguna de seguridad',
+  alAdmin.json.some?.((x) => x.tipo === 'seguridad' && /ingresos fallidos/.test(x.titulo)) && !alHseqSeg.json.some?.((x) => x.tipo === 'seguridad')
+  && (await db.auditoria.count({ where: { accion: 'INGRESO_FALLIDO', usuarioId: null } })) >= 20, JSON.stringify(alAdmin.json.filter?.((x) => x.tipo === 'seguridad')));
+const comercialDb = await db.usuario.findUnique({ where: { email: comercial.email } });
+for (let i = 0; i < 10; i++) await db.auditoria.create({ data: { usuarioId: comercialDb.id, entidad: 'conciliacion', entidadId: 'prueba-' + i, accion: 'EXPORTAR', despues: { formato: 'xlsx' } } });
+r = await llamar('GET', '/alertas', { token: T8 });
+prueba('…y las descargas masivas (10 o más exportaciones de una persona en una hora)', r.json.some?.((x) => x.tipo === 'seguridad' && /Descargas masivas/.test(x.titulo) && x.titulo.includes(comercialDb.nombre)),
+  JSON.stringify(r.json.filter?.((x) => x.tipo === 'seguridad')));
+// Un error interno de verdad (solo existe en pruebas): queda registrado y se avisa al administrador una vez por hora
+const [e1, e2] = [await fetch(API + '/salud/error-de-prueba'), await fetch(API + '/salud/error-de-prueba')];
+await new Promise((ok) => setTimeout(ok, 800));
+const errores = await db.errorServidor.findMany({ where: { ruta: '/api/v1/salud/error-de-prueba' }, orderBy: { id: 'asc' } });
+prueba('un error interno queda registrado (sin la pila) y al administrador se le avisa una sola vez por hora', e1.status === 500 && e2.status === 500 && errores.length === 2
+  && errores.filter((x) => x.avisado).length === 1 && errores[0].mensaje === 'Error de prueba del monitoreo' && errores[0].firma === errores[1].firma,
+  JSON.stringify(errores.map((x) => ({ ...x, id: String(x.id) }))));
+r = await llamar('GET', '/alertas', { token: T8 });
+prueba('…y sale en las alertas de seguridad del administrador', r.json.some?.((x) => x.tipo === 'seguridad' && /errores? del servidor/.test(x.titulo)), JSON.stringify(r.json.filter?.((x) => x.tipo === 'seguridad')));
+// Correo diario por rol (un servicio realizado hace 8 días y sin facturar: Comercial tiene su alerta de facturación)
+await servicioFin(8, 2);
+const [resumenHseq, resumen] = [await llamar('POST', '/alertas/resumen-diario', { token: thseq }), await llamar('POST', '/alertas/resumen-diario', { token: T8 })];
+const deRol = (rol) => resumen.json.porUsuario?.filter((x) => x.rol === rol) ?? [];
+prueba('correo diario: a cada quien las alertas de su rol (Comercial ve facturación; HSEQ no ve facturación ni seguridad; el administrador, todo); solo lo envía quien configura',
+  resumenHseq.status === 403 && resumen.status === 201 && resumen.json.enviados >= 2
+  && deRol('Comercial').some((x) => x.tipos.includes('finanzas')) && deRol('HSEQ').every((x) => !x.tipos.includes('finanzas') && !x.tipos.includes('seguridad'))
+  && deRol('Administrador').some((x) => x.tipos.includes('seguridad')) && !deRol('Conductor').length && !deRol('Cliente (portal)').length,
+  JSON.stringify(resumen.json).slice(0, 500));
+
 await db.$disconnect();
 console.log(`\n${ok} pruebas correctas, ${fallas} fallidas`);
 process.exit(fallas ? 1 : 0);

@@ -45,13 +45,20 @@ export class AuthService {
     const u = await this.db.usuario.findUnique({ where: { email: email.trim().toLowerCase() } });
     // Mismo mensaje si el usuario no existe o la clave es incorrecta (no revela qué correos existen).
     const invalido = new UnauthorizedException({ mensaje: 'Correo o contraseña incorrectos.' });
-    if (!u || !u.activo) { await hashClave(clave); throw invalido; }
+    // Cada intento fallido queda en la auditoría (con la IP): la alerta de seguridad detecta los picos (un ataque)
+    if (!u || !u.activo) {
+      await hashClave(clave);
+      await this.audit.registrar(u ? { id: u.id } : null, 'usuario', u?.id ?? 'desconocido', 'INGRESO_FALLIDO', undefined, { motivo: u ? 'usuario inactivo' : 'correo no registrado' });
+      throw invalido;
+    }
     if (u.bloqueadoHasta && u.bloqueadoHasta > new Date()) {
+      await this.audit.registrar({ id: u.id }, 'usuario', u.id, 'INGRESO_FALLIDO', undefined, { motivo: 'cuenta bloqueada' });
       throw new ForbiddenException({ mensaje: `Cuenta bloqueada temporalmente por intentos fallidos. Intente de nuevo después de las ${u.bloqueadoHasta.toTimeString().slice(0, 5)}.` });
     }
     if (!(await verify(u.passwordHash, clave))) {
       const intentos = u.intentosFallidos + 1;
       await this.db.usuario.update({ where: { id: u.id }, data: { intentosFallidos: intentos >= MAX_INTENTOS ? 0 : intentos, bloqueadoHasta: intentos >= MAX_INTENTOS ? new Date(Date.now() + BLOQUEO_MIN * 60_000) : null } });
+      await this.audit.registrar({ id: u.id }, 'usuario', u.id, intentos >= MAX_INTENTOS ? 'BLOQUEO_INGRESO' : 'INGRESO_FALLIDO', undefined, { intentos });
       throw invalido;
     }
     // Segundo paso: con la verificación en dos pasos activa, la contraseña sola no abre sesión. Los intentos fallidos no

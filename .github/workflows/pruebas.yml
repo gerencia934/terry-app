@@ -105,6 +105,9 @@ jobs:
           SIIGO_PARTNER_ID: TERRYGO-PRUEBAS
           SIIGO_EMPRESA_NIT: 901089780-8
           SIIGO_SINCRONIZAR: 'false'
+          # El correo diario no corre solo durante las pruebas; el error de prueba del monitoreo, sí existe
+          RESUMEN_DIARIO: 'false'
+          PRUEBAS_ERRORES: 'true'
         run: |
           nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for i in $(seq 1 30); do

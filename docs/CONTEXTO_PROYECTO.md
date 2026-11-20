@@ -139,6 +139,14 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - ✅ solo Comercial, Facturación y Gerencia ven facturas, pagos, la regla y la alerta de manifiestos sin facturar
     (permisos `finanzas.ver` y `finanzas.gestionar`); el portal y la app de campo no leen esas tablas (RLS).
   88 pruebas de reglas y 436 e2e OK (con un Siigo simulado: las pruebas nunca tocan la cuenta real).
+- Seguridad y avisos (19-11-2026):
+  - ✅ correo diario de alertas por rol (hora en Ajustes; si no hay alertas, no llega nada);
+  - ✅ avisos de errores del servidor al administrador (a lo sumo uno por hora por error) y registro en la base;
+  - ✅ cada ingreso fallido queda en la auditoría; alertas de seguridad para el administrador: picos de ingresos
+    fallidos, cuentas bloqueadas, descargas masivas y errores;
+  - decisión: la separación por empresa en la base para el personal queda para cuando haya más de una empresa (hoy el
+    API filtra cada consulta por empresa y las pruebas lo verifican).
+  88 pruebas de reglas y 441 e2e OK.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

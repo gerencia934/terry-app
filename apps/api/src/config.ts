@@ -36,6 +36,12 @@ const Esquema = z.object({
   // Cloudflare R2 con sus propios nombres (equivalen a los S3_*): bucket, cuenta (arma la dirección si falta R2_ENDPOINT) y claves
   R2_BUCKET_NAME: z.string().trim().default(''), R2_ACCOUNT_ID: z.string().trim().default(''), R2_ENDPOINT: z.string().trim().default(''),
   R2_ACCESS_KEY_ID: z.string().trim().default(''), R2_SECRET_ACCESS_KEY: z.string().trim().default(''),
+  // Correo diario de alertas por rol (la hora y si va se fijan en Ajustes › Datos de la empresa)
+  RESUMEN_DIARIO: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
+  // Avisos de errores del servidor: a estos correos (separados por coma); vacío = a los administradores de la empresa
+  ALERTAS_CORREO: z.string().trim().default(''),
+  // Solo para las pruebas automáticas: GET /salud/error-de-prueba responde un error interno (apagado en producción)
+  PRUEBAS_ERRORES: sinVacio(z.enum(['true', 'false']).default('false')).transform((v) => v === 'true'),
   // Siigo Nube: facturas y pagos de los manifiestos. Las claves van solo en el .env del API (nunca en la web ni en git).
   SIIGO_URL: z.string().trim().url().default('https://api.siigo.com'),
   SIIGO_USERNAME: z.string().trim().default(''), SIIGO_ACCESS_KEY: z.string().trim().default(''), SIIGO_PARTNER_ID: z.string().trim().default(''),

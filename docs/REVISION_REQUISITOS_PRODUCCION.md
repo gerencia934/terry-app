@@ -86,7 +86,7 @@ Revisión del 19-11-2026 de `docs/REQUISITOS_PRODUCCION.md` contra la rama `fase
 | Secretos en el gestor del proveedor | ⚠️ Hoy en `.env` local (bien para desarrollo) | En producción, gestor de secretos |
 | Pull requests con pruebas en GitHub Actions, Dependabot, CodeQL | ✅ Flujos en `.github/` (§9) | — |
 | Rama `main` protegida y 2FA en GitHub | ❌ | Lo configura el dueño de la cuenta en GitHub |
-| Registro de errores, alertas y monitoreo | ❌ | Sentry opcional por variable de entorno; alertas por picos de ingresos fallidos, descargas masivas y errores 5xx |
+| Registro de errores, alertas y monitoreo | ✅ (19-11-2026): errores en `errores_servidor` con aviso por correo, correo diario de alertas por rol y alertas de seguridad (picos de ingresos fallidos, cuentas bloqueadas, descargas masivas, errores). Falta el monitoreo externo de la infraestructura (al desplegar) | Sentry opcional por variable de entorno; alertas por picos de ingresos fallidos, descargas masivas y errores 5xx |
 | Prueba de penetración y prueba de carga (400 usuarios, p95 < 1 s) | ❌ | Guion k6 en el repositorio para correr en `staging`; la prueba de penetración la contrata la gerencia |
 
 ## 5. Datos personales (Ley 1581)
@@ -144,9 +144,12 @@ si Siigo o Wialon fallan, la operación sigue.
    - copias;
    - S3 con URL firmada;
    - cola de trabajos;
-   - RLS (hecha para el portal de clientes el 19-11-2026; falta la de empresa para el personal);
+   - RLS (hecha para el portal de clientes el 19-11-2026). La de empresa para el personal se dejó para cuando haya más
+     de una empresa: hoy el API filtra cada consulta por empresa (y las pruebas lo verifican), y hacerlo también en la base
+     obliga a pasar cada consulta por una transacción que le diga a la base qué empresa es (riesgo y demora sin beneficio
+     mientras Terra Viva sea la única);
    - 2FA (hecha el 19-11-2026);
-   - monitoreo.
+   - monitoreo (alertas, avisos de errores y correo diario hechos el 19-11-2026; falta el de la infraestructura).
 5. **Siguientes pasos:**
    - portal de clientes (hecho el 19-11-2026: consulta, descarga, cargue de declaraciones y pedidos);
    - Wialon;

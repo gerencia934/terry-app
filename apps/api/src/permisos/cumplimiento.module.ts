@@ -1,9 +1,14 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Get, Injectable, Logger, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors,
+  type OnApplicationBootstrap, type OnModuleDestroy,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EstadoPermiso, UnidadMedida } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
-import { Auditoria } from '../common/servicios';
+import { Auditoria, Correo } from '../common/servicios';
+import type { Config } from '../config';
 import { Archivos } from '../common/archivos';
 import { ActorActual, Permiso, Publico, Zod, fechaColombia, type Actor } from '../common/http';
 import { veFinanzas } from '../finanzas/estado';
@@ -76,7 +81,7 @@ function estadoDelActo(p: { licencia: string | null; licenciaIndefinida: boolean
   const d = Math.round((p.licenciaVence.getTime() - fechaColombia().getTime()) / 86_400_000);
   return d < 0 ? { estado: 'VENCIDA' as const, cubre: false, dias: d } : { estado: d <= 60 ? 'POR_VENCER' as const : 'VIGENTE' as const, cubre: true, dias: d };
 }
-export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
+export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operacion' | 'finanzas' | 'seguridad'; nivel: 'alta' | 'media' | 'info'; titulo: string; detalle: string; fecha?: string; referencia?: string }
 
 @Injectable()
 class CumplimientoService {
@@ -310,8 +315,40 @@ class CumplimientoService {
         detalle: `Realizados hace más de ${DIAS_PARA_FACTURAR} días y sin factura en Siigo. Revíselos en Facturación` });
       if (ultima?.estado === 'FALLIDA') out.push({ tipo: 'finanzas', nivel: 'alta', titulo: 'La última sincronización con Siigo falló', detalle: ultima.error ?? 'Vuelva a intentarlo desde Facturación' });
     }
+    // Seguridad (solo el administrador): picos de ingresos fallidos, cuentas bloqueadas, descargas masivas y errores del servidor
+    if (a.permisos.includes('*')) out.push(...(await this.alertasSeguridad(a)));
     const orden = { alta: 0, media: 1, info: 2 };
     return out.sort((x, y) => orden[x.nivel] - orden[y.nivel]);
+  }
+
+  /**
+   * Alertas de seguridad (requisitos de producción): un pico de ingresos fallidos en la última hora (posible ataque),
+   * cuentas bloqueadas hoy, una persona que exporta o descarga en bloque muchas veces en una hora y errores del servidor.
+   */
+  private async alertasSeguridad(a: Actor): Promise<Alerta[]> {
+    const hora = new Date(Date.now() - 3_600_000), dia = new Date(Date.now() - 86_400_000);
+    // Los fallidos de usuarios de esta empresa y los de correos que no existen (no son de ninguna empresa)
+    const deLaEmpresa = { OR: [{ usuarioId: null }, { usuario: { empresaId: a.empresaId } }] };
+    const [fallidos, ips, bloqueos, exportaciones, errores] = await Promise.all([
+      this.db.auditoria.count({ where: { accion: { in: ['INGRESO_FALLIDO', 'BLOQUEO_INGRESO'] }, fecha: { gte: hora }, ...deLaEmpresa } }),
+      this.db.auditoria.groupBy({ by: ['ip'], where: { accion: { in: ['INGRESO_FALLIDO', 'BLOQUEO_INGRESO'] }, fecha: { gte: hora }, ...deLaEmpresa } }),
+      this.db.auditoria.count({ where: { accion: 'BLOQUEO_INGRESO', fecha: { gte: dia }, usuario: { empresaId: a.empresaId } } }),
+      this.db.auditoria.groupBy({ by: ['usuarioId'], where: { accion: 'EXPORTAR', fecha: { gte: hora }, usuario: { empresaId: a.empresaId } }, _count: { _all: true } }),
+      this.db.errorServidor.count({ where: { fecha: { gte: dia }, OR: [{ empresaId: a.empresaId }, { empresaId: null }] } }),
+    ]);
+    const out: Alerta[] = [];
+    if (fallidos >= 20) out.push({ tipo: 'seguridad', nivel: 'alta', titulo: `${fallidos} ingresos fallidos en la última hora`,
+      detalle: `Desde ${ips.length} ${ips.length === 1 ? 'dirección' : 'direcciones'} de internet. Puede ser alguien probando contraseñas: revise la auditoría` });
+    if (bloqueos) out.push({ tipo: 'seguridad', nivel: 'media', titulo: `${bloqueos} ${bloqueos === 1 ? 'cuenta bloqueada' : 'cuentas bloqueadas'} hoy por intentos fallidos`, detalle: 'Se desbloquean solas a los 15 minutos. Si no fue la persona, pídale cambiar su contraseña' });
+    const masivas = exportaciones.filter((x) => x._count._all >= 10);
+    if (masivas.length) {
+      const nombres = await this.db.usuario.findMany({ where: { id: { in: masivas.map((x) => x.usuarioId!).filter(Boolean) } }, select: { id: true, nombre: true } });
+      for (const m of masivas) out.push({ tipo: 'seguridad', nivel: 'media', titulo: `Descargas masivas: ${nombres.find((n) => n.id === m.usuarioId)?.nombre ?? 'un usuario'} exportó ${m._count._all} veces en la última hora`,
+        detalle: 'Revise en la auditoría qué descargó', referencia: m.usuarioId ?? undefined });
+    }
+    if (errores) out.push({ tipo: 'seguridad', nivel: errores >= 10 ? 'alta' : 'media', titulo: `${errores} ${errores === 1 ? 'error' : 'errores'} del servidor en las últimas 24 horas`,
+      detalle: 'Le llegó un aviso por correo con cada error nuevo; el detalle técnico está en el registro del servidor' });
+    return out;
   }
 
   catalogo(a: Actor, tipo?: string) {
@@ -366,11 +403,82 @@ class CumplimientoService {
   elementosChequeo(a: Actor) { return this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ grupo: 'asc' }, { nombre: 'asc' }] }); }
 }
 
+/**
+ * Correo diario de alertas (requisitos de producción): a cada persona de la oficina le llegan las alertas que le tocan
+ * por su rol: cumplimiento a HSEQ, flota y personal a Logística, operación a quien programa o aprueba, facturación a
+ * Comercial y Facturación, seguridad al administrador (que recibe todo). Una vez al día por empresa, desde la hora de
+ * Ajustes › Datos de la empresa (7:00 si no se indica), aunque haya varias copias del API (tareas_diarias).
+ */
+const QUIEN: Record<Alerta['tipo'], string[]> = {
+  cumplimiento: ['permisos.gestionar'], flota: ['rutas.programar'], personal: ['rutas.programar'],
+  operacion: ['rutas.programar', 'solicitudes.aprobar', 'declaraciones.autorizar'], finanzas: ['finanzas.ver'], seguridad: [],
+};
+const leToca = (permisos: string[], tipo: Alerta['tipo']) => permisos.includes('*') || QUIEN[tipo].some((p) => permisos.includes(p));
+const NIVEL: Record<Alerta['nivel'], string> = { alta: 'URGENTE', media: 'PARA ATENDER', info: 'PARA SABER' };
+
+@Injectable()
+export class ResumenDiario implements OnApplicationBootstrap, OnModuleDestroy {
+  private readonly log = new Logger('ResumenDiario');
+  private reloj: NodeJS.Timeout | null = null;
+  constructor(private readonly db: PrismaService, private readonly s: CumplimientoService, private readonly correo: Correo, private readonly cfg: ConfigService<Config, true>) {}
+
+  onApplicationBootstrap() {
+    if (!this.cfg.get('RESUMEN_DIARIO', { infer: true })) return;
+    this.reloj = setInterval(() => void this.revisar(), 10 * 60_000);
+    this.reloj.unref?.();
+    setTimeout(() => void this.revisar(), 90_000).unref?.();
+  }
+  onModuleDestroy() { if (this.reloj) clearInterval(this.reloj); }
+
+  private async revisar() {
+    try {
+      const hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota', hour: 'numeric', hour12: false })) % 24;
+      const dia = fechaColombia().toISOString().slice(0, 10);
+      for (const e of await this.db.empresa.findMany({ select: { id: true, configuracion: true } })) {
+        const c = ((e.configuracion ?? {}) as { resumenDiario?: { activo?: boolean; hora?: number } }).resumenDiario ?? {};
+        if (c.activo === false || hora < (c.hora ?? 7)) continue;
+        const [x] = await this.db.$queryRaw<{ dia: Date }[]>`
+          INSERT INTO tareas_diarias (empresa_id, tarea, dia) VALUES (${e.id}::uuid, 'RESUMEN_ALERTAS', ${dia}::date) ON CONFLICT DO NOTHING RETURNING dia`;
+        if (!x) continue;
+        const r = await this.enviar(e.id);
+        await this.db.tareaDiaria.update({ where: { empresaId_tarea_dia: { empresaId: e.id, tarea: 'RESUMEN_ALERTAS', dia: new Date(`${dia}T00:00:00Z`) } },
+          data: { terminadaEn: new Date(), detalle: { enviados: r.enviados } } });
+      }
+    } catch (e) { this.log.error(`Correo diario de alertas: ${(e as Error).message}`); }
+  }
+
+  /** Arma y envía el correo de cada persona de la oficina con las alertas que le tocan por su rol (sin alertas, no le escribe). */
+  async enviar(empresaId: string) {
+    // Las alertas se calculan una vez (con todos los permisos) y a cada quien se le dejan las de su rol
+    const todas = await this.s.alertas({ id: 'resumen-diario', empresaId, rol: 'Sistema', permisos: ['*'], nombre: 'Resumen diario' });
+    const usuarios = await this.db.usuario.findMany({ where: { empresaId, activo: true, clienteId: null }, orderBy: { nombre: 'asc' },
+      select: { id: true, nombre: true, email: true, rol: { select: { nombre: true, permisos: { select: { permiso: { select: { codigo: true } } } } } } } });
+    const web = this.cfg.get('WEB_URL', { infer: true }).replace(/\/$/, '');
+    const hoy = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const porUsuario: { nombre: string; rol: string; alertas: number; tipos: string[] }[] = [];
+    for (const u of usuarios) {
+      if (!u.email) continue;
+      const permisos = u.rol.permisos.map((p) => p.permiso.codigo);
+      const suyas = todas.filter((x) => leToca(permisos, x.tipo));
+      if (!suyas.length) continue;
+      const urgentes = suyas.filter((x) => x.nivel === 'alta').length;
+      const bloques = (['alta', 'media', 'info'] as const).map((n) => [n, suyas.filter((x) => x.nivel === n)] as const).filter(([, xs]) => xs.length)
+        .map(([n, xs]) => `${NIVEL[n]}\n${xs.map((x) => `• ${x.titulo}${x.detalle ? ` — ${x.detalle}` : ''}`).join('\n')}`);
+      const texto = [`Buenos días, ${u.nombre.split(' ')[0]}.`, '', `Estas son sus alertas de TERRY-GO para hoy, ${hoy}:`, '', ...bloques.flatMap((b) => [b, '']),
+        `Ábralas en TERRY-GO: ${web}`, '', `Le llegan por su rol (${u.rol.nombre}). Si no quiere recibirlas, pídaselo al administrador.`].join('\n');
+      const asunto = `TERRY-GO · ${suyas.length} ${suyas.length === 1 ? 'alerta' : 'alertas'} para hoy${urgentes ? ` (${urgentes} ${urgentes === 1 ? 'urgente' : 'urgentes'})` : ''}`;
+      await this.correo.enviar(u.email, asunto, texto).catch((e) => this.log.warn(`No se pudo enviar a ${u.id}: ${(e as Error).message}`));
+      porUsuario.push({ nombre: u.nombre, rol: u.rol.nombre, alertas: suyas.length, tipos: [...new Set(suyas.map((x) => x.tipo))].sort() });
+    }
+    return { enviados: porUsuario.length, porUsuario };
+  }
+}
+
 const pdf = FileInterceptor('archivo', { limits: { fileSize: 15 * 1024 * 1024, files: 1 } });
 
 @Controller()
 class CumplimientoController {
-  constructor(private readonly s: CumplimientoService, private readonly db: PrismaService) {}
+  constructor(private readonly s: CumplimientoService, private readonly db: PrismaService, private readonly resumen: ResumenDiario) {}
   @Get('permisos-ambientales') permisos(@ActorActual() a: Actor) { return this.s.permisos(a); }
   @Permiso('permisos.gestionar') @Patch('permisos-ambientales/:id') editarPermiso(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarPermiso)) b: z.infer<typeof EditarPermiso>) { return this.s.editarPermiso(a, id, b); }
   @Get('obligaciones/:id/cumplimientos') historial(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.historial(a, id); }
@@ -386,6 +494,8 @@ class CumplimientoController {
   @Get('gestores-aliados/:id/licencia') verLicencia(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlaceDocumento(a, 'aliado', id); }
   @Permiso('permisos.gestionar') @Patch('gestores-aliados/:id') editarAliado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarAliado)) b: z.infer<typeof EditarAliado>) { return this.s.editarAliado(a, id, b); }
   @Get('alertas') alertas(@ActorActual() a: Actor) { return this.s.alertas(a); }
+  /** «Enviar el resumen ahora» (Ajustes): el mismo correo diario, en este momento. */
+  @Permiso('configuracion.editar') @Post('alertas/resumen-diario') resumenDiario(@ActorActual() a: Actor) { return this.resumen.enviar(a.empresaId); }
   @Get('catalogos') catalogo(@ActorActual() a: Actor, @Query(new Zod(z.object({ tipo: z.string().optional() }))) q: { tipo?: string }) { return this.s.catalogo(a, q.tipo); }
   @Get('catalogos/residuos') residuos(@ActorActual() a: Actor) { return this.s.residuos(a); }
   @Get('catalogos/operacion') operacion(@ActorActual() a: Actor) { return this.s.operacion(a); }
@@ -406,5 +516,5 @@ class CumplimientoController {
   }
 }
 
-@Module({ controllers: [CumplimientoController], providers: [CumplimientoService] })
+@Module({ controllers: [CumplimientoController], providers: [CumplimientoService, ResumenDiario] })
 export class CumplimientoModule {}

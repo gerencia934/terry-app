@@ -10,6 +10,7 @@ import { AuthModule } from './auth/auth.module';
 import { ClientesModule } from './clientes/clientes.module';
 import { CertificadoComercialModule } from './clientes/certificado-comercial.module';
 import { FinanzasModule } from './finanzas/finanzas.module';
+import { MonitoreoModule } from './monitoreo/monitoreo.module';
 import { DeclaracionesModule } from './declaraciones/declaraciones.module';
 import { LogisticaModule } from './rutas/logistica.module';
 import { CumplimientoModule } from './permisos/cumplimiento.module';
@@ -39,7 +40,7 @@ import { PortalModule } from './portal/portal.module';
       }),
     }),
     PrismaModule, ComunModule, ArchivosModule, TrabajosModule, AuthModule,
-    ClientesModule, CertificadoComercialModule, FinanzasModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
+    MonitoreoModule, ClientesModule, CertificadoComercialModule, FinanzasModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
     ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule,
   ],
   providers: [

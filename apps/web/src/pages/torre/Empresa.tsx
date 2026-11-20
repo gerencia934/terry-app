@@ -1,7 +1,7 @@
 // Datos de la empresa para los documentos: firma y certificaciones del certificado, nota de calibración de la báscula,
 // numeración (TV / PSAP, para continuar la serie del sistema anterior) y textos legales del certificado con versiones.
 import { useEffect, useState } from 'react';
-import { History, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react';
+import { History, Mail, Plus, Save, Send, ShieldCheck, Trash2, X } from 'lucide-react';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { api, tienePermiso } from '../../lib/api';
 import { cx, fmtFecha } from '../../lib/format';
@@ -21,6 +21,8 @@ interface Config {
   cartera?: { retenerCertificados?: boolean; diasGracia?: number };
   /** Certificado comercial: cargo con que firma el representante legal (por omisión, Gerente General) y correo bajo la firma. */
   certificadoComercial?: { cargo?: string; correo?: string };
+  /** Correo diario de alertas por rol: si va (sí, si falta) y a qué hora (7:00, si falta). */
+  resumenDiario?: { activo?: boolean; hora?: number };
 }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
@@ -28,6 +30,39 @@ interface Texto { id: string; codigo: string; version: number; titulo: string; t
 interface GrupoTexto { codigo: string; vigente: Texto | null; historial: { id: string; version: number; vigenteDesde: string; activo: boolean; revisado: boolean; creadoPor: { nombre: string } | null }[] }
 const DOCUMENTO = { MANIFIESTO: 'Manifiestos (y recibos)', ACTA: 'Certificados', INSPECCION: 'Inspecciones vehiculares', CERT_COMERCIAL: 'Certificados comerciales' };
 const area = 'min-h-[120px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+
+/** Correo diario de alertas: a cada persona de la oficina, las de su rol (Cumplimiento a HSEQ, Flota a Logística, Facturación a Comercial y Facturación…). */
+function ResumenDiarioCard({ c, setC, edita, guardar }: { c: Config; setC: (f: (s: Config) => Config) => void; edita: boolean; guardar: () => Promise<void> }) {
+  const toast = useToast();
+  const [enviando, setEnviando] = useState(false);
+  const r = c.resumenDiario ?? {};
+  const enviarAhora = async () => {
+    setEnviando(true);
+    try {
+      const x = await api<{ enviados: number }>('/alertas/resumen-diario', { cuerpo: {} });
+      toast(x.enviados ? `Resumen enviado a ${x.enviados} ${x.enviados === 1 ? 'persona' : 'personas'}.` : 'Hoy nadie tiene alertas: no se envió ningún correo.', 'ok');
+    } catch (e) { toast(msg(e), 'warn'); }
+    setEnviando(false);
+  };
+  return (
+    <Card title="Correo diario de alertas" action={edita && <Button size="sm" variant="primary" onClick={() => void guardar()}><Save size={14} /> Guardar</Button>}>
+      <p className="mb-3 flex items-start gap-2 text-[13px] text-muted"><Mail size={16} className="mt-0.5 shrink-0 text-brand" />
+        Cada mañana, a cada persona de la oficina le llegan las alertas de su rol: vencimientos de permisos a HSEQ, flota y conductores a Logística, manifiestos sin facturar a Comercial y Facturación, y seguridad al administrador. Si un día no tiene alertas, no le llega nada.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="flex items-start gap-2 rounded-lg border border-line p-3 text-[13px]">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" disabled={!edita} checked={r.activo !== false} onChange={(e) => setC((s) => ({ ...s, resumenDiario: { ...s.resumenDiario, activo: e.target.checked } }))} />
+          <span><span className="font-medium">Enviar el correo diario</span><span className="block text-muted">Recomendado.</span></span>
+        </label>
+        <Field label="Hora de envío (Colombia)" id="em-rd-h">
+          <Select id="em-rd-h" disabled={!edita || r.activo === false} value={String(r.hora ?? 7)} onChange={(e) => setC((s) => ({ ...s, resumenDiario: { ...s.resumenDiario, hora: Number(e.target.value) } }))}>
+            {Array.from({ length: 13 }, (_, i) => i + 5).map((h) => <option key={h} value={h}>{h <= 12 ? `${h}:00 a. m.` : `${h - 12}:00 p. m.`}</option>)}
+          </Select>
+        </Field>
+      </div>
+      {edita && <Button size="sm" className="mt-3" disabled={enviando} onClick={enviarAhora}><Send size={14} /> Enviar el resumen de hoy ahora</Button>}
+    </Card>
+  );
+}
 
 export function EmpresaServidor() {
   const toast = useToast();
@@ -136,6 +171,8 @@ export function EmpresaServidor() {
           {!c.bascula?.certificado?.trim() && <Field label="Nota libre del recibo (mientras no registre la calibración)" id="em-nb"><Input id="em-nb" disabled={!edita} value={c.notaBascula ?? ''} onChange={(e) => setC((s) => ({ ...s, notaBascula: e.target.value }))} /></Field>}
           {!c.ciudadFirma && <p className="mt-3 rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">Complete la ciudad de firma: el certificado la necesita en «Lugar y fecha».</p>}
         </Card>
+
+        <ResumenDiarioCard c={c} setC={setC} edita={edita} guardar={guardarConfig} />
 
         <Card title="Numeración de documentos">
           <p className="mb-3 text-[13px] text-muted">Para continuar la numeración del sistema anterior, escriba en «Último número» el último que se usó allá (por ejemplo, 1830 para seguir en TV1831). El último número solo puede subir.</p>
