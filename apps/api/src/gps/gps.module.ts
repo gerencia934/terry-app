@@ -32,7 +32,7 @@ interface DetalleEstado { unidades?: UnidadGuardada[] }
 export interface ConfGps { plantaLatitud?: number | null; plantaLongitud?: number | null; radioPlantaM?: number; radioSedeM?: number; minutosParada?: number; kmDesvio?: number }
 export interface ResumenCiclo { unidades: number; enlazadas: number; rutas: number; puntos: number; eventos: number; errores: number; omitido?: boolean }
 interface RutaPorProcesar {
-  id: string; codigo: string; vehiculo_id: string; unidad: number; hora_salida: Date; hora_llegada_planta: Date | null; es_final: boolean;
+  id: string; codigo: string; vehiculo_id: string; unidad: number; hora_salida: Date; hora_llegada_planta: Date | null; es_final: boolean; cerrada: boolean;
 }
 
 const horaCo = (d: Date) => d.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -201,17 +201,19 @@ export class GpsService implements OnApplicationBootstrap, OnModuleDestroy {
    */
   private async procesarRutas(empresaId: string, porUnidad: Map<number, UnidadWialon>) {
     const res = { rutas: 0, puntos: 0, eventos: 0, errores: 0 };
+    // También las ya cerradas: solo sirven para saber dónde termina la anterior del mismo vehículo (no se procesan)
     const rutas = await this.db.$queryRaw<RutaPorProcesar[]>`
-      SELECT r.id::text, r.codigo, r.vehiculo_id::text, v.wialon_unidad_id AS unidad, r.hora_salida, r.hora_llegada_planta, e.es_final
+      SELECT r.id::text, r.codigo, r.vehiculo_id::text, v.wialon_unidad_id AS unidad, r.hora_salida, r.hora_llegada_planta, e.es_final,
+             COALESCE(g.cerrada, false) AS cerrada
         FROM rutas r
         JOIN estados_recorrido e ON e.id = r.estado_recorrido_id
         JOIN vehiculos v ON v.id = r.vehiculo_id
         LEFT JOIN rutas_gps g ON g.ruta_id = r.id
        WHERE r.empresa_id = ${empresaId}::uuid AND r.hora_salida IS NOT NULL AND v.wialon_unidad_id IS NOT NULL
-         AND r.hora_salida > now() - interval '3 days' AND (g.ruta_id IS NULL OR NOT g.cerrada)
-       ORDER BY r.vehiculo_id, r.hora_salida`;
-    if (!rutas.length) return res;
-    const ids = rutas.map((r) => r.id);
+         AND r.hora_salida > now() - interval '3 days'
+       ORDER BY r.vehiculo_id, r.hora_salida, r.id`;
+    const ids = rutas.filter((r) => !r.cerrada).map((r) => r.id);
+    if (!ids.length) return res;
     const [conf, previos, paradas] = await Promise.all([
       this.parametros(empresaId),
       this.db.rutaGps.findMany({ where: { rutaId: { in: ids } } }),
@@ -222,6 +224,7 @@ export class GpsService implements OnApplicationBootstrap, OnModuleDestroy {
     const ahora = Date.now();
     for (let i = 0; i < rutas.length; i++) {
       const r = rutas[i], siguiente = rutas[i + 1]?.vehiculo_id === r.vehiculo_id ? rutas[i + 1] : undefined;
+      if (r.cerrada) continue;
       try {
         const salida = r.hora_salida.getTime();
         const fin = Math.min(ahora, salida + VENTANA_MAX, siguiente ? siguiente.hora_salida.getTime() : Infinity, r.es_final ? (r.hora_llegada_planta?.getTime() ?? ahora) : Infinity);
