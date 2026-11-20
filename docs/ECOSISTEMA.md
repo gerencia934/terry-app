@@ -7,7 +7,7 @@ aplicación: sus pantallas, su servidor y su base de datos. Si un módulo falla,
 |---|---|---|---|
 | Portal (Cuenta Terry-App) | `app.terravivasas.net` | `apps/portal` (este repositorio) | Neon, proyecto `terry-portal` |
 | Residuos | `residuos.terravivasas.net` | `apps/api` + `apps/web` (este repositorio) | Neon, proyecto `terra-residuos` |
-| Mantenimiento | `mantenimiento.terravivasas.net` | repositorio `terra-mantenimiento` | la suya |
+| Mantenimiento | `mantenimiento.terravivasas.net` (acepta el pase desde el 20-11-2026) | repositorio `terra-mantenimiento` | la suya |
 | CRM comercial | (próximamente) | — | la suya |
 | Planta | (próximamente) | — | la suya |
 
