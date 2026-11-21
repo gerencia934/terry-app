@@ -284,6 +284,8 @@ model Empresa {
   clientes         Cliente[]
   proveedores      Proveedor[]
   vehiculos        Vehiculo[]
+  bloqueosMantenimiento BloqueoMantenimiento[]
+  enviosMantenimiento   EnvioMantenimiento[]
   bodegas          Bodega[]
   zonas            Zona[]
   catalogo         CatalogoResiduo[]
@@ -684,6 +686,7 @@ model Vehiculo {
   rastreo          RutaRastreo[]
   rutas            Ruta[]
   preoperacionales Preoperacional[]
+  bloqueosMantenimiento BloqueoMantenimiento[]
   manifiestos      Manifiesto[]
   gps              VehiculoGps?
   rutasGps         RutaGps[]
@@ -2422,4 +2425,49 @@ model SuscripcionPush {
 
   @@index([usuarioId], map: "ix_suscripciones_push_usuario")
   @@map("suscripciones_push")
+}
+
+/// Ventanas en que Mantenimiento tiene un vehículo en taller (docs/ECOSISTEMA.md): llegan por PUT/DELETE de Mantenimiento
+/// y no dejan programar rutas con ese vehículo en esas fechas.
+model BloqueoMantenimiento {
+  id               String    @id @db.VarChar(80)
+  empresaId        String    @map("empresa_id") @db.Uuid
+  vehiculoId       String?   @map("vehiculo_id") @db.Uuid
+  placa            String    @db.VarChar(12)
+  ordenId          String?   @map("orden_id") @db.VarChar(80)
+  consecutivo      String?   @db.VarChar(40)
+  desde            DateTime  @db.Timestamptz
+  hasta            DateTime  @db.Timestamptz
+  motivo           String    @db.VarChar(500)
+  tipo             String?   @db.VarChar(20)
+  criticidad       String?   @db.VarChar(20)
+  detieneOperacion Boolean   @default(true) @map("detiene_operacion")
+  taller           String?   @db.VarChar(200)
+  liberadoEn       DateTime? @map("liberado_en") @db.Timestamptz
+  creadoEn         DateTime  @default(now()) @map("creado_en") @db.Timestamptz
+  actualizadoEn    DateTime  @default(now()) @map("actualizado_en") @db.Timestamptz
+  empresa          Empresa   @relation(fields: [empresaId], references: [id])
+  vehiculo         Vehiculo? @relation(fields: [vehiculoId], references: [id])
+
+  @@index([vehiculoId, desde, hasta], map: "ix_bloqueos_mto_vehiculo")
+  @@map("bloqueos_mantenimiento")
+}
+
+/// Avisos para Mantenimiento (preoperacionales con NO OK y kilómetros al cerrar una ruta). Se reintentan hasta que responda.
+model EnvioMantenimiento {
+  id          BigInt    @id @default(autoincrement())
+  empresaId   String    @map("empresa_id") @db.Uuid
+  tipo        String    @db.VarChar(20)
+  llave       String    @db.VarChar(120)
+  cuerpo      Json
+  intentos    Int       @default(0)
+  ultimoError String?   @map("ultimo_error") @db.VarChar(300)
+  siguienteEn DateTime  @default(now()) @map("siguiente_en") @db.Timestamptz
+  enviadoEn   DateTime? @map("enviado_en") @db.Timestamptz
+  creadoEn    DateTime  @default(now()) @map("creado_en") @db.Timestamptz
+  empresa     Empresa   @relation(fields: [empresaId], references: [id])
+
+  @@unique([tipo, llave], map: "ux_envios_mto")
+  @@index([siguienteEn], map: "ix_envios_mto_pendientes")
+  @@map("envios_mantenimiento")
 }

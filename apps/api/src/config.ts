@@ -24,6 +24,11 @@ const Esquema = z.object({
   // Entrada única del ecosistema Terry-App (docs/ECOSISTEMA.md): dirección del portal y su clave pública Ed25519 (la «x»
   // del JWK, en base64url). Sin ellas el pase del portal no se acepta y solo sirve la entrada propia de Residuos.
   PORTAL_URL: z.string().trim().default(''),
+  // Conexión con Mantenimiento (docs/ECOSISTEMA.md): su dirección y la llave compartida «x-integracion-token» (la misma
+  // TERRYGO_INTEGRACION_TOKEN de Mantenimiento), y la empresa dueña de la flota. Sin URL y llave no se recibe ni se envía nada.
+  MANTENIMIENTO_URL: z.string().trim().default(''),
+  MANTENIMIENTO_INTEGRACION_TOKEN: z.string().trim().default(''),
+  MANTENIMIENTO_EMPRESA_NIT: z.string().trim().default(''),
   PORTAL_CLAVE_PUBLICA: z.string().trim().regex(/^([A-Za-z0-9_-]{43})?$/, 'PORTAL_CLAVE_PUBLICA debe ser la «x» de un JWK Ed25519 (43 caracteres base64url)').default(''),
   NODE_ENV: z.string().default('development'),
   // Archivos (firmas, fotos, PDF). En desarrollo, carpeta local; en producción se cambia a S3 / R2.

@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
 import { Notificaciones } from '../notificaciones/notificaciones.module';
+import { Mantenimiento } from '../integraciones/mantenimiento.module';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
 
 const Rango = z.object({ desde: z.coerce.date().optional(), hasta: z.coerce.date().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
@@ -81,7 +82,8 @@ const rango = (f: { desde?: Date; hasta?: Date }) => (f.desde || f.hasta ? { gte
 
 @Injectable()
 class LogisticaService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly notificaciones: Notificaciones) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly notificaciones: Notificaciones,
+    private readonly mto: Mantenimiento) {}
 
   async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
     const { take, skip, pagina, porPagina } = paginar(f);
@@ -184,10 +186,12 @@ class LogisticaService {
     if (!lineas.length) throw new BadRequestException({ mensaje: 'No hay líneas pendientes por programar en lo elegido.' });
     if (b.items.some((id) => !lineas.find((l) => l.id === id))) throw new BadRequestException({ mensaje: 'Alguna línea no existe o no es de su empresa.' });
     await this.validarRecursos(a, { vehiculo: b.vehiculoId, conductor: b.conductorId, auxiliar: b.auxiliarId, zona: b.zonaId });
+    // Mantenimiento: un vehículo en taller o no apto no se programa (docs/ECOSISTEMA.md)
+    const { aviso } = b.vehiculoId ? await this.mto.revisarVehiculo(a.empresaId, b.vehiculoId, b.fechaProgramada) : {};
     const codigo = b.codigo ?? (await this.codigoLibre(a.empresaId, b.fechaProgramada));
     const inicial = await this.db.estadoRecorrido.findFirst({ where: { empresaId: a.empresaId, activo: true }, orderBy: { orden: 'asc' } });
     const sedes = [...new Set(lineas.map((l) => l.sucursalId))];
-    return this.db.$transaction(async (tx) => {
+    const creada = await this.db.$transaction(async (tx) => {
       const r = await tx.ruta.create({ data: {
         empresaId: a.empresaId, codigo, fechaProgramada: b.fechaProgramada, horaProgramada: b.horaProgramada ? new Date(`1970-01-01T${b.horaProgramada}:00Z`) : undefined,
         zonaId: b.zonaId, vehiculoId: b.vehiculoId, conductorId: b.conductorId, auxiliarId: b.auxiliarId, interna: b.interna, valorFlete: b.valorFlete, observaciones: b.observaciones, estadoRecorridoId: inicial?.id,
@@ -199,6 +203,7 @@ class LogisticaService {
       await this.audit.registrar(a, 'ruta', r.id, 'CREAR', undefined, { codigo: r.codigo, paradas: sedes.length, lineas: lineas.length }, tx);
       return r;
     });
+    return aviso ? { ...creada, avisoMantenimiento: aviso } : creada;
   }
 
   /** Vehículo, conductor, auxiliar y zona deben ser de la empresa y estar activos. */
@@ -226,10 +231,13 @@ class LogisticaService {
     const r = await this.rutaPropia(a, id);
     if (r.estadoRecorrido?.esFinal) throw new BadRequestException({ mensaje: `La ruta ${r.codigo} ya terminó o fue cancelada.` });
     await this.validarRecursos(a, { vehiculo: b.vehiculoId, conductor: b.conductorId, auxiliar: b.auxiliarId, zona: b.zonaId });
+    // Mantenimiento: al poner un vehículo o mover la fecha, se revisa que el vehículo pueda salir ese día
+    const vehiculo = b.vehiculoId === undefined ? r.vehiculoId : b.vehiculoId;
+    const { aviso } = vehiculo && (b.vehiculoId || b.fechaProgramada) ? await this.mto.revisarVehiculo(a.empresaId, vehiculo, b.fechaProgramada ?? r.fechaProgramada) : {};
     const { horaProgramada, ...resto } = b;
     const act = await this.db.ruta.update({ where: { id }, data: { ...resto, horaProgramada: horaProgramada === undefined ? undefined : horaProgramada === null ? null : new Date(`1970-01-01T${horaProgramada}:00Z`) } });
     await this.audit.registrar(a, 'ruta', id, 'EDITAR', undefined, b);
-    return act;
+    return aviso ? { ...act, avisoMantenimiento: aviso } : act;
   }
 
   /** Agrega líneas a una ruta existente: usa la parada de la sede o crea una al final. */
@@ -313,6 +321,11 @@ class LogisticaService {
     if (!e) throw new BadRequestException({ mensaje: 'Estado del recorrido no válido.' });
     const act = await this.db.ruta.update({ where: { id }, data: { estadoRecorridoId: e.id, kmInicial: b.kmInicial, kmFinal: b.kmFinal, horaSalida: e.orden === 2 && !r.horaSalida ? new Date() : undefined, horaLlegadaPlanta: e.esFinal ? new Date() : undefined } });
     await this.audit.registrar(a, 'ruta', id, 'ESTADO', { estado: r.estadoRecorridoId }, { estado: e.nombre });
+    // Al terminar la ruta con su kilometraje final, Mantenimiento lo recibe para sus planes por kilómetro
+    if (e.esFinal && !e.cancela && b.kmFinal != null && r.vehiculoId)
+      void this.db.vehiculo.findUnique({ where: { id: r.vehiculoId }, select: { placa: true } })
+        .then((v) => v && this.mto.encolar(a.empresaId, 'LECTURA', `ruta:${id}`, { placa: v.placa, tipo: 'KM', valor: b.kmFinal!, leidaEn: new Date().toISOString(), fuente: 'RUTA' }))
+        .catch(() => undefined);
     return act;
   }
 
@@ -376,6 +389,12 @@ class LogisticaService {
       titulo: `Inspección no aprobada · ${v?.placa ?? 'vehículo'}`, cuerpo: `Fallas críticas: ${fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre).join(', ')}`,
       ruta: 'inspecciones', etiqueta: `preoperacional-${p.id}`,
     }, a.id)).catch(() => undefined);
+    // Mantenimiento recibe los ítems NO OK (críticos o no) para abrir sus hallazgos; si no responde, se reintenta solo
+    const noOk = b.respuestas.filter((r) => r.resultado === 'NO_OK');
+    if (noOk.length) void this.db.vehiculo.findUnique({ where: { id: b.vehiculoId }, select: { placa: true } }).then((v) => v && this.mto.encolar(a.empresaId, 'PREOPERACIONAL', p.id, {
+      preoperacionalId: p.id, placa: v.placa, reportadoEn: p.fechaReal.toISOString(), ...(p.km != null ? { km: p.km } : {}),
+      items: noOk.map((r) => { const e = els.find((x) => x.id === r.elementoId)!; return { elementoId: e.id, descripcion: e.nombre, critico: e.critico }; }),
+    })).catch(() => undefined);
     return { ...p, fallasCriticas: fallaCritica.map((f) => els.find((e) => e.id === f.elementoId)!.nombre) };
   }
 
