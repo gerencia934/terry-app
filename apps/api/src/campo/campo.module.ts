@@ -4,7 +4,7 @@
 // para atender cada parada e imprimir el manifiesto en sitio) y, en solo lectura, el estado de mantenimiento de su vehículo.
 // El guard global le niega a un token de campo cualquier otra ruta del servidor (@PermiteCampo en common/http.ts), y aquí
 // cada consulta elige campo por campo lo que sale (select): ni tarifas, ni valor del flete, ni historial del cliente.
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, GoneException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -12,7 +12,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Notificaciones } from '../notificaciones/notificaciones.module';
 import { ActorActual, Permiso, PermiteCampo, Zod, fechaColombia, type Actor } from '../common/http';
-import { EstadoRuta, LogisticaModule, LogisticaService, Preop, Rastreo } from '../rutas/logistica.module';
+import { EstadoRuta, LogisticaModule, LogisticaService, Rastreo, preopEnMantenimiento } from '../rutas/logistica.module';
+import { MantenimientoModule, PreopRutas } from '../mantenimiento/mantenimiento.module';
 import { EditarLinea, Evidencia, Grabar, ManifiestosModule, ManifiestosService } from '../manifiestos/manifiestos.module';
 import { notaBascula } from '../manifiestos/pdf';
 
@@ -56,7 +57,7 @@ const seleccionMf = {
 @Injectable()
 export class CampoService {
   constructor(private readonly db: PrismaService, private readonly logistica: LogisticaService, private readonly manifiestos: ManifiestosService,
-    private readonly audit: Auditoria, private readonly notificaciones: Notificaciones) {}
+    private readonly audit: Auditoria, private readonly notificaciones: Notificaciones, private readonly preop: PreopRutas) {}
 
   /** Causal (de la lista de causales) y nota, en un solo texto para el manifiesto y el aviso. */
   private async motivo(a: Actor, b: z.infer<typeof Novedad>) {
@@ -92,19 +93,18 @@ export class CampoService {
     const base = { empresaId: a.empresaId, fechaProgramada: fecha };
     let rutas = await this.db.ruta.findMany({ where: { ...base, OR: [{ conductorId: a.id }, { auxiliarId: a.id }] }, select: seleccionRuta, orderBy: { codigo: 'asc' } });
     if (!rutas.length && this.supervisa(a)) rutas = await this.db.ruta.findMany({ where: base, select: seleccionRuta, orderBy: { codigo: 'asc' } });
-    const ids = rutas.map((r) => r.id);
     const sedes = [...new Set(rutas.flatMap((r) => r.paradas.map((p) => p.sucursalId)))];
-    const vehiculos = [...new Set(rutas.map((r) => r.vehiculoId).filter((v): v is string => !!v))];
-    const [mfs, empresa, etapas, arl, eps, causales, elementos, inspecciones, firmados] = await Promise.all([
-      this.db.manifiesto.findMany({ where: { empresaId: a.empresaId, rutaId: { in: ids }, estado: { not: 'ANULADO' } }, orderBy: { numero: 'asc' }, select: seleccionMf }),
+    // Portal Logístico: sin preoperacional apto en Mantenimiento (o excepción de la oficina) la ruta no se entrega
+    const estados = new Map(await Promise.all(rutas.map(async (r) => [r.id, await this.preop.evaluar(r.id, true)] as const)));
+    const abiertas = new Set(rutas.filter((r) => estados.get(r.id)?.abierta).map((r) => r.id));
+    const [mfs, empresa, etapas, arl, eps, causales, firmados] = await Promise.all([
+      this.db.manifiesto.findMany({ where: { empresaId: a.empresaId, rutaId: { in: [...abiertas] }, estado: { not: 'ANULADO' } }, orderBy: { numero: 'asc' }, select: seleccionMf }),
       this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { razonSocial: true, nit: true, configuracion: true } }),
       this.db.estadoRecorrido.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { orden: 'asc' },
         select: { id: true, nombre: true, color: true, orden: true, esFinal: true, cancela: true, rastreo: true, descripcion: true } }),
       this.db.entidadSeguridadSocial.findMany({ where: { tipo: 'ARL', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
       this.db.entidadSeguridadSocial.findMany({ where: { tipo: 'EPS', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
       this.db.catalogoItem.findMany({ where: { empresaId: a.empresaId, tipo: 'CAUSAL', activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true } }),
-      this.db.elementoChequeo.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: [{ grupo: 'asc' }, { nombre: 'asc' }], select: { id: true, grupo: true, nombre: true, critico: true } }),
-      this.db.preoperacional.findMany({ where: { vehiculoId: { in: vehiculos }, fechaProgramada: fecha }, orderBy: { fechaReal: 'desc' }, select: { id: true, numero: true, vehiculoId: true, aprobado: true } }),
       // Quién firmó la última vez en cada sede de hoy: el celular lo propone (se corrige si es otra persona)
       sedes.length ? this.db.manifiesto.findMany({ where: { empresaId: a.empresaId, estado: 'REALIZADO', items: { some: { sucursalId: { in: sedes } } } }, orderBy: { realizadoEn: 'desc' }, take: 300,
         select: { firmaNombre: true, firmaDocumento: true, items: { select: { sucursalId: true }, take: 1 } } }) : Promise.resolve([]),
@@ -117,28 +117,18 @@ export class CampoService {
     return {
       fecha: fecha.toISOString().slice(0, 10),
       emisor: { razonSocial: empresa.razonSocial, nit: empresa.nit, notaBascula: notaBascula(empresa.configuracion, fecha) },
-      rutas: rutas.map((r) => ({ ...r, paradas: r.paradas.map((p) => ({ ...p, ultimoFirmante: firmante.get(p.sucursalId) ?? null })) })),
+      rutas: rutas.map((r) => {
+        const e = estados.get(r.id)!;
+        const preoperacional = e.abierta ? { via: e.via, detalle: e.detalle, confirmado: e.confirmado } : null;
+        const bloqueo = e.abierta ? null : { codigo: e.codigo, mensaje: e.mensaje };
+        // Bloqueada: solo el encabezado (código, fecha, vehículo); nada de paradas, sedes ni clientes
+        return { ...r, paradas: e.abierta ? r.paradas.map((p) => ({ ...p, ultimoFirmante: firmante.get(p.sucursalId) ?? null })) : [],
+          paradasBloqueadas: e.abierta ? 0 : r.paradas.length, preoperacional, bloqueo, mantenimiento: e.enlaces };
+      }),
       manifiestos: mfs,
       catalogos: { etapas, arl, eps, causales },
-      elementos, inspecciones,
+      mantenimiento: { conectado: this.preop.conectado, enlaces: this.preop.enlacesGenerales() },
     };
-  }
-
-  /**
-   * «Todos somos supervisores», solo en mantenimiento: el vehículo de su ruta (vencimientos y últimas inspecciones con sus
-   * fallas). Nada de clientes.
-   */
-  async miVehiculo(a: Actor, fecha: Date) {
-    const r = await this.db.ruta.findFirst({ where: { empresaId: a.empresaId, vehiculoId: { not: null }, fechaProgramada: { lte: fecha }, OR: [{ conductorId: a.id }, { auxiliarId: a.id }] },
-      orderBy: { fechaProgramada: 'desc' }, select: { vehiculoId: true } });
-    if (!r?.vehiculoId) return { vehiculo: null, inspecciones: [] };
-    const [vehiculo, inspecciones] = await Promise.all([
-      this.db.vehiculo.findUnique({ where: { id: r.vehiculoId }, select: { id: true, placa: true, marca: true, tipo: true, soatVence: true, rtmVence: true, polizaRcVence: true } }),
-      this.db.preoperacional.findMany({ where: { vehiculoId: r.vehiculoId }, orderBy: [{ fechaProgramada: 'desc' }, { fechaReal: 'desc' }], take: 15,
-        select: { id: true, numero: true, fechaProgramada: true, fechaReal: true, aprobado: true, km: true, observaciones: true, conductor: { select: { nombre: true } },
-          respuestas: { where: { resultado: 'NO_OK' }, select: { elemento: { select: { nombre: true, critico: true } } } } } }),
-    ]);
-    return { vehiculo, inspecciones: inspecciones.map(({ respuestas, ...i }) => ({ ...i, fallas: respuestas.map((x) => ({ nombre: x.elemento.nombre, critico: x.elemento.critico })) })) };
   }
 
   async estado(a: Actor, id: string, b: z.infer<typeof EstadoRuta>) {
@@ -160,6 +150,7 @@ export class CampoService {
    */
   async abrirManifiestos(a: Actor, rutaId: string) {
     await this.ruta(a, rutaId);
+    await this.preop.asegurar(rutaId); // regla de Terra Viva: sin preoperacional apto no hay manifiesto
     const { creados, pendientes, codigo } = await this.manifiestos.abrirDesdeRuta(a, { rutaId, paradaIds: [], gestores: {} }, true);
     const residuos = pendientes.map((p) => `«${p.residuo}»`).join(', ');
     if (pendientes.length) void this.notificaciones.aPermisos(a.empresaId, ['rutas.programar'], { titulo: `Ruta ${codigo}: elegir gestor aliado`,
@@ -169,19 +160,6 @@ export class CampoService {
       manifiestos: creados.map((m) => ({ id: m.id, numero: m.numero })),
       aviso: pendientes.length ? `Faltan los manifiestos de ${residuos} (residuo peligroso): la oficina elige el gestor aliado que lo recibe y ya tiene el aviso. Cuando lo abra, actualice la ruta.` : null,
     };
-  }
-
-  async preoperacional(a: Actor, b: z.infer<typeof Preop>) {
-    // Campo inspecciona solo el vehículo de una ruta suya de esa fecha
-    if (!this.supervisa(a) && !(await this.db.ruta.findFirst({ where: { empresaId: a.empresaId, vehiculoId: b.vehiculoId, fechaProgramada: b.fechaProgramada,
-      OR: [{ conductorId: a.id }, { auxiliarId: a.id }] }, select: { id: true } })))
-      throw new ForbiddenException({ mensaje: 'Ese vehículo no está en una ruta suya de esa fecha.' });
-    const p = await this.logistica.preoperacional(a, b);
-    return { id: p.id, numero: p.numero, aprobado: p.aprobado, fallasCriticas: p.fallasCriticas };
-  }
-
-  fotoPreop(a: Actor, id: string, elementoId: string | undefined, f?: Express.Multer.File) {
-    return this.logistica.fotoPreop(a, id, elementoId, f); // solo quien hizo la inspección agrega sus fotos
   }
 
   async editarLinea(a: Actor, id: string, itemId: string, b: z.infer<typeof EditarLinea>) {
@@ -268,13 +246,13 @@ const archivo = (mb: number) => FileInterceptor('archivo', { limits: { fileSize:
 class CampoController {
   constructor(private readonly s: CampoService) {}
   @Permiso('rutas.operar') @Get('paquete') paquete(@ActorActual() a: Actor, @Query(new Zod(Fecha)) q: z.infer<typeof Fecha>) { return this.s.paquete(a, q.fecha ?? fechaColombia()); }
-  @Permiso('rutas.operar') @Get('mi-vehiculo') miVehiculo(@ActorActual() a: Actor, @Query(new Zod(Fecha)) q: z.infer<typeof Fecha>) { return this.s.miVehiculo(a, q.fecha ?? fechaColombia()); }
+  // «Mi vehículo», el preoperacional y las fallas están en Mantenimiento (el Portal Logístico abre sus pantallas)
+  @Permiso('rutas.operar') @Get('mi-vehiculo') miVehiculo() { throw new GoneException({ codigo: 'EN_MANTENIMIENTO', mensaje: '«Mi vehículo» ahora está en Mantenimiento: en el Portal Logístico, toque «Más» › «Mi vehículo».' }); }
+  @Permiso('rutas.operar') @Post('preoperacionales') preop() { throw preopEnMantenimiento(); }
+  @Permiso('rutas.operar') @Post('preoperacionales/:id/fotos') fotoPreop() { throw preopEnMantenimiento(); }
   @Permiso('rutas.operar') @Patch('rutas/:id/estado') estado(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EstadoRuta)) b: z.infer<typeof EstadoRuta>) { return this.s.estado(a, id, b); }
   @Permiso('rutas.operar') @Post('rutas/:id/rastreo') rastreo(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Rastreo)) b: z.infer<typeof Rastreo>) { return this.s.rastreo(a, id, b); }
   @Permiso('manifiestos.operar') @Post('rutas/:id/manifiestos') abrir(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.abrirManifiestos(a, id); }
-  @Permiso('rutas.operar') @Post('preoperacionales') preop(@ActorActual() a: Actor, @Body(new Zod(Preop)) b: z.infer<typeof Preop>) { return this.s.preoperacional(a, b); }
-  @Permiso('rutas.operar') @Post('preoperacionales/:id/fotos') @UseInterceptors(archivo(12))
-  fotoPreop(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body('elementoId') elementoId?: string, @UploadedFile() f?: Express.Multer.File) { return this.s.fotoPreop(a, id, elementoId, f); }
   @Permiso('manifiestos.operar') @Patch('manifiestos/:id/items/:itemId')
   editarLinea(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body(new Zod(EditarLinea)) b: z.infer<typeof EditarLinea>) { return this.s.editarLinea(a, id, itemId, b); }
   @Permiso('manifiestos.operar') @Post('manifiestos/:id/evidencias') @UseInterceptors(archivo(10))
@@ -285,5 +263,5 @@ class CampoController {
   @Permiso('rutas.operar') @Post('paradas/:id/no-atendida') noAtendida(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Novedad)) b: z.infer<typeof Novedad>) { return this.s.noAtendida(a, id, b); }
 }
 
-@Module({ imports: [LogisticaModule, ManifiestosModule], controllers: [CampoController], providers: [CampoService] })
+@Module({ imports: [LogisticaModule, ManifiestosModule, MantenimientoModule], controllers: [CampoController], providers: [CampoService] })
 export class CampoModule {}

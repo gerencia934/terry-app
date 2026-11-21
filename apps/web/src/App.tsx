@@ -19,7 +19,7 @@ import { Certificados, Inspecciones, Inventario, Manifiestos, Recepcion } from '
 import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
-import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor, CampoVehiculoServidor, CampoAyudaServidor } from './pages/CampoServidor';
+import { CampoEnviosServidor, CampoIrMantenimiento, CampoManifiestoServidor, CampoRutaServidor, CampoMasServidor, CampoAyudaServidor } from './pages/CampoServidor';
 import { CampoBitacoraServidor } from './pages/CampoBitacora';
 import { BitacoraServidor } from './pages/BitacoraServidor';
 import { CentroAyuda } from './components/Ayuda';
@@ -79,10 +79,11 @@ function Screen() {
   switch (route) {
     // App del conductor: conectada al API (con cola sin señal) o de demostración
     case 'campo': return MODO_REAL ? <CampoRutaServidor /> : <CampoHoy />;
-    case 'campo-preop': return MODO_REAL ? <CampoInspeccionServidor /> : <CampoPreop />;
+    case 'campo-preop': return MODO_REAL ? <CampoIrMantenimiento tipo="preoperacional" /> : <CampoPreop />;
     case 'campo-parada': return MODO_REAL ? <CampoManifiestoServidor /> : <CampoParada />;
     case 'campo-envios': return MODO_REAL ? <CampoEnviosServidor /> : <CampoHoy />;
-    case 'campo-vehiculo': return MODO_REAL ? <CampoVehiculoServidor /> : <CampoHoy />;
+    case 'campo-vehiculo': return MODO_REAL ? <CampoIrMantenimiento tipo="vehiculo" /> : <CampoHoy />;
+    case 'campo-mas': return MODO_REAL ? <CampoMasServidor /> : <CampoHoy />;
     case 'campo-bitacora': return MODO_REAL ? <CampoBitacoraServidor /> : <CampoHoy />;
     case 'campo-ayuda': return <CampoAyudaServidor />;
   }

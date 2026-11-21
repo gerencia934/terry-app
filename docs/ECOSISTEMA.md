@@ -20,7 +20,9 @@ aplicación: sus pantallas, su servidor y su base de datos. Si un módulo falla,
    reintenta hasta que el otro responde. Quien recibe acepta el mismo aviso repetido sin duplicar nada (idempotencia
    por un identificador del aviso).
 3. **Una consulta a otro módulo nunca bloquea.** Se espera como máximo 3 segundos. Si el otro módulo no responde, se
-   sigue con un aviso visible («no se pudo consultar Mantenimiento»), no con un error.
+   sigue con un aviso visible («no se pudo consultar Mantenimiento»), no con un error. Única excepción, por regla de
+   negocio: el preoperacional del Portal Logístico. Sin respuesta vale lo último confirmado; si nunca se confirmó, la
+   ruta espera, y en una emergencia la oficina autoriza la salida con un motivo.
 4. **El portal no es indispensable.** Cada módulo conserva su propia entrada como respaldo. Quien ya está adentro
    sigue trabajando aunque el portal se caiga.
 
@@ -69,7 +71,8 @@ Si el correo no existe en el módulo, responde 403: «Su cuenta Terry-App no tie
 |---|---|---|
 | Vehículo en mantenimiento (bloqueo) | Mantenimiento → Residuos | `PUT/DELETE /api/v1/integraciones/mantenimiento/bloqueos/{id}` con `x-integracion-token` |
 | Disponibilidad del vehículo antes de programar | Residuos → Mantenimiento | `GET /api/v1/mto/integraciones/terrygo/vehiculos/:placa/disponibilidad` |
-| Ítems NO OK del preoperacional | Residuos → Mantenimiento | `POST /api/v1/mto/integraciones/terrygo/preoperacionales` |
+| Preoperacional del día (Portal Logístico: sin él no hay ruta) | Residuos → Mantenimiento | `GET /api/v1/mto/integraciones/terrygo/vehiculos/:placa/preoperacional?fecha=AAAA-MM-DD` |
+| Ítems NO OK del preoperacional | Residuos → Mantenimiento | Retirado el 21-11-2026: el preoperacional ya se hace en Mantenimiento |
 | Kilómetros de una ruta o tanqueo | Residuos → Mantenimiento | `POST /api/v1/mto/integraciones/terrygo/lecturas` |
 | Coordenadas de la sede (check-in comercial) | CRM → Residuos | (se define con el CRM) |
 | Vehículo que llega a planta (F-09) | Residuos → Planta | (se define con Planta) |

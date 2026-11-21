@@ -13,17 +13,18 @@ export const AYUDA: Record<AccesoAyuda, Ayuda> = {
     guias: [
       { id: 'campo-dia', titulo: 'Empezar el día', resumen: 'De la planta a la primera parada.', rutas: ['campo'], pasos: [
         'Con señal (en planta), abra «Mi ruta» y toque «Actualizar»: la ruta del día queda guardada en el teléfono.',
-        'Haga la inspección del vehículo. Sin la inspección aprobada, la ruta no sale.',
+        'Haga el preoperacional del vehículo: toque «Preoperacional» abajo (se abre Mantenimiento) y al terminar toque «Volver a mi ruta». Sin preoperacional apto, la ruta no se abre.',
         'Toque «Abrir los manifiestos de la ruta» si aún no están abiertos.',
         'Cambie la etapa a «En camino» y escriba el kilometraje del tablero.',
         'En cada parada toque «Atender» y siga los pasos del manifiesto.',
         'Al volver a la planta, cambie a la etapa final con el kilometraje.',
       ] },
-      { id: 'campo-inspeccion', titulo: 'Inspección del vehículo', resumen: 'Antes de salir, todos los días.', rutas: ['campo-preop'], pasos: [
-        'Marque cada elemento: «Bien», «Falla» o «No aplica».',
-        'Si algo falla, tómele una foto con el botón de la cámara.',
-        'Los elementos marcados como «Crítico» impiden la salida si fallan: avise al coordinador.',
-        'Escriba el kilometraje, firme con el dedo y toque «Enviar inspección».',
+      { id: 'campo-inspeccion', titulo: 'Preoperacional del vehículo', resumen: 'Antes de salir, todos los días: sin él no se abre la ruta.', rutas: ['campo', 'campo-preop'], pasos: [
+        'Toque «Preoperacional» en la barra de abajo: se abre Mantenimiento con el vehículo de su ruta ya elegido, con su misma cuenta.',
+        'Revise cada punto y marque «Bien», «Falla» o «N.A.». Una falla lleva nota o foto.',
+        'Al terminar, toque «Volver a mi ruta». Si salió apto, la ruta se abre sola con sus paradas.',
+        'Si salió NO APTO, el vehículo no sale: avise a su coordinador. Cuando se corrija la falla, haga uno nuevo.',
+        'Lo hace el conductor o el auxiliar de la ruta. Si lo hizo otra persona, no cuenta.',
       ] },
       { id: 'campo-manifiesto', titulo: 'Diligenciar el manifiesto', resumen: 'Cinco pasos cortos en cada parada.', rutas: ['campo-parada'], pasos: [
         'Llegada: toque «Llegué: marcar la hora». Ahí ve la dirección, el horario, las indicaciones y a quién llamar.',
@@ -50,23 +51,25 @@ export const AYUDA: Record<AccesoAyuda, Ayuda> = {
         'Funciona sin señal: se envía solo. Si se equivocó, el coordinador lo corrige.',
       ] },
       { id: 'campo-senal', titulo: 'Trabajar sin señal', resumen: 'Todo se guarda en el teléfono.', rutas: ['campo-envios', 'campo'], pasos: [
-        'Inspecciones, manifiestos, fotos, novedades y tiempos se guardan en el teléfono y se envían solos al volver la señal.',
+        'Manifiestos, fotos, novedades y tiempos se guardan en el teléfono y se envían solos al volver la señal. Para que la ruta se abra, el preoperacional necesita señal (hágalo en planta).',
         'Arriba a la derecha ve cuántos envíos hay pendientes; en «Envíos» está el detalle.',
         'Si algo sale «con error», toque «Reintentar». Si sigue, avise al coordinador antes de descartarlo.',
         'No cierre sesión ni borre la aplicación mientras haya envíos pendientes.',
       ] },
-      { id: 'campo-vehiculo', titulo: 'Mi vehículo', resumen: 'Solo para consultar.', rutas: ['campo-vehiculo'], pasos: [
-        'Vea los vencimientos del SOAT, la técnico-mecánica y la póliza, y las últimas inspecciones con sus fallas.',
-        'Si algo está vencido o por vencer, avise al coordinador. Las fallas se reportan en la inspección.',
+      { id: 'campo-vehiculo', titulo: 'Mi vehículo y reportar fallas', resumen: 'En Mantenimiento, con su misma cuenta.', rutas: ['campo-mas', 'campo-vehiculo'], pasos: [
+        'En «Más» › «Mi vehículo» ve la hoja de vida en Mantenimiento: documentos, mantenimientos y fallas.',
+        'Si encuentra una falla durante el día, toque «Reportar falla» en la barra de abajo: el reporte le llega al coordinador de mantenimiento.',
+        'En «Más» › «Mis reportes de fallas» sigue en qué va lo que reportó.',
       ] },
     ],
     preguntas: [
-      { pregunta: '¿Por qué no puedo salir a ruta?', respuesta: 'Falta la inspección aprobada del vehículo, o la inspección tiene una falla crítica. Hágala o avise al coordinador.' },
+      { pregunta: '¿Por qué no puedo salir a ruta?', respuesta: 'Falta el preoperacional apto del vehículo de hoy (se hace en Mantenimiento, con el botón «Preoperacional»), o salió NO APTO. Si Mantenimiento no responde, llame a su coordinador: solo el Jefe de Operaciones puede autorizar la salida, con un motivo.' },
+      { pregunta: '¿Por qué no veo las paradas de mi ruta?', respuesta: 'Porque falta el preoperacional apto del vehículo hoy. Hágalo con el botón «Preoperacional» y, al volver, la ruta se abre sola. Si ya lo hizo, toque «Ya lo hice: consultar de nuevo».' },
       { pregunta: 'El cliente entregó más o menos de lo que pidió. ¿Qué anoto?', respuesta: 'Lo real. Si la diferencia es grande, la app le pide confirmarla, pero no lo bloquea: grábelo así.' },
       { pregunta: 'El cliente tiene un residuo que no está en mi ruta.', respuesta: 'No lo cargue sin autorización: llame al coordinador. Solo se recoge lo declarado y autorizado.' },
       { pregunta: '¿Puedo corregir un manifiesto que ya grabé?', respuesta: 'No: grabado ya no cambia. Avise al coordinador; si hay un error, la oficina lo anula con su motivo y se hace otro.' },
       { pregunta: '¿Quién firma el manifiesto?', respuesta: 'La persona del cliente que entrega el residuo, con su nombre y cédula. La app le propone a quien firmó la última vez en esa sede.' },
-      { pregunta: '¿Por qué no veo precios ni otros clientes?', respuesta: 'La app de campo solo trae su ruta del día. Precios e historial de clientes son de la oficina, por política de Terra Viva.' },
+      { pregunta: '¿Por qué no veo precios ni otros clientes?', respuesta: 'El Portal Logístico solo trae su ruta del día. Precios e historial de clientes son de la oficina, por política de Terra Viva.' },
       { pregunta: '¿Por qué una parada tiene dos manifiestos?', respuesta: 'Porque lleva residuos peligrosos: Los Pinos no los recibe, así que van en su propio manifiesto directo al gestor aliado. Atienda, haga firmar e imprima cada uno.' },
       { pregunta: 'Dice «Sin manifiesto todavía». ¿Qué hago?', respuesta: 'Es un residuo peligroso que puede ir a más de un gestor aliado: lo elige la oficina, que ya recibió el aviso. Toque «Actualizar» en unos minutos; si no aparece, llame a su coordinador. No lo cargue sin manifiesto.' },
       { pregunta: 'Se me descargó el celular.', respuesta: 'Lo que ya guardó sigue en el teléfono. Al cargarlo y tener señal, se envía solo.' },
@@ -94,8 +97,8 @@ export const AYUDA: Record<AccesoAyuda, Ayuda> = {
       ] },
       { id: 'of-programar', titulo: 'Programar una ruta', resumen: 'Líneas aprobadas, vehículo y tripulación.', rutas: ['programacion', 'programacion-tabla', 'seguimiento'], pasos: [
         'En Programación elija las líneas aprobadas que van juntas: una parada por sede.',
-        'Asigne vehículo, conductor y auxiliar. Sin inspección aprobada del vehículo, la ruta no sale.',
-        'En Seguimiento vea las etapas que marca la app del conductor y las novedades que reporta.',
+        'Asigne vehículo, conductor y auxiliar. Sin el preoperacional apto del vehículo en Mantenimiento, la ruta no sale y el conductor no ve sus paradas.',
+        'En Seguimiento vea las etapas que marca el conductor en el Portal Logístico y las novedades que reporta.',
       ] },
       { id: 'of-planta', titulo: 'Recibir en planta (manifiesto de entrada)', resumen: 'Jefe de Planta.', rutas: ['descargues', 'manifiestos'], pasos: [
         'Con la entrega en planta autorizada, registre la llegada del vehículo del cliente, con su conductor, ARL y EPS.',
@@ -133,7 +136,8 @@ export const AYUDA: Record<AccesoAyuda, Ayuda> = {
       { pregunta: '¿Por qué no se emite el acta?', respuesta: 'Sus manifiestos no están facturados (regla de Terra Viva). Facturación o Gerencia pueden dar una excepción con su motivo.' },
       { pregunta: '¿Por qué no puedo aprobar esta conciliación?', respuesta: 'Tiene diferencias y usted la concilió: la aprueba otra persona (cuatro ojos).' },
       { pregunta: 'Al abrir los manifiestos de una ruta me pide elegir un gestor aliado.', respuesta: 'La ruta lleva un residuo peligroso que reciben varios gestores aliados vigentes. Los Pinos no recibe peligrosos (Res. DGL 000632 de 2023, art. 6): cada uno sale en su propio manifiesto, directo al gestor que usted elija. Si solo uno lo recibe, se elige solo; si ninguno, revise sus licencias en Permisos › Gestores aliados.' },
-      { pregunta: 'Un conductor dice que no ve un cliente o sus precios.', respuesta: 'Es a propósito: la app de campo solo trae la ruta del día, sin precios ni historial de clientes.' },
+      { pregunta: 'Un conductor dice que no ve un cliente o sus precios.', respuesta: 'Es a propósito: el Portal Logístico solo trae la ruta del día, sin precios ni historial de clientes.' },
+      { pregunta: 'Un conductor dice que su ruta está bloqueada.', respuesta: 'Le falta el preoperacional apto del vehículo hoy en Mantenimiento (o lo hizo alguien que no es de la ruta, o salió NO APTO). En el detalle de la ruta toque «Consultar Mantenimiento». Si Mantenimiento no responde y es una emergencia, el Jefe de Operaciones puede «Autorizar sin preoperacional» con un motivo que queda en la auditoría.' },
     ],
   },
   CLIENTE: {

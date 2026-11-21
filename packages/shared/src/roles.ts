@@ -12,7 +12,7 @@ export type AccesoRol = 'OFICINA' | 'CAMPO' | 'CLIENTE';
 
 export const ACCESOS_ROL: Record<AccesoRol, { nombre: string; tipo: 'Interno' | 'Externo'; descripcion: string }> = {
   OFICINA: { nombre: 'Empresa (oficina)', tipo: 'Interno', descripcion: 'Personal de Terra Viva que trabaja en la aplicación de oficina.' },
-  CAMPO: { nombre: 'Campo (conductores, auxiliares y planta)', tipo: 'Interno', descripcion: 'Quien opera rutas y manifiestos desde el celular.' },
+  CAMPO: { nombre: 'Portal Logístico (conductores, auxiliares y planta)', tipo: 'Interno', descripcion: 'Quien opera rutas y manifiestos desde el celular; el preoperacional y las fallas se hacen en Mantenimiento.' },
   CLIENTE: { nombre: 'Portal de clientes', tipo: 'Externo', descripcion: 'Las personas de cada cliente que entran a su portal: solo ven lo de su empresa.' },
 };
 
@@ -47,6 +47,7 @@ export const MODULOS_PERMISOS: ModuloPermisos[] = [
   ] },
   { clave: 'rutas', nombre: 'Rutas y campo', permisos: [
     { codigo: 'rutas.programar', nombre: 'Programar rutas', descripcion: 'Armar y cambiar rutas con vehículo, conductor y auxiliar, descartar líneas y ver el rastreo GPS.', accesos: O },
+    { codigo: 'rutas.autorizar_sin_preop', nombre: 'Autorizar salida sin preoperacional', descripcion: 'Solo para emergencias (por ejemplo, si Mantenimiento no responde): deja salir una ruta sin el preoperacional apto del vehículo, con un motivo que queda en la auditoría.', accesos: O },
     { codigo: 'rutas.operar', nombre: 'Operar rutas en campo', descripcion: 'Desde el celular: inspección preoperacional, paradas, estados del recorrido y ubicación.', accesos: OC },
   ] },
   { clave: 'bitacora', nombre: 'Bitácora de tiempos', permisos: [
@@ -125,7 +126,7 @@ export const ROLES_PREDETERMINADOS: RolPredeterminado[] = [
   { clave: 'ADMINISTRADOR', nombre: 'Administrador', acceso: 'OFICINA', descripcion: 'Gerencia y administración del sistema: acceso total. No se le quitan permisos (así nadie queda por fuera de la configuración).', permisos: ['*'] },
   { clave: 'JEFE_OPERACIONES', nombre: 'Jefe de Operaciones', acceso: 'OFICINA', descripcion: 'Dirige la operación: crea clientes y su acceso al portal, aprueba recolecciones y entregas en planta, programa rutas y concilia.',
     permisos: ['clientes.editar', 'declaraciones.crear', 'solicitudes.crear', 'solicitudes.aprobar', 'solicitudes.autorizar_entrega', 'rutas.programar', 'manifiestos.operar', 'manifiestos.anular',
-      'conciliaciones.gestionar', 'conciliaciones.aprobar', 'importacion.cargar', 'informes.ver', 'exportar.masivo', 'bitacora.registrar', 'bitacora.equipo'] },
+      'conciliaciones.gestionar', 'conciliaciones.aprobar', 'importacion.cargar', 'informes.ver', 'exportar.masivo', 'bitacora.registrar', 'bitacora.equipo', 'rutas.autorizar_sin_preop'] },
   { clave: 'LOGISTICA', nombre: 'Líder de Operaciones', alias: ['Logística', 'Logistica'], acceso: 'OFICINA', descripcion: 'Revisa y aprueba las solicitudes de recolección, programa las rutas, maneja los manifiestos y concilia cantidades.',
     permisos: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo',
       'bitacora.registrar', 'bitacora.equipo'] },

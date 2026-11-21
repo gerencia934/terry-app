@@ -76,7 +76,9 @@ s = await db.solicitud.findUniqueOrThrow({ where: { id: sol.id }, include: { ite
 prueba('al cancelar la ruta sus líneas vuelven a PENDIENTE', s.estado === 'PENDIENTE' && s.items.every((i) => i.estado === 'PENDIENTE'));
 for (const l of [linea1, linea2]) await db.rutaItem.create({ data: { rutaId: ruta2.id, paradaId: parada2.id, solicitudItemId: l.id } });
 prueba('y se pueden programar en otra ruta', (await db.solicitud.findUniqueOrThrow({ where: { id: sol.id } })).estado === 'PROGRAMADA');
-await db.preoperacional.create({ data: { vehiculoId: vehiculo.id, rutaId: ruta2.id, conductorId: admin.id, fechaProgramada: new Date('2026-12-02'), aprobado: true } });
+await rechaza('con vehículo y conductor pero sin el preoperacional apto de Mantenimiento no sale', () => db.ruta.update({ where: { id: ruta2.id }, data: { estadoRecorridoId: etapa['En camino'] } }), /preoperacional apto/);
+await rechaza('una excepción de la oficina sin quién la dio ni motivo no se guarda', () => db.ruta.update({ where: { id: ruta2.id }, data: { preopAutorizacion: 'EXCEPCION', preopDetalle: 'corto' } }), /chk_preop_excepcion/);
+await db.ruta.update({ where: { id: ruta2.id }, data: { preopAutorizacion: 'PREOPERACIONAL', preopReferencia: '7f1c2c8e-0000-4000-8000-000000000001', preopDetalle: 'Apto · 6:05 a. m. · Prueba', preopAutorizadoEn: new Date() } });
 const antesDeSalir = new Date(Date.now() - 1000);
 await new Promise((r) => setTimeout(r, 20));
 await db.ruta.update({ where: { id: ruta2.id }, data: { estadoRecorridoId: etapa['En camino'] } });

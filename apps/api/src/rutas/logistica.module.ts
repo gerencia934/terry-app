@@ -1,5 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { BadRequestException, GoneException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AprobacionSolicitud, ClaseSolicitud, EstadoSolicitud, Jornada, Operacion, Prisma, ResultadoChequeo } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +6,7 @@ import { Auditoria } from '../common/servicios';
 import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
 import { Notificaciones } from '../notificaciones/notificaciones.module';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
+import { MantenimientoModule, PreopRutas } from '../mantenimiento/mantenimiento.module';
 
 const Rango = z.object({ desde: z.coerce.date().optional(), hasta: z.coerce.date().optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
 const FiltroSol = Rango.extend({
@@ -86,7 +86,7 @@ const rango = (f: { desde?: Date; hasta?: Date }) => (f.desde || f.hasta ? { gte
 
 @Injectable()
 export class LogisticaService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly notificaciones: Notificaciones) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly notificaciones: Notificaciones, private readonly preop: PreopRutas) {}
 
   async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
     const { take, skip, pagina, porPagina } = paginar(f);
@@ -321,8 +321,16 @@ export class LogisticaService {
     if (!r) throw new NotFoundException({ mensaje: 'Ruta no encontrada.' });
     const e = await this.db.estadoRecorrido.findFirst({ where: { id: b.estadoRecorridoId, empresaId: a.empresaId } });
     if (!e) throw new BadRequestException({ mensaje: 'Estado del recorrido no válido.' });
+    // Portal Logístico: para salir (etapas intermedias) hace falta el preoperacional apto de Mantenimiento o la excepción
+    // de la oficina. Sin vehículo o conductor responde la regla de la base, con su propio mensaje.
+    if (e.orden > 1 && !e.esFinal && r.vehiculoId && r.conductorId) await this.preop.asegurar(id);
     const act = await this.db.ruta.update({ where: { id }, data: { estadoRecorridoId: e.id, kmInicial: b.kmInicial, kmFinal: b.kmFinal, horaSalida: e.orden === 2 && !r.horaSalida ? new Date() : undefined, horaLlegadaPlanta: e.esFinal ? new Date() : undefined } });
     await this.audit.registrar(a, 'ruta', id, 'ESTADO', { estado: r.estadoRecorridoId }, { estado: e.nombre });
+    // El kilometraje que toma el conductor alimenta los planes de mantenimiento (se captura una sola vez)
+    if (b.kmInicial !== undefined || b.kmFinal !== undefined) {
+      const v = r.vehiculoId ? await this.db.vehiculo.findUnique({ where: { id: r.vehiculoId }, select: { placa: true } }) : null;
+      this.preop.enviarKm(v?.placa, b.kmFinal ?? b.kmInicial, id);
+    }
     return act;
   }
 
@@ -440,11 +448,15 @@ class LogisticaController {
   @Get('preoperacionales') inspecciones(@ActorActual() a: Actor, @Query(new Zod(FiltroPreop)) f: z.infer<typeof FiltroPreop>) { return this.s.inspecciones(a, f); }
   @Get('inspecciones') listarInspecciones(@ActorActual() a: Actor, @Query(new Zod(FiltroInspecciones)) f: z.infer<typeof FiltroInspecciones>) { return this.s.listarInspecciones(a, f); }
   @Get('inspecciones/:id') inspeccion(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.inspeccion(a, id); }
-  @Permiso('rutas.operar') @Post('preoperacionales/:id/fotos') @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: 12 * 1024 * 1024, files: 1 } }))
-  fotoPreop(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body('elementoId') elementoId?: string, @UploadedFile() f?: Express.Multer.File) { return this.s.fotoPreop(a, id, elementoId, f); }
-  @Permiso('rutas.operar') @Post('preoperacionales') preop(@ActorActual() a: Actor, @Body(new Zod(Preop)) b: z.infer<typeof Preop>) { return this.s.preoperacional(a, b); }
+  // Portal Logístico: el preoperacional se hace en Mantenimiento. Aquí solo queda el histórico (GET inspecciones);
+  // una app vieja que todavía envíe uno recibe el aviso claro (410) y su cola lo muestra como rechazado.
+  @Permiso('rutas.operar') @Post('preoperacionales/:id/fotos') fotoPreop() { throw preopEnMantenimiento(); }
+  @Permiso('rutas.operar') @Post('preoperacionales') preop() { throw preopEnMantenimiento(); }
   @Permiso('rutas.operar') @Patch('paradas/:id') parada(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Parada)) b: z.infer<typeof Parada>) { return this.s.parada(a, id, b); }
 }
 
-@Module({ controllers: [LogisticaController], providers: [LogisticaService], exports: [LogisticaService] })
+/** El preoperacional ya no se registra en Residuos (Portal Logístico › Preoperacional abre Mantenimiento). */
+export const preopEnMantenimiento = () => new GoneException({ codigo: 'PREOPERACIONAL_EN_MANTENIMIENTO', mensaje: 'El preoperacional ahora se hace en Mantenimiento: en el Portal Logístico, toque «Preoperacional».' });
+
+@Module({ imports: [MantenimientoModule], controllers: [LogisticaController], providers: [LogisticaService], exports: [LogisticaService] })
 export class LogisticaModule {}

@@ -230,7 +230,18 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
     la mesa de ayuda (Ajustes › Empresa), asignar los roles nuevos a cada persona y publicar;
   - el módulo Comercial (CRM) y la importación de Bigin se trabajan en otra cuenta de Claude desde el 20-11-2026: esta
     rama no los tocó.
-  122 pruebas de reglas y 587 e2e OK.
+  122 pruebas de reglas y 587 e2e OK. Publicado el 21-11-2026.
+- Portal Logístico (21-11-2026, pedido de la gerencia): el módulo de campo se llama así y se apoya en Mantenimiento.
+  - El preoperacional, «mi vehículo» y las fallas se hacen en Mantenimiento: Residuos no crea tablas de eso.
+  - Sin preoperacional apto del vehículo ese día (el último del día, hecho por el conductor o el auxiliar), el
+    conductor no ve la ruta ni abre manifiestos, y la ruta no sale. El Jefe de Operaciones puede autorizar la salida
+    en una emergencia, con motivo y auditoría.
+  - Celular: Mi ruta · Preoperacional · Reportar falla · Tiempos · Más. Los dos del medio abren Mantenimiento con el
+    vehículo elegido y vuelven a la ruta.
+  - Mantenimiento: PR gerencia934/terra-mantenimiento#7 unido (consulta del preoperacional del día y «Volver a mi ruta»).
+  - Falta, por permisos de producción: publicar Mantenimiento (flujo «Despliegue de infraestructura» y sus pantallas)
+    y cargar la llave compartida en los dos Workers (ver docs/DESPLIEGUE.md). Sin la llave las rutas quedan bloqueadas.
+  124 pruebas de reglas, 594 e2e de Residuos y 111 de Mantenimiento OK.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.

@@ -39,6 +39,30 @@ async function aceptarDatos(sesion) {
 const formDe = (buf, nombre) => { const form = new FormData(); form.append('archivo', new Blob([buf]), nombre); return form; };
 const excel = async (id, filas) => formDe(await excelBuf(id, filas), `${id}.xlsx`);
 
+// Mantenimiento simulado en el puerto 3997 (Portal Logístico): el API apunta a él con MANTENIMIENTO_URL y el token «mto-prueba».
+// Cada prueba dice qué preoperacional hay para una placa y un día; «caido» simula que no responde (servidor despertando).
+const mtoSim = { preops: new Map(), caido: false, lecturas: [], noRegistradas: new Set() };
+const simPreop = (placa, fecha, { aprobado = true, email, nombre = 'Conductor de prueba' } = {}) =>
+  mtoSim.preops.set(`${placa}|${fecha}`, { id: randomUUID(), terminadoEn: `${fecha}T11:05:00.000Z`, aprobado, fallas: aprobado ? 0 : 1, criticas: aprobado ? 0 : 1, usuario: { email, nombre } });
+const mantenimientoSimulado = http.createServer((req, res) => {
+  const json = (c, d) => { res.writeHead(c, { 'content-type': 'application/json' }); res.end(JSON.stringify(d)); };
+  let b = ''; req.on('data', (x) => (b += x)); req.on('end', () => {
+    if (mtoSim.caido) return json(503, { mensaje: 'El servidor se está iniciando' });
+    if (req.headers['x-integracion-token'] !== 'mto-prueba') return json(401, { mensaje: 'Token de integración inválido.' });
+    const u = new URL(req.url, 'http://local');
+    const m = u.pathname.match(/^\/api\/v1\/mto\/integraciones\/terrygo\/vehiculos\/([A-Z0-9]+)\/preoperacional$/);
+    if (req.method === 'GET' && m) {
+      if (mtoSim.noRegistradas.has(m[1])) return json(404, { mensaje: 'No hay un vehículo con esa placa en mantenimiento.' });
+      const ultimo = mtoSim.preops.get(`${m[1]}|${u.searchParams.get('fecha')}`) ?? null;
+      return json(200, { placa: m[1], activoId: '0f0e0d0c-0b0a-5908-8706-' + Buffer.from(m[1]).toString('hex').padEnd(12, '0').slice(0, 12), fecha: u.searchParams.get('fecha'),
+        realizados: ultimo ? 1 : 0, aprobado: !!ultimo?.aprobado, ultimo, disponibilidad: { apto: true, estadoOperativo: 'OPERATIVO', motivos: [] } });
+    }
+    if (req.method === 'POST' && u.pathname === '/api/v1/mto/integraciones/terrygo/lecturas') { mtoSim.lecturas.push(JSON.parse(b || '{}')); return json(201, { id: randomUUID(), valida: true }); }
+    json(404, { mensaje: 'Ruta no simulada' });
+  });
+});
+await new Promise((listo) => mantenimientoSimulado.listen(3997, listo));
+
 console.log('\n1. Salud y autenticación');
 let r = await llamar('GET', '/salud');
 prueba('salud responde ok con base de datos conectada', r.status === 200 && r.json.baseDeDatos === 'conectada');
@@ -636,30 +660,28 @@ const enCamino = estados.json.find((e) => e.orden === 2), cancelada = estados.js
 r = await llamar('PATCH', `/rutas/${ruta.id}/estado`, { token: T, cuerpo: { estadoRecorridoId: enCamino.id } });
 prueba('la ruta NO sale sin preoperacional aprobado → 409', r.status === 409 && /preoperacional/.test(r.json.mensaje), JSON.stringify(r.json));
 const critico = elementos.json.find((e) => e.critico);
-r = await llamar('POST', '/preoperacionales', { token: T, cuerpo: { vehiculoId: veh.id, rutaId: ruta.id, fechaProgramada: '2026-11-20', km: 184500, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: e.id === critico.id ? 'NO_OK' : 'OK' })) } });
-prueba('preoperacional con ítem crítico en NO queda no aprobado', r.status === 201 && r.json.aprobado === false && r.json.fallasCriticas.length === 1);
+// Portal Logístico: el preoperacional vive en Mantenimiento (aquí, simulado); Residuos ya no lo registra
+r = await llamar('POST', '/preoperacionales', { token: T, cuerpo: { vehiculoId: veh.id, rutaId: ruta.id, fechaProgramada: '2026-11-20', km: 184500, respuestas: [] } });
+prueba('el preoperacional ya no se registra en Residuos: está en Mantenimiento → 410', r.status === 410 && /Mantenimiento/.test(r.json.mensaje), JSON.stringify(r.json));
+simPreop(veh.placa, '2026-11-20', { aprobado: false, email: yo.email });
 r = await llamar('PATCH', `/rutas/${ruta.id}/estado`, { token: T, cuerpo: { estadoRecorridoId: enCamino.id } });
-prueba('…y la ruta sigue bloqueada', r.status === 409);
-r = await llamar('POST', '/preoperacionales', { token: T, cuerpo: { vehiculoId: veh.id, rutaId: ruta.id, fechaProgramada: '2026-11-20', km: 184501, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
-prueba('preoperacional completo queda aprobado', r.status === 201 && r.json.aprobado === true);
+prueba('preoperacional NO APTO en Mantenimiento: la ruta sigue bloqueada', r.status === 409 && /NO APTO/.test(r.json.mensaje), JSON.stringify(r.json));
+simPreop(veh.placa, '2026-11-20', { email: 'otra.persona@terravivasas.com', nombre: 'Otra persona' });
+r = await llamar('PATCH', `/rutas/${ruta.id}/estado`, { token: T, cuerpo: { estadoRecorridoId: enCamino.id } });
+prueba('…si lo hizo alguien que no es de la ruta, no cuenta', r.status === 409 && /conductor o el auxiliar/.test(r.json.mensaje), JSON.stringify(r.json));
+simPreop(veh.placa, '2026-11-20', { email: yo.email, nombre: yo.nombre });
 r = await llamar('PATCH', `/rutas/${ruta.id}/estado`, { token: T, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 184501 } });
-prueba('con preoperacional aprobado la ruta sale', r.status === 200);
-// Inspección desde el celular: con el id que genera el teléfono (si se reenvía sin señal no se duplica), la firma del conductor y una foto
+const constancia = await db.ruta.findUnique({ where: { id: ruta.id }, select: { preopAutorizacion: true, preopReferencia: true, preopDetalle: true } });
+prueba('con el preoperacional apto de Mantenimiento la ruta sale, y en la ruta queda cuál la autorizó', r.status === 200 && constancia.preopAutorizacion === 'PREOPERACIONAL'
+  && constancia.preopReferencia === mtoSim.preops.get(`${veh.placa}|2026-11-20`).id && /^Apto · /.test(constancia.preopDetalle ?? ''), JSON.stringify([r.status, constancia]));
+await new Promise((listo) => setTimeout(listo, 300));
+prueba('…y el kilometraje que tomó el conductor le llega a Mantenimiento (una sola captura)', mtoSim.lecturas.some((l) => l.placa === veh.placa && l.valor === 184501 && l.fuente === 'RUTA' && l.refId === ruta.id),
+  JSON.stringify(mtoSim.lecturas).slice(0, 200));
+// Histórico: las inspecciones que se hicieron en Residuos antes de Mantenimiento siguen visibles en la oficina
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-const idPreop = randomUUID();
-const preopCel = { id: idPreop, firma: `data:image/png;base64,${PNG_1X1}`, vehiculoId: veh.id, rutaId: ruta.id, fechaProgramada: '2026-11-20', km: 184502,
-  respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) };
-const envio1 = await llamar('POST', '/preoperacionales', { token: T, cuerpo: preopCel });
-const envio2 = await llamar('POST', '/preoperacionales', { token: T, cuerpo: preopCel });
-prueba('inspección desde el celular: con la firma del conductor, y si se reenvía (sin señal) no se duplica', envio1.status === 201 && envio1.json.id === idPreop && !!envio1.json.firmaUrl
-  && envio2.json.id === idPreop && (await db.preoperacional.count({ where: { id: idPreop } })) === 1, JSON.stringify([envio1.status, envio2.status, envio1.json.firmaUrl]));
-const fotoForm = (elementoId) => { const fo = new FormData(); fo.append('elementoId', elementoId); fo.append('archivo', new Blob([Buffer.from(PNG_1X1, 'base64')]), 'foto.png'); return fo; };
-r = await llamar('POST', `/preoperacionales/${idPreop}/fotos`, { token: T, form: fotoForm(critico.id) });
-const conFoto = await llamar('GET', `/inspecciones/${idPreop}`, { token: T });
-prueba('…la foto se guarda en el almacenamiento y la oficina la ve en el detalle, con la firma', r.status === 201 && !!r.json.fotoUrl
-  && conFoto.json.respuestas?.some((x) => x.fotoUrl === r.json.fotoUrl) && conFoto.json.firmaUrl === envio1.json.firmaUrl, JSON.stringify(r.json));
-const noEsta = await llamar('POST', `/preoperacionales/${idPreop}/fotos`, { token: T, form: fotoForm(randomUUID()) });
-prueba('…una foto de un elemento que no está en la inspección → 404', noEsta.status === 404, String(noEsta.status));
+for (const [aprobado, km] of [[false, 184400], [true, 184401], [true, 184402]])
+  await db.preoperacional.create({ data: { vehiculoId: veh.id, rutaId: ruta.id, conductorId: yo.id, fechaProgramada: new Date('2026-11-20'), fechaReal: new Date(), km, aprobado,
+    respuestas: { create: elementos.json.map((e) => ({ elementoId: e.id, resultado: !aprobado && e.id === critico.id ? 'NO_OK' : 'OK' })) } } });
 const veh2 = await db.vehiculo.findUnique({ where: { placa: 'DXY545' } });
 const sol2 = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-21', items: [{ declaracionId: lodo.id, cantidadEstimada: 100 }] } })).json;
 const ruta2 = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-C${Date.now() % 100000}`, fechaProgramada: '2026-11-21', vehiculoId: veh2.id, conductorId: yo.id, solicitudes: [sol2.id] } })).json;
@@ -716,6 +738,29 @@ const solCampo = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { apr
 const solAjena = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-26', items: [{ declaracionId: lodo.id, cantidadEstimada: 50 }] } })).json;
 const rutaCampo = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-K${Date.now() % 100000}`, fechaProgramada: '2026-11-26', vehiculoId: veh2.id, conductorId: conductor.id, valorFlete: 450000, solicitudes: [solCampo.id] } })).json;
 const rutaAjena = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-J${Date.now() % 100000}`, fechaProgramada: '2026-11-26', vehiculoId: veh.id, conductorId: yo.id, solicitudes: [solAjena.id] } })).json;
+// Portal Logístico (gerencia, 21-11-2026): sin preoperacional apto en Mantenimiento, ni la ruta ni el manifiesto
+r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
+let rc = r.json.rutas?.find((x) => x.id === rutaCampo.id);
+prueba('portal logístico: sin preoperacional la ruta llega bloqueada, sin paradas ni datos del cliente, con el botón a Mantenimiento', r.status === 200
+  && rc?.bloqueo?.codigo === 'SIN_PREOPERACIONAL' && rc.paradas.length === 0 && rc.paradasBloqueadas === 1 && /\/\?volver=residuos#campo-preop-[0-9a-f-]{36}$/.test(rc.mantenimiento?.preoperacional ?? '')
+  && !(r.json.manifiestos ?? []).length && !JSON.stringify(rc).includes(suc.nombre), JSON.stringify(rc).slice(0, 400));
+r = await llamar('POST', `/campo/rutas/${rutaCampo.id}/manifiestos`, { token: tc });
+prueba('…ni deja abrir manifiestos → 409 PREOPERACIONAL', r.status === 409 && r.json.codigo === 'PREOPERACIONAL', JSON.stringify(r.json));
+r = await llamar('PATCH', `/campo/rutas/${rutaCampo.id}/estado`, { token: tc, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 90100 } });
+prueba('…ni salir a ruta → 409', r.status === 409 && /preoperacional/.test(r.json.mensaje), JSON.stringify(r.json));
+mtoSim.caido = true;
+r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
+prueba('…si Mantenimiento no responde y nunca se confirmó, sigue bloqueada con el aviso', r.json.rutas?.find((x) => x.id === rutaCampo.id)?.bloqueo?.codigo === 'SIN_RESPUESTA', JSON.stringify(r.json.rutas).slice(0, 200));
+mtoSim.caido = false;
+simPreop(veh2.placa, '2026-11-26', { email: conductor.email, nombre: conductor.nombre });
+r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
+rc = r.json.rutas?.find((x) => x.id === rutaCampo.id);
+prueba('portal logístico: con el preoperacional apto del conductor en Mantenimiento, la ruta se abre sola', !rc?.bloqueo && rc?.paradas.length === 1 && rc.preoperacional?.via === 'PREOPERACIONAL'
+  && /^Apto · /.test(rc.preoperacional.detalle) && rc.preoperacional.confirmado === true, JSON.stringify(rc).slice(0, 300));
+mtoSim.caido = true;
+rc = (await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc })).json.rutas?.find((x) => x.id === rutaCampo.id);
+prueba('…si después Mantenimiento no responde, vale lo último confirmado', !rc?.bloqueo && rc?.preoperacional?.confirmado === false, JSON.stringify(rc?.preoperacional));
+mtoSim.caido = false;
 r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
 const paqTxt = JSON.stringify(r.json);
 prueba('campo: el paquete del día trae solo su ruta, con la sede y lo que hay que recoger', r.status === 200 && r.json.rutas?.length === 1 && r.json.rutas[0].id === rutaCampo.id
@@ -725,10 +770,8 @@ r = await llamar('PATCH', `/campo/rutas/${rutaAjena.id}/estado`, { token: tc, cu
 prueba('…ni toca una ruta que no es suya → 403', r.status === 403, JSON.stringify(r.json));
 r = await llamar('POST', `/campo/rutas/${rutaAjena.id}/manifiestos`, { token: tc });
 prueba('…ni le abre manifiestos → 403', r.status === 403, JSON.stringify(r.json));
-r = await llamar('POST', '/campo/preoperacionales', { token: tc, cuerpo: { vehiculoId: veh.id, rutaId: rutaAjena.id, fechaProgramada: '2026-11-26', km: 1, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
-prueba('…ni inspecciona un vehículo que no está en su ruta → 403', r.status === 403, JSON.stringify(r.json));
-r = await llamar('POST', '/campo/preoperacionales', { token: tc, cuerpo: { vehiculoId: veh2.id, rutaId: rutaCampo.id, fechaProgramada: '2026-11-26', km: 90100, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
-prueba('campo: inspecciona su vehículo', r.status === 201 && r.json.aprobado === true, JSON.stringify(r.json));
+r = await llamar('POST', '/campo/preoperacionales', { token: tc, cuerpo: { vehiculoId: veh2.id, rutaId: rutaCampo.id, fechaProgramada: '2026-11-26', km: 90100, respuestas: [] } });
+prueba('portal logístico: el preoperacional ya no se registra en Residuos (está en Mantenimiento) → 410', r.status === 410 && /Mantenimiento/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('PATCH', `/campo/rutas/${rutaCampo.id}/estado`, { token: tc, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 90100 } });
 prueba('…y sale a ruta', r.status === 200 && r.json.estadoRecorridoId === enCamino.id, JSON.stringify(r.json));
 r = await llamar('POST', `/campo/rutas/${rutaCampo.id}/manifiestos`, { token: tc });
@@ -748,6 +791,7 @@ prueba('…la oficina sí ve el precio del manifiesto', Number((await llamar('GE
 const rutaDeCampo = async (fecha, cantidad) => {
   const sol = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: fecha, items: [{ declaracionId: lodo.id, cantidadEstimada: cantidad }] } })).json;
   const ruta = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-N${Date.now() % 1000000}`, fechaProgramada: fecha, vehiculoId: veh2.id, conductorId: conductor.id, solicitudes: [sol.id] } })).json;
+  simPreop(veh2.placa, fecha, { email: conductor.email, nombre: conductor.nombre });
   const mf = (await llamar('POST', `/campo/rutas/${ruta.id}/manifiestos`, { token: tc })).json.manifiestos[0];
   const paq = (await llamar('GET', `/campo/paquete?fecha=${fecha}`, { token: tc })).json;
   return { sol, mf, item: paq.manifiestos?.find((m) => m.id === mf.id)?.items[0], parada: paq.rutas?.[0]?.paradas[0], causal: paq.catalogos?.causales?.[0] };
@@ -772,10 +816,21 @@ const otraParada = (await llamar('GET', '/campo/paquete?fecha=2026-11-26', { tok
 const conGrabado = await llamar('POST', `/campo/paradas/${otraParada.id}/no-atendida`, { token: tc, cuerpo: { nota: 'Intento sobre una parada ya atendida' } });
 prueba('…una parada con manifiesto grabado no se marca como no atendida → 400', conGrabado.status === 400 && /grabado/.test(conGrabado.json.mensaje), JSON.stringify(conGrabado.json));
 r = await llamar('GET', '/campo/mi-vehiculo?fecha=2026-11-26', { token: tc });
-prueba('campo: «mi vehículo» en solo lectura (vencimientos e inspecciones con sus fallas)', r.status === 200 && r.json.vehiculo?.placa === veh2.placa && r.json.inspecciones?.length >= 1
-  && 'soatVence' in r.json.vehiculo && !/cliente|precio/i.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 300));
+prueba('portal logístico: «mi vehículo» ahora está en Mantenimiento → 410 con el aviso', r.status === 410 && /Mantenimiento/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: T });
 prueba('campo: quien programa rutas (oficina) abre la app del conductor con las rutas del día', r.status === 200 && r.json.rutas.some((x) => x.id === rutaAjena.id), JSON.stringify(r.json).slice(0, 200));
+// Oficina: consultar Mantenimiento y, en una emergencia, autorizar la salida sin preoperacional (Jefe de Operaciones)
+r = await llamar('POST', `/rutas/${rutaAjena.id}/preoperacional/consultar`, { token: T });
+prueba('oficina: «Consultar Mantenimiento» dice por qué la ruta no puede salir', r.status === 201 && r.json.abierta === false && r.json.codigo === 'SIN_PREOPERACIONAL', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/rutas/${rutaAjena.id}/preoperacional/excepcion`, { token: tc, cuerpo: { motivo: 'Mantenimiento no responde desde las 5' } });
+prueba('…el conductor no autoriza su propia salida → 403', r.status === 403, JSON.stringify(r.json));
+r = await llamar('POST', `/rutas/${rutaAjena.id}/preoperacional/excepcion`, { token: T, cuerpo: { motivo: 'urge' } });
+prueba('…la excepción necesita un motivo de verdad → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', `/rutas/${rutaAjena.id}/preoperacional/excepcion`, { token: T, cuerpo: { motivo: 'Mantenimiento no responde; el vehículo se revisó en planta con el jefe de taller' } });
+const salida = await llamar('PATCH', `/rutas/${rutaAjena.id}/estado`, { token: T, cuerpo: { estadoRecorridoId: enCamino.id } });
+prueba('…con la excepción la ruta sale, y queda en la auditoría con su motivo', r.status === 201 && r.json.abierta === true && r.json.via === 'EXCEPCION' && salida.status === 200
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'ruta', entidadId: rutaAjena.id, accion: 'EXCEPCION_PREOP' } })), JSON.stringify([r.status, r.json, salida.status]).slice(0, 300));
+prueba('…y la función viene marcada para el Jefe de Operaciones', !!(await db.rolPermiso.findFirst({ where: { rol: { clave: 'JEFE_OPERACIONES' }, permiso: { codigo: 'rutas.autorizar_sin_preop' } } })));
 
 // Residuos peligrosos en la ruta: Los Pinos no los recibe (Res. 000632, art. 6); salen en su propio manifiesto, directo al gestor aliado
 const pinos = await db.proveedor.findFirst({ where: { esPropio: true } });
@@ -789,6 +844,7 @@ prueba('ruta con un peligroso que reciben varios gestores aliados: la oficina el
 prueba('…y no abre nada a medias', (await db.manifiesto.count({ where: { rutaId: rutaMixta.id } })) === 0);
 r = await llamar('POST', '/manifiestos/desde-ruta', { token: T, cuerpo: { rutaId: rutaMixta.id, gestores: { [aceite.id]: pinos.id } } });
 prueba('…ni acepta un destino que no lo recibe (Los Pinos) → 400', r.status === 400 && /no puede recibir/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+simPreop(veh2.placa, '2026-12-04', { email: conductor.email, nombre: conductor.nombre });
 r = await llamar('POST', `/campo/rutas/${rutaMixta.id}/manifiestos`, { token: tc });
 const mfsMixta = await db.manifiesto.findMany({ where: { rutaId: rutaMixta.id }, include: { items: true, destino: true } });
 prueba('campo: el conductor no elige el gestor; abre lo de Los Pinos y le avisa que lo peligroso lo abre la oficina', r.status === 201 && r.json.manifiestos?.length === 1 && /Aceite usado de motor/.test(r.json.aviso ?? '')
@@ -1056,9 +1112,9 @@ r = await llamar('PATCH', `/rutas/${rutaB.id}/estado`, { token: T8, cuerpo: { es
 prueba('…no sale sin vehículo y conductor → 409', r.status === 409 && /vehículo y conductor/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('PATCH', `/rutas/${rutaB.id}`, { token: T8, cuerpo: { vehiculoId: veh.id, conductorId: yo.id, valorFlete: 350000, horaProgramada: '07:30' } });
 prueba('asignar vehículo, conductor y flete', r.status === 200, JSON.stringify(r.json));
-await llamar('POST', '/preoperacionales', { token: T8, cuerpo: { vehiculoId: veh.id, rutaId: rutaB.id, fechaProgramada: '2026-11-25', km: 184600, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
+simPreop(veh.placa, '2026-11-25', { email: yo.email, nombre: yo.nombre });
 r = await llamar('PATCH', `/rutas/${rutaB.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 184600 } });
-prueba('con recursos e inspección aprobada la ruta sale', r.status === 200, JSON.stringify(r.json));
+prueba('con recursos y el preoperacional apto en Mantenimiento la ruta sale', r.status === 200, JSON.stringify(r.json));
 r = await llamar('POST', `/rutas/${rutaB.id}/rastreo`, { token: T8, cuerpo: { puntos: [
   { latitud: 7.3466, longitud: -73.8986, registradoEn: new Date().toISOString() },
   { latitud: 7.3, longitud: -73.9, registradoEn: new Date(Date.now() - 3600e3).toISOString() },
@@ -1072,8 +1128,6 @@ r = await llamar('GET', `/manifiestos/${mfB.id}`, { token: T8 });
 prueba('la línea trae precio de la tarifa, disposición principal y métrica', r.status === 200 && r.json.items.length === 1 && Number(r.json.items[0].precioUnitario) === 780 && r.json.items[0].disposicion?.codigo === 'BIO' && r.json.items[0].metrica?.abreviacion === 'kg', JSON.stringify(r.json.items?.[0]).slice(0, 300));
 r = await llamar('PATCH', `/manifiestos/${mfB.id}/items/${r.json.items[0].id}`, { token: T8, cuerpo: { embalajes: 4 } });
 prueba('en campo se corrige la línea (embalajes)', r.status === 200 && r.json.embalajes === 4, JSON.stringify(r.json));
-r = await llamar('GET', `/preoperacionales?vehiculoId=${veh.id}&fecha=2026-11-25`, { token: T8 });
-prueba('la app consulta la inspección del día del vehículo', r.status === 200 && r.json.some((p) => p.aprobado && /^INS-\d{4}-\d{5}$/.test(p.numero)), JSON.stringify(r.json).slice(0, 200));
 for (const n of [1, 2]) r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from(PNG, 'base64'), `foto${n}.png`, { tipo: 'FOTO' }) });
 prueba('dos fotos de evidencia', r.status === 201);
 r = await llamar('POST', `/manifiestos/${mfB.id}/evidencias`, { token: T8, form: archivoForm(Buffer.from(PNG, 'base64'), 'foto3.png', { tipo: 'FOTO' }) });
@@ -2412,7 +2466,7 @@ const peligrosa = await db.declaracion.findFirst({ where: { clienteId: suc.clien
 const solGps = (await llamar('POST', '/solicitudes', { token: T8, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: hoyGps,
   items: [{ declaracionId: peligrosa?.id, cantidadEstimada: 300 }] } })).json;
 const rutaGps = (await llamar('POST', '/rutas', { token: T8, cuerpo: { codigo: `R-GPS-${Date.now() % 100000}`, fechaProgramada: hoyGps, vehiculoId: lpm.id, conductorId: yo.id, solicitudes: [solGps.id] } })).json;
-await llamar('POST', '/preoperacionales', { token: T8, cuerpo: { vehiculoId: lpm.id, rutaId: rutaGps.id, fechaProgramada: hoyGps, km: 50000, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
+simPreop(lpm.placa, hoyGps, { email: yo.email, nombre: yo.nombre });
 r = await llamar('PATCH', `/rutas/${rutaGps.id}/estado`, { token: T8, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 50000 } });
 prueba('GPS: ruta de hoy con residuos peligrosos en un vehículo de la flota, en camino', !!peligrosa && !!rutaGps.id && r.status === 200, JSON.stringify([solGps, rutaGps, r.json]).slice(0, 300));
 const T0 = Math.floor(Date.now() / 1000) - 110 * 60;

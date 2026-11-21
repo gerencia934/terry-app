@@ -1,6 +1,6 @@
 // Torre de control (oficina, modo servidor): tipos, catálogos y detalle de ruta compartidos.
 import { useEffect, useState, type ReactNode } from 'react';
-import { MapPin, Pencil, FileStack, Trash2, Save, X } from 'lucide-react';
+import { MapPin, Pencil, FileStack, Trash2, Save, X, RefreshCw, ShieldAlert } from 'lucide-react';
 import { Badge, Button, ColorBadge, DefList, EstadoBadge, Field, Input, Select, Sheet, useToast } from '../../components/ui';
 import { ErrorApi, alCambiarSesion, api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
@@ -30,6 +30,8 @@ export interface RutaApi {
   interna: boolean; valorFlete: string | null; kmInicial: number | null; kmFinal: number | null; horaSalida: string | null; horaLlegadaPlanta: string | null; observaciones: string | null;
   vehiculo: { placa: string; marca: string | null; color: string } | null; conductor: { nombre: string } | null; auxiliar: { nombre: string } | null; zona: { nombre: string } | null;
   estadoRecorrido: Etapa | null; paradas: Parada[];
+  // Portal Logístico: qué autorizó la ruta (el preoperacional de Mantenimiento o una excepción de la oficina)
+  preopAutorizacion?: 'PREOPERACIONAL' | 'EXCEPCION' | null; preopDetalle?: string | null; preopAutorizadoEn?: string | null;
 }
 
 // ---------- Catálogos (una sola carga por sesión) ----------
@@ -135,12 +137,14 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
   const [gps, setGps] = useState<PuntoGps | 'sin' | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [elegir, setElegir] = useState<PendienteGestor[] | null>(null);
+  const [preopMsg, setPreopMsg] = useState<string | null>(null);
+  const [motivoExc, setMotivoExc] = useState<string | null>(null);
   const [gestores, setGestores] = useState<Record<string, string>>({});
   const mfs = useApi<{ filas: MfFila[] }>(ruta ? `/manifiestos?rutaId=${ruta.id}&porPagina=100` : null);
   // GPS de Wialon (Logística y Gerencia): kilómetros, planta, llegada y salida de cada parada, eventos y recorrido
   const gpsR = useApi<RutaGpsDetalle>(ruta && tienePermiso('rutas.programar') ? `/rutas/${ruta.id}/gps` : null);
   const [recorrido, setRecorrido] = useState<[number, number][] | null>(null);
-  useEffect(() => { setEditar(false); setQuitar(null); setGps(null); setRecorrido(null); setF(ruta ? formDeRuta(ruta) : null); setElegir(null); setGestores({}); }, [ruta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setEditar(false); setQuitar(null); setGps(null); setRecorrido(null); setF(ruta ? formDeRuta(ruta) : null); setElegir(null); setGestores({}); setPreopMsg(null); setMotivoExc(null); }, [ruta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ruta) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
   const final = !!ruta.estadoRecorrido?.esFinal;
@@ -164,6 +168,14 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
       setElegir(d.pendientes);
     }
   }, '');
+  // El preoperacional vive en Mantenimiento: la oficina puede volver a consultarlo o, en una emergencia, autorizar la salida
+  const consultarPreop = () => accion(async () => {
+    const e = await api<{ abierta: boolean; via?: string; detalle?: string; mensaje?: string }>(`/rutas/${ruta.id}/preoperacional/consultar`, { metodo: 'POST' });
+    setPreopMsg(e.abierta ? (e.via === 'EXCEPCION' ? `Autorizada por la oficina: ${e.detalle}` : `Preoperacional apto: ${(e.detalle ?? '').replace(/^Apto · /, '')}`) : e.mensaje ?? 'Sin preoperacional apto.');
+  }, '');
+  const autorizarSinPreop = () => motivoExc !== null && accion(async () => {
+    await api(`/rutas/${ruta.id}/preoperacional/excepcion`, { cuerpo: { motivo: motivoExc } }); setMotivoExc(null); setPreopMsg(null);
+  }, `Ruta ${ruta.codigo}: salida autorizada sin preoperacional (queda en la auditoría).`);
   const verGps = async () => {
     try { const ps = await api<PuntoGps[]>(`/rutas/${ruta.id}/rastreo`); setGps(ps.length ? ps[ps.length - 1] : 'sin'); } catch (e) { toast(msg(e), 'warn'); }
   };
@@ -214,9 +226,28 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
             ...(ruta.interna ? [['Tipo', 'Movimiento interno en planta']] as [string, string][] : []),
             ['Kilometraje', ruta.kmInicial !== null ? `${cant(ruta.kmInicial)} → ${ruta.kmFinal !== null ? cant(ruta.kmFinal) : '…'}${ruta.kmFinal !== null ? ` (${cant(ruta.kmFinal - ruta.kmInicial)} km)` : ''}` : '—'],
             ['Salida / llegada', `${horaCo(ruta.horaSalida)} / ${horaCo(ruta.horaLlegadaPlanta)}`],
+            ['Preoperacional', ruta.preopAutorizacion === 'EXCEPCION' ? <span><Badge tone="warn">Excepción de la oficina</Badge> <span className="text-[12px] text-muted">{ruta.preopDetalle}</span></span>
+              : ruta.preopAutorizacion === 'PREOPERACIONAL' ? <span><Badge tone="ok">Apto</Badge> <span className="text-[12px] text-muted">{(ruta.preopDetalle ?? '').replace(/^Apto · /, '')}</span></span>
+              : <Badge tone="neutral">Sin confirmar</Badge>],
             ...(ruta.observaciones ? [['Observaciones', ruta.observaciones]] as [string, string][] : []),
           ]} />
           {(!ruta.vehiculoId || !ruta.conductorId) && !final && <p className="rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn">La ruta no puede salir hasta tener vehículo y conductor.</p>}
+          {!final && (
+            <div className="flex flex-col gap-2 rounded-xl border border-line p-3">
+              <p className="text-[13px] text-muted">El preoperacional se hace en Mantenimiento. Sin él (o una excepción de la oficina), la ruta no sale y el conductor no ve sus paradas.</p>
+              {preopMsg && <p className="text-[13px] font-medium">{preopMsg}</p>}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" disabled={ocupado} onClick={consultarPreop}><RefreshCw size={14} /> Consultar Mantenimiento</Button>
+                {tienePermiso('rutas.autorizar_sin_preop') && ruta.preopAutorizacion !== 'EXCEPCION' && motivoExc === null && <Button size="sm" onClick={() => setMotivoExc('')}><ShieldAlert size={14} /> Autorizar sin preoperacional</Button>}
+              </div>
+              {motivoExc !== null && (
+                <div className="flex flex-col gap-2">
+                  <Field label="Motivo (queda en la auditoría)" id="motivo-exc"><Input id="motivo-exc" value={motivoExc} maxLength={300} onChange={(e) => setMotivoExc(e.target.value)} placeholder="Mantenimiento no responde y el vehículo se revisó en planta" /></Field>
+                  <div className="flex gap-2"><Button size="sm" variant="primary" disabled={ocupado || motivoExc.trim().length < 10} onClick={autorizarSinPreop}>Autorizar salida</Button><Button size="sm" onClick={() => setMotivoExc(null)}>Cancelar</Button></div>
+                </div>
+              )}
+            </div>
+          )}
 
           <section className="flex flex-col gap-2">
             <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Paradas</h3>

@@ -1,4 +1,4 @@
-// App del conductor conectada al API (modo servidor). Pensada para el celular y para trabajar SIN SEÑAL:
+// Portal Logístico (antes «app del conductor»), conectado al API (modo servidor). Pensada para el celular y para trabajar SIN SEÑAL:
 // el «paquete del día» queda guardado en el teléfono y cada acción entra a una cola que se envía sola.
 //
 // Gerencia, 20-11-2026: la app de campo es un módulo aparte, solo en el celular. Trae únicamente la ruta del día (sin
@@ -6,8 +6,8 @@
 // (se anota lo real), y se imprime en sitio. Reportar «no había residuo» o «no me atendieron» toma un toque y no castiga.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  AlertOctagon, ArrowLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, CloudUpload, Eraser, Factory, Home, LifeBuoy, MapPin, Minus, Navigation, Phone, Plus,
-  Printer, RefreshCw, Route, Satellite, Scale, ShieldAlert, Timer, Truck, Wifi, WifiOff,
+  ArrowLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, CloudUpload, Eraser, Factory, Home, LifeBuoy, MapPin, Minus, Navigation, Phone, Plus,
+  Printer, RefreshCw, Route, Satellite, Scale, ShieldAlert, Timer, Truck, Wifi, WifiOff, Lock, Megaphone, MoreHorizontal, ExternalLink, FileText,
 } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Sheet, useToast } from '../components/ui';
 import { Logo } from '../components/AppShell';
@@ -34,7 +34,13 @@ interface Ruta {
   id: string; codigo: string; fechaProgramada: string; kmInicial: number | null; kmFinal: number | null; vehiculoId: string | null;
   vehiculo: { placa: string; marca: string | null; tipo: string } | null; conductor: { nombre: string } | null; auxiliar: { nombre: string } | null;
   estadoRecorrido: Etapa | null; paradas: Parada[];
+  // Portal Logístico: sin preoperacional apto en Mantenimiento la ruta llega bloqueada (sin paradas ni datos de clientes)
+  preoperacional?: { via: 'PREOPERACIONAL' | 'EXCEPCION'; detalle: string; confirmado: boolean } | null;
+  bloqueo?: { codigo: string; mensaje: string } | null; paradasBloqueadas?: number; mantenimiento?: EnlacesMto | null;
 }
+/** Pantallas de Mantenimiento del vehículo (se abren con la misma cuenta y vuelven a «Mi ruta»). */
+interface EnlacesMto { preoperacional: string; reportar: string; vehiculo: string; reportes: string }
+interface MantenimientoPaquete { conectado: boolean; enlaces: { preoperacional: string; reportar: string; vehiculos: string; reportes: string } | null }
 interface LineaMf {
   id: string; cantidad: string; embalajes: number | null;
   sucursal: { id: string; codigo: string | null; nombre: string; generadorNombre: string | null; generadorNit: string | null };
@@ -49,9 +55,7 @@ interface Manifiesto {
   vehiculo: { placa: string; tipo: string } | null; conductor: { nombre: string; documento: string | null } | null; auxiliar: { nombre: string } | null;
   evidencias: { tipo: string }[]; items: LineaMf[];
 }
-interface Elemento { id: string; grupo: string; nombre: string; critico: boolean }
 interface Catalogos { etapas: Etapa[]; arl: { id: string; nombre: string }[]; eps: { id: string; nombre: string }[]; causales: { id: string; nombre: string }[] }
-interface Inspeccion { id: string; numero: string; vehiculoId: string; aprobado: boolean | null }
 /** Lo diligenciado en el teléfono (borrador) y, al grabar, la copia para imprimir sin señal. */
 interface Borrador {
   paso: number; cantidades: Record<string, string>; embalajes: Record<string, string>; quitados: Record<string, string>;
@@ -63,7 +67,7 @@ interface Paquete {
   fecha: string; usuarioId: string; actualizado: string; rutaSel: string | null;
   emisor: { razonSocial: string; nit: string; notaBascula: string | null };
   rutas: Ruta[]; manifiestos: Record<string, Manifiesto>; enCola: Record<string, boolean>; grabados: Record<string, Grabado>;
-  catalogos: Catalogos; elementos: Elemento[]; inspecciones: Inspeccion[];
+  catalogos: Catalogos; mantenimiento?: MantenimientoPaquete | null;
 }
 
 const hoy = () => new Date().toLocaleDateString('en-CA'); // AAAA-MM-DD en la hora del teléfono
@@ -87,14 +91,14 @@ async function enviar<T>(op: Omit<Operacion, 'creadoEn' | 'intentos'>): Promise<
 /** Descarga la ruta del día, sus manifiestos y las listas (una sola consulta a la puerta de campo) y los guarda en el teléfono. */
 async function descargarPaquete(anterior: Paquete | null): Promise<Paquete> {
   const yo = sesionActual()!.usuario, f = hoy();
-  const d = await api<{ emisor: Paquete['emisor']; rutas: Ruta[]; manifiestos: Manifiesto[]; catalogos: Catalogos; elementos: Elemento[]; inspecciones: Inspeccion[] }>(`/campo/paquete?fecha=${f}`);
+  const d = await api<{ emisor: Paquete['emisor']; rutas: Ruta[]; manifiestos: Manifiesto[]; catalogos: Catalogos; mantenimiento: MantenimientoPaquete | null }>(`/campo/paquete?fecha=${f}`);
   const mismoDia = anterior?.fecha === f && anterior.usuarioId === yo.id;
   const manifiestos: Record<string, Manifiesto> = Object.fromEntries(d.manifiestos.map((m) => [m.id, m]));
   // Lo grabado en el teléfono que aún no llega al servidor sigue «por enviar»; lo grabado se conserva para imprimir
   const enCola = mismoDia ? Object.fromEntries(Object.entries(anterior.enCola).filter(([id]) => manifiestos[id]?.estado === 'PENDIENTE')) : {};
   const rutaSel = anterior?.rutaSel && d.rutas.some((r) => r.id === anterior.rutaSel) ? anterior.rutaSel : d.rutas[0]?.id ?? null;
   const p: Paquete = { fecha: f, usuarioId: yo.id, actualizado: new Date().toISOString(), rutaSel, emisor: d.emisor, rutas: d.rutas, manifiestos, enCola,
-    grabados: mismoDia ? anterior.grabados ?? {} : {}, catalogos: d.catalogos, elementos: d.elementos, inspecciones: d.inspecciones };
+    grabados: mismoDia ? anterior.grabados ?? {} : {}, catalogos: d.catalogos, mantenimiento: d.mantenimiento ?? null };
   guardarPaquete(p);
   return p;
 }
@@ -111,10 +115,27 @@ export function usePaquete() {
     catch (e) { if (!silencioso) toast(e instanceof ErrorApi ? e.message : 'No se pudo actualizar.', 'warn'); }
     finally { setCargando(false); }
   };
-  useEffect(() => { if (!p || p.fecha !== hoy()) void actualizar(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Al abrir (también al volver de Mantenimiento): si la ruta estaba bloqueada, se consulta de nuevo
+  useEffect(() => { if (!p || p.fecha !== hoy() || p.rutas.some((r) => r.bloqueo)) void actualizar(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const cambiar = (fn: (x: Paquete) => Paquete) => setP((x) => { if (!x) return x; const n = fn(x); guardarPaquete(n); return n; });
   const ruta = p?.rutas.find((r) => r.id === p.rutaSel) ?? null;
   return { p, ruta, cargando, actualizar, cambiar };
+}
+
+/** Pantallas de Mantenimiento: las del vehículo de la ruta elegida o, sin ruta, las generales. */
+type TipoMto = 'preoperacional' | 'reportar' | 'vehiculo' | 'reportes';
+export function enlaceMantenimiento(tipo: TipoMto): string | null {
+  const p = leerPaquete<Paquete>();
+  const r = p?.rutas.find((x) => x.id === p.rutaSel) ?? p?.rutas[0];
+  if (r?.mantenimiento) return r.mantenimiento[tipo];
+  const g = p?.mantenimiento?.enlaces;
+  return g ? (tipo === 'vehiculo' ? g.vehiculos : g[tipo]) : null;
+}
+function abrirMantenimiento(tipo: TipoMto, aviso: (m: string) => void, url?: string | null) {
+  const u = url ?? enlaceMantenimiento(tipo);
+  if (!u) { aviso('Mantenimiento todavía no está conectado: avise a su coordinador.'); return; }
+  if (!navigator.onLine) { aviso('Necesita señal para abrir Mantenimiento.'); return; }
+  window.location.href = u;
 }
 
 /** La parada de un manifiesto: la que tiene sus líneas de solicitud. */
@@ -158,24 +179,29 @@ function datosImpresion(p: Paquete, m: Manifiesto, g: Grabado | undefined): Dato
 }
 
 // ======================= Marco de la app de campo =======================
-// Barra inferior del celular (estándar de Mantenimiento): máximo 6 casillas
-const NAV: [RouteName, ReactNode, string, RouteName[]][] = [
+// Barra inferior del Portal Logístico: cinco botones grandes. «Preoperacional» y «Reportar falla» abren Mantenimiento
+// con el vehículo de la ruta ya elegido (misma cuenta) y al terminar vuelven a «Mi ruta».
+type Destino = RouteName | 'mto-preoperacional' | 'mto-reportar';
+const NAV: [Destino, ReactNode, string, RouteName[]][] = [
   ['campo', <Home size={22} />, 'Mi ruta', ['campo-parada']],
-  ['campo-preop', <ClipboardCheck size={22} />, 'Inspección', []],
+  ['mto-preoperacional', <ClipboardCheck size={22} />, 'Preoperacional', []],
+  ['mto-reportar', <Megaphone size={22} />, 'Reportar falla', []],
   ['campo-bitacora', <Timer size={22} />, 'Tiempos', []],
-  ['campo-vehiculo', <Truck size={22} />, 'Mi vehículo', []],
-  ['campo-envios', <CloudUpload size={22} />, 'Envíos', []],
-  ['campo-ayuda', <LifeBuoy size={22} />, 'Ayuda', []],
+  ['campo-mas', <MoreHorizontal size={22} />, 'Más', ['campo-envios', 'campo-ayuda']],
 ];
 
 export function CampoLayout({ children, title, back, pie }: { children: ReactNode; title?: string; back?: boolean; pie?: ReactNode }) {
   const { route, go } = useRouter();
+  const toast = useToast();
   const { enLinea, pendientes, errores } = useCola();
+  const tocar = (r: Destino) => (r === 'mto-preoperacional' ? abrirMantenimiento('preoperacional', (m) => toast(m, 'warn'))
+    : r === 'mto-reportar' ? abrirMantenimiento('reportar', (m) => toast(m, 'warn')) : go(r));
   return (
     <div className="mx-auto flex min-h-full max-w-[560px] flex-col bg-bg">
       <header className="sticky z-30 border-b border-line bg-surface" style={{ top: 'env(safe-area-inset-top, 0px)' }}>
         <div className="safe-x flex h-14 items-center gap-2">
-          {back ? <button onClick={() => go('campo')} className="-ml-2 rounded-lg p-2" aria-label="Volver"><ArrowLeft size={22} /></button> : <Logo className="h-7" />}
+          {back ? <button onClick={() => go('campo')} className="-ml-2 rounded-lg p-2" aria-label="Volver"><ArrowLeft size={22} /></button>
+            : <><Logo className="h-7" />{!title && <span className="shrink-0 rounded-md bg-brand-soft px-1.5 py-0.5 text-[11px] font-semibold text-brand-ink">Portal Logístico</span>}</>}
           {title && <h1 className="truncate text-[16px] font-semibold">{title}</h1>}
           <BotonAyuda acceso="CAMPO" ruta={route} verTodo={() => go('campo-ayuda')} className="ml-auto" />
           <button onClick={() => go('campo-envios')} className={cx('flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-medium',
@@ -187,10 +213,10 @@ export function CampoLayout({ children, title, back, pie }: { children: ReactNod
       </header>
       <main className={cx('safe-x flex-1 py-4', pie ? 'pb-44' : 'pb-28')}><AvisoNotificaciones />{children}</main>
       {pie && <div className="fixed inset-x-0 bottom-16 z-30 border-t border-line bg-surface/95 backdrop-blur"><div className="safe-x mx-auto max-w-[560px] py-2.5">{pie}</div></div>}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface safe-bottom" aria-label="Navegación de campo">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface safe-bottom" aria-label="Navegación del Portal Logístico">
         <div className="mx-auto grid max-w-[560px]" style={{ gridTemplateColumns: `repeat(${NAV.length}, minmax(0, 1fr))` }}>
           {NAV.map(([r, ic, l, tambien]) => (
-            <button key={r} onClick={() => go(r)} className={cx('flex h-16 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-medium leading-tight', route === r || tambien.includes(route) ? 'text-brand' : 'text-muted')}>{ic}{l}</button>
+            <button key={r} onClick={() => tocar(r)} className={cx('flex h-16 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-medium leading-tight', route === r || tambien.includes(route) ? 'text-brand' : 'text-muted')}>{ic}{l}</button>
           ))}
         </div>
       </nav>
@@ -210,11 +236,18 @@ export function CampoRutaServidor() {
 
   // GPS solo mientras la ruta esté en una etapa con rastreo
   useEffect(() => { if (ruta && etapa?.rastreo) iniciarGps(ruta.id); else detenerGps(); }, [ruta?.id, etapa?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Al volver de Mantenimiento (preoperacional hecho), la ruta bloqueada se consulta otra vez sola
+  const bloqueada = !!ruta?.bloqueo;
+  useEffect(() => {
+    if (!bloqueada) return;
+    const f = () => { if (document.visibilityState === 'visible' && navigator.onLine) void actualizar(true); };
+    document.addEventListener('visibilitychange', f); window.addEventListener('focus', f);
+    return () => { document.removeEventListener('visibilitychange', f); window.removeEventListener('focus', f); };
+  }, [bloqueada]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!p) return <CampoLayout><Vacio cargando={cargando} actualizar={() => actualizar()} texto="Descargue la ruta del día con señal (en planta) para trabajar sin conexión." /></CampoLayout>;
   if (!ruta) return <CampoLayout><Vacio cargando={cargando} actualizar={() => actualizar()} texto="No tiene rutas programadas para hoy." /></CampoLayout>;
 
-  const inspeccion = p.inspecciones.find((i) => i.vehiculoId === ruta.vehiculoId && i.aprobado);
   const siguientes = p.catalogos.etapas.filter((e) => e.orden > (etapa?.orden ?? 0) || (e.esFinal && !etapa?.esFinal));
   const atendida = (pa: Parada) => { const mfs = mfsDeParada(p, pa);
     return pa.estado === 'NO_ATENDIDA' || (mfs.length > 0 && mfs.filter((m) => m.estado !== 'ANULADO').every((m) => hechoMf(p, m)) && !sinManifiesto(p, pa).length); };
@@ -263,14 +296,16 @@ export function CampoRutaServidor() {
         {etapa?.rastreo && <span className="flex items-center gap-1 rounded-lg bg-info/10 px-2.5 py-1 text-info"><Satellite size={13} /> GPS activo</span>}
       </div>
 
-      {inspeccion ? (
-        <div className="mt-4 flex items-center gap-3 rounded-2xl bg-ok/10 p-4 text-ok"><CheckCircle2 size={24} className="shrink-0" /><div><p className="font-semibold">Inspección {inspeccion.numero} aprobada</p><p className="text-[13px] opacity-90">El vehículo puede salir.</p></div></div>
-      ) : (
-        <button onClick={() => go('campo-preop')} className="mt-4 flex w-full items-center gap-3 rounded-2xl bg-warn/10 p-4 text-left text-warn ring-1 ring-warn/30">
-          <AlertOctagon size={26} className="shrink-0" /><div className="flex-1"><p className="font-semibold">Haga la inspección del vehículo</p><p className="text-[13px] opacity-90">La ruta no sale sin la inspección aprobada.</p></div><ChevronRight size={20} />
-        </button>
+      {ruta.bloqueo ? <TarjetaBloqueo ruta={ruta} cargando={cargando} actualizar={() => actualizar()} aviso={(m) => toast(m, 'warn')} /> : ruta.preoperacional && (
+        <div className={cx('mt-4 flex items-center gap-3 rounded-2xl p-4', ruta.preoperacional.via === 'EXCEPCION' ? 'bg-warn/10 text-warn' : 'bg-ok/10 text-ok')}>
+          {ruta.preoperacional.via === 'EXCEPCION' ? <ShieldAlert size={24} className="shrink-0" /> : <CheckCircle2 size={24} className="shrink-0" />}
+          <div><p className="font-semibold">{ruta.preoperacional.via === 'EXCEPCION' ? 'Salida autorizada por la oficina sin preoperacional' : `Preoperacional ${ruta.vehiculo?.placa ?? ''}: apto`}</p>
+            <p className="text-[13px] opacity-90">{ruta.preoperacional.via === 'EXCEPCION' ? `Motivo: ${ruta.preoperacional.detalle}` : ruta.preoperacional.detalle.replace(/^Apto · /, '')}
+              {ruta.preoperacional.confirmado ? '' : ' · sin poder confirmar ahora con Mantenimiento'}</p></div>
+        </div>
       )}
 
+      {!ruta.bloqueo && (<>
       {!etapa?.esFinal && siguientes.length > 0 && (
         <div className="mt-4"><p className="mb-2 text-[13px] font-medium text-muted">Cambiar etapa</p>
           <div className="grid grid-cols-2 gap-2">
@@ -325,7 +360,7 @@ export function CampoRutaServidor() {
                     </div>
                   ))}
                   {faltan.length > 0 && <p className="mt-2 rounded-lg bg-warn/10 px-2.5 py-1.5 text-[12px] leading-snug text-warn">Sin manifiesto todavía: {faltan.map((it) => it.solicitudItem.declaracion.nombre).join(', ')}.{' '}
-                    {faltan.some((it) => it.solicitudItem.declaracion.esPeligroso) ? 'Es peligroso: va directo a un gestor aliado y la oficina elige cuál. Actualice la ruta en un momento.' : 'Toque «Abrir los manifiestos que faltan».'}</p>}
+                    {faltan.some((it) => it.solicitudItem.declaracion.esPeligroso) ? 'Es peligroso: va directo a un gestor aliado y la oficina elige cuál. Actualice la ruta en un momento.' : 'Toque arriba el botón para abrir los manifiestos.'}</p>}
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-[1fr_1fr_1.4fr] gap-2">
@@ -345,6 +380,7 @@ export function CampoRutaServidor() {
         })}
         <li className="flex items-center gap-3 rounded-2xl border border-dashed border-line p-4 text-[14px] text-muted"><Factory size={22} className="shrink-0" /><div><p className="font-medium text-fg">Descarga en planta</p><p className="text-[13px]">Al llegar, cambie la etapa a la final con el kilometraje.</p></div></li>
       </ol>
+      </>)}
       <p className="mt-4 text-center text-[12px] text-subtle">Copia guardada en el teléfono: {new Date(p.actualizado).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</p>
     </CampoLayout>
   );
@@ -359,82 +395,65 @@ function Vacio({ cargando, actualizar, texto }: { cargando: boolean; actualizar:
   );
 }
 
-// ======================= Inspección del vehículo =======================
-type Res = 'OK' | 'NO_OK' | 'NA';
-export function CampoInspeccionServidor() {
+// ======================= Ruta bloqueada: falta el preoperacional (Mantenimiento) =======================
+const TITULO_BLOQUEO: Record<string, string> = {
+  SIN_PREOPERACIONAL: 'Primero, el preoperacional', NO_APTO: 'El vehículo no está apto para salir', OTRA_PERSONA: 'Falta su preoperacional',
+  NO_REGISTRADO: 'Vehículo sin registrar en Mantenimiento', SIN_RESPUESTA: 'No se pudo confirmar el preoperacional', SIN_VEHICULO: 'La ruta no tiene vehículo',
+};
+function TarjetaBloqueo({ ruta, cargando, actualizar, aviso }: { ruta: Ruta; cargando: boolean; actualizar: () => void; aviso: (m: string) => void }) {
+  const b = ruta.bloqueo!;
+  const puedeHacerlo = b.codigo !== 'SIN_VEHICULO' && b.codigo !== 'NO_REGISTRADO';
+  const n = ruta.paradasBloqueadas ?? 0;
+  return (
+    <div className="mt-4 rounded-2xl bg-warn/10 p-4 text-warn ring-1 ring-warn/30">
+      <div className="flex items-start gap-3"><Lock size={24} className="mt-0.5 shrink-0" />
+        <div className="min-w-0"><p className="font-semibold">{TITULO_BLOQUEO[b.codigo] ?? 'Ruta bloqueada'}</p><p className="mt-1 text-[13px] leading-snug opacity-90">{b.mensaje}</p></div></div>
+      <div className="mt-3 grid gap-2">
+        {puedeHacerlo && <Button variant="primary" className="h-12 w-full rounded-xl" onClick={() => abrirMantenimiento('preoperacional', aviso, ruta.mantenimiento?.preoperacional)}>
+          <ClipboardCheck size={18} /> {b.codigo === 'NO_APTO' ? 'Hacer un preoperacional nuevo' : 'Hacer preoperacional'}</Button>}
+        <Button className="h-11 w-full rounded-xl" disabled={cargando} onClick={actualizar}><RefreshCw size={16} className={cx(cargando && 'animate-spin')} /> {cargando ? 'Consultando…' : 'Ya lo hice: consultar de nuevo'}</Button>
+      </div>
+      <p className="mt-3 text-[12px] opacity-80"><Route size={12} className="mr-1 inline" />{ruta.codigo} · {n} parada{n === 1 ? '' : 's'}: se abren cuando el preoperacional esté apto.</p>
+    </div>
+  );
+}
+
+// ======================= Más: lo de Mantenimiento, envíos y ayuda =======================
+export function CampoMasServidor() {
   const { go } = useRouter();
   const toast = useToast();
-  const { p, ruta, cambiar } = usePaquete();
-  const [res, setRes] = useState<Record<string, Res>>({});
-  const [km, setKm] = useState('');
-  const [obs, setObs] = useState('');
-  const [enviando, setEnviando] = useState(false);
-  // Fotos por elemento (sobre todo de las fallas) y firma del conductor: se suben al almacenamiento, también sin señal
-  const [fotos, setFotos] = useState<Record<string, { blob: Blob; url: string }>>({});
-  const [firma, setFirma] = useState('');
-  const tomarFoto = async (elementoId: string, archivo?: File) => {
-    if (!archivo) return;
-    try { const blob = await comprimirFoto(archivo); setFotos((s) => ({ ...s, [elementoId]: { blob, url: URL.createObjectURL(blob) } })); }
-    catch { toast('No se pudo leer la foto.', 'warn'); }
-  };
-  if (!p || !ruta) return <CampoLayout title="Inspección" back><p className="mt-6 text-center text-muted">Primero descargue la ruta del día.</p></CampoLayout>;
-  if (!ruta.vehiculoId) return <CampoLayout title="Inspección" back><p className="mt-6 text-center text-muted">La ruta aún no tiene vehículo asignado.</p></CampoLayout>;
-  const grupos = [...new Set(p.elementos.map((e) => e.grupo))];
-  const faltan = p.elementos.filter((e) => !res[e.id]).length;
-  const criticasMal = p.elementos.filter((e) => e.critico && res[e.id] === 'NO_OK');
-  const enviarInspeccion = async () => {
-    setEnviando(true);
-    const id = crypto.randomUUID(); // el mismo id en cada reintento: la inspección no se duplica
-    const cuerpo = { id, firma, vehiculoId: ruta.vehiculoId, rutaId: ruta.id, fechaProgramada: hoy(), km: Number(km), observaciones: obs || undefined, respuestas: p.elementos.map((e) => ({ elementoId: e.id, resultado: res[e.id] })) };
-    try {
-      const r = await enviar<{ id: string; numero: string; aprobado: boolean; fallasCriticas: string[] }>({ grupo: `ruta:${ruta.id}`, descripcion: `Inspección del vehículo ${ruta.vehiculo?.placa ?? ''}`, metodo: 'POST', ruta: '/campo/preoperacionales', cuerpo });
-      // Las fotos van después, en orden y en la misma cola (si no hay señal, esperan a la inspección)
-      let n = 0;
-      for (const [elementoId, f] of Object.entries(fotos)) {
-        const el = p.elementos.find((x) => x.id === elementoId);
-        await encolar({ grupo: `ruta:${ruta.id}`, descripcion: `Foto de la inspección · ${el?.nombre ?? ''}`, metodo: 'POST', ruta: `/campo/preoperacionales/${id}/fotos`,
-          form: { campos: { elementoId }, archivo: f.blob, nombre: `inspeccion-${id.slice(0, 8)}-${++n}.jpg` } });
-      }
-      const aprobado = r.respuesta ? r.respuesta.aprobado : !criticasMal.length;
-      if (r.respuesta) cambiar((x) => ({ ...x, inspecciones: [...x.inspecciones, { id: r.respuesta!.id, numero: r.respuesta!.numero, vehiculoId: ruta.vehiculoId!, aprobado }] }));
-      else if (aprobado) cambiar((x) => ({ ...x, inspecciones: [...x.inspecciones, { id: 'local', numero: '(por enviar)', vehiculoId: ruta.vehiculoId!, aprobado: true }] }));
-      if (!aprobado) toast(`No aprobada: ${criticasMal.map((e) => e.nombre).join(', ')}. El vehículo no puede salir.`, 'warn');
-      else { toast(r.enCola ? 'Inspección guardada en el teléfono: se enviará al volver la señal.' : 'Inspección aprobada.'); go('campo'); }
-    } catch (e) { toast(e instanceof ErrorApi ? e.message : 'No se pudo enviar la inspección.', 'warn'); }
-    finally { setEnviando(false); }
-  };
+  const fila = (icono: ReactNode, titulo: string, sub: string, accion: () => void, externo = false) => (
+    <button onClick={accion} className="flex w-full items-center gap-3 rounded-2xl bg-surface p-4 text-left ring-1 ring-line">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand-ink">{icono}</span>
+      <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold">{titulo}</span><span className="block text-[13px] text-muted">{sub}</span></span>
+      {externo ? <ExternalLink size={18} className="shrink-0 text-muted" /> : <ChevronRight size={18} className="shrink-0 text-muted" />}
+    </button>
+  );
+  const mto = (t: TipoMto) => () => abrirMantenimiento(t, (m) => toast(m, 'warn'));
   return (
-    <CampoLayout title="Inspección del vehículo" back>
-      <p className="text-[13px] text-muted">{ruta.vehiculo?.placa} · {ruta.codigo}. Marque cada elemento. Los marcados como <b>críticos</b> impiden la salida si fallan.</p>
-      {grupos.map((g) => (
-        <section key={g} className="mt-4"><h2 className="mb-2 text-[15px] font-semibold">{g}</h2>
-          <ul className="flex flex-col gap-2">
-            {p.elementos.filter((e) => e.grupo === g).map((e) => (
-              <li key={e.id} className="rounded-xl bg-surface p-3 ring-1 ring-line">
-                <p className="text-[14px] font-medium">{e.nombre}{e.critico && <span className="ml-2"><Badge tone="bad">Crítico</Badge></span>}</p>
-                <div className="mt-2 grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
-                  {([['OK', 'Bien'], ['NO_OK', 'Falla'], ['NA', 'No aplica']] as [Res, string][]).map(([v, l]) => (
-                    <button key={v} onClick={() => setRes((s) => ({ ...s, [e.id]: v }))} className={cx('h-11 rounded-lg text-[14px] font-semibold ring-1',
-                      res[e.id] === v ? (v === 'OK' ? 'bg-ok text-white ring-ok' : v === 'NO_OK' ? 'bg-bad text-white ring-bad' : 'bg-muted text-white ring-muted') : 'ring-line')}>{l}</button>
-                  ))}
-                  <label className={cx('flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg ring-1', fotos[e.id] ? 'bg-brand-soft text-brand-ink ring-brand' : res[e.id] === 'NO_OK' ? 'text-bad ring-bad' : 'text-muted ring-line')}
-                    aria-label={`Foto de ${e.nombre}`} title="Tomar una foto">
-                    <Camera size={18} /><input type="file" accept="image/*" capture="environment" className="hidden" onChange={(ev) => tomarFoto(e.id, ev.target.files?.[0])} />
-                  </label>
-                </div>
-                {fotos[e.id] && <img src={fotos[e.id].url} alt={`Foto de ${e.nombre}`} className="mt-2 h-24 w-32 rounded-lg object-cover" />}
-                {res[e.id] === 'NO_OK' && !fotos[e.id] && <p className="mt-1.5 text-[12px] text-bad">Tome una foto de la falla.</p>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-      <div className="mt-5 flex flex-col gap-3">
-        <Field label="Kilometraje actual" id="km-i"><Input id="km-i" inputMode="numeric" value={km} onChange={(e) => setKm(e.target.value.replace(/\D/g, ''))} /></Field>
-        <Field label="Observaciones" id="obs-i"><Input id="obs-i" value={obs} maxLength={500} onChange={(e) => setObs(e.target.value)} /></Field>
-        {criticasMal.length > 0 && <p className="rounded-xl bg-bad/10 p-3 text-[13px] text-bad">Falla crítica: {criticasMal.map((e) => e.nombre).join(', ')}. La inspección quedará no aprobada.</p>}
-        <div><p className="mb-1.5 text-[13px] font-medium">Firma del conductor</p><Firma valor={firma} onChange={setFirma} /></div>
-        <Button variant="primary" className="h-12 rounded-xl" disabled={!!faltan || !km || !firma || enviando} onClick={enviarInspeccion}>{faltan ? `Faltan ${faltan} elementos` : !firma ? 'Falta su firma' : enviando ? 'Enviando…' : 'Enviar inspección'}</Button>
+    <CampoLayout title="Más">
+      <div className="flex flex-col gap-3">
+        {fila(<Truck size={20} />, 'Mi vehículo', 'Hoja de vida en Mantenimiento: documentos, mantenimientos y fallas.', mto('vehiculo'), true)}
+        {fila(<FileText size={20} />, 'Mis reportes de fallas', 'Lo que reportó y en qué va, en Mantenimiento.', mto('reportes'), true)}
+        {fila(<CloudUpload size={20} />, 'Envíos pendientes', 'Lo guardado en el teléfono que falta por enviar.', () => go('campo-envios'))}
+        {fila(<LifeBuoy size={20} />, 'Ayuda', 'Guías paso a paso, preguntas frecuentes y a quién llamar.', () => go('campo-ayuda'))}
+      </div>
+      <p className="mt-5 text-[12px] leading-snug text-subtle">El preoperacional, el reporte de fallas y la hoja de vida del vehículo están en Mantenimiento: se abren con su misma cuenta y al terminar vuelve a su ruta.</p>
+    </CampoLayout>
+  );
+}
+
+/** Direcciones de antes (Inspección, Mi vehículo): ahora están en Mantenimiento. */
+export function CampoIrMantenimiento({ tipo }: { tipo: TipoMto }) {
+  const { go } = useRouter();
+  const u = enlaceMantenimiento(tipo);
+  useEffect(() => { if (u && navigator.onLine) window.location.href = u; }, [u]);
+  return (
+    <CampoLayout title={tipo === 'preoperacional' ? 'Preoperacional' : 'Mi vehículo'}>
+      <div className="mt-8 flex flex-col items-center gap-4 text-center">
+        <ExternalLink size={36} className="text-muted" />
+        <p className="max-w-[320px] text-muted">{u ? 'Abriendo Mantenimiento…' : 'Esto ahora se hace en Mantenimiento, que todavía no está conectado: avise a su coordinador.'}</p>
+        <Button onClick={() => go('campo')}>Volver a mi ruta</Button>
       </div>
     </CampoLayout>
   );
@@ -779,74 +798,6 @@ export function Firma({ valor, onChange }: { valor: string; onChange: (dataUrl: 
         onPointerUp={() => { if (!dibujando.current) return; dibujando.current = false; onChange(ref.current!.toDataURL('image/png')); }} />
       <button type="button" onClick={() => { const c = ref.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); onChange(''); }} className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted"><Eraser size={14} /> Borrar firma</button>
     </div>
-  );
-}
-
-// ======================= Mi vehículo: mantenimiento en solo lectura =======================
-interface MiVehiculo {
-  vehiculo: { id: string; placa: string; marca: string | null; tipo: string; soatVence: string | null; rtmVence: string | null; polizaRcVence: string | null } | null;
-  inspecciones: { id: string; numero: string; fechaProgramada: string; aprobado: boolean | null; km: number | null; observaciones: string | null; conductor: { nombre: string } | null; fallas: { nombre: string; critico: boolean }[] }[];
-}
-const MI_VEHICULO = 'terry-go-mi-vehiculo';
-
-/** «Todos somos supervisores» en mantenimiento (gerencia, 20-11-2026): vencimientos e inspecciones del vehículo, solo para consultar. */
-export function CampoVehiculoServidor() {
-  const toast = useToast();
-  const [d, setD] = useState<MiVehiculo | null>(() => { try { return JSON.parse(localStorage.getItem(MI_VEHICULO) ?? 'null') as MiVehiculo | null; } catch { return null; } });
-  const [cargando, setCargando] = useState(false);
-  const cargar = async (silencioso = false) => {
-    if (!navigator.onLine) { if (!silencioso) toast('Sin señal: se muestra la última consulta guardada.', 'warn'); return; }
-    setCargando(true);
-    try { const x = await api<MiVehiculo>(`/campo/mi-vehiculo?fecha=${hoy()}`); setD(x); try { localStorage.setItem(MI_VEHICULO, JSON.stringify(x)); } catch { /* sin espacio */ } }
-    catch (e) { if (!silencioso) toast(e instanceof ErrorApi ? e.message : 'No se pudo consultar.', 'warn'); }
-    finally { setCargando(false); }
-  };
-  useEffect(() => { void cargar(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const vence = (f: string | null, nombre: string) => {
-    if (!f) return <li className="flex items-center justify-between rounded-xl bg-surface p-3 ring-1 ring-line"><span>{nombre}</span><Badge tone="neutral">Sin fecha</Badge></li>;
-    const dias = Math.round((new Date(`${f.slice(0, 10)}T00:00:00`).getTime() - new Date(`${hoy()}T00:00:00`).getTime()) / 86_400_000);
-    const fecha = f.slice(0, 10).split('-').reverse().join('/');
-    return (
-      <li className="flex items-center justify-between rounded-xl bg-surface p-3 ring-1 ring-line"><span>{nombre}</span>
-        {dias < 0 ? <Badge tone="bad">Vencido el {fecha}</Badge> : dias <= 30 ? <Badge tone="warn">Vence en {dias} días</Badge> : <Badge tone="ok">Al día hasta {fecha}</Badge>}</li>
-    );
-  };
-  return (
-    <CampoLayout title="Mi vehículo">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[13px] text-muted">Solo consulta. Para reportar una falla, hágalo en la inspección o avise al coordinador.</p>
-        <button onClick={() => cargar()} disabled={cargando} className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-muted ring-1 ring-line" aria-label="Actualizar"><RefreshCw size={15} className={cx(cargando && 'animate-spin')} /></button>
-      </div>
-      {!d?.vehiculo ? (
-        <p className="mt-8 text-center text-muted">{cargando ? 'Consultando…' : 'No tiene un vehículo asignado en sus rutas.'}</p>
-      ) : (
-        <>
-          <div className="mt-4 rounded-2xl bg-surface p-4 ring-1 ring-line">
-            <p className="num text-[22px] font-bold">{d.vehiculo.placa}</p>
-            <p className="text-[13px] text-muted">{[d.vehiculo.tipo, d.vehiculo.marca].filter(Boolean).join(' · ')}</p>
-          </div>
-          <Seccion titulo="Documentos">
-            <ul className="flex flex-col gap-2">{vence(d.vehiculo.soatVence, 'SOAT')}{vence(d.vehiculo.rtmVence, 'Revisión técnico-mecánica')}{vence(d.vehiculo.polizaRcVence, 'Póliza de responsabilidad civil')}</ul>
-          </Seccion>
-          <Seccion titulo="Últimas inspecciones">
-            {!d.inspecciones.length && <p className="text-[13px] text-muted">Aún no hay inspecciones.</p>}
-            <ul className="flex flex-col gap-2">
-              {d.inspecciones.map((i) => (
-                <li key={i.id} className="rounded-xl bg-surface p-3 ring-1 ring-line">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[14px] font-medium">{i.fechaProgramada.slice(0, 10).split('-').reverse().join('/')} · {i.numero}</p>
-                    {i.aprobado === false ? <Badge tone="bad">No aprobada</Badge> : i.aprobado ? <Badge tone="ok">Aprobada</Badge> : <Badge tone="neutral">Pendiente</Badge>}
-                  </div>
-                  <p className="text-[12px] text-muted">{i.conductor?.nombre ?? ''}{i.km ? ` · ${i.km.toLocaleString('es-CO')} km` : ''}</p>
-                  {i.fallas.length > 0 && <p className="mt-1 text-[13px] text-bad">Fallas: {i.fallas.map((f) => `${f.nombre}${f.critico ? ' (crítica)' : ''}`).join(', ')}</p>}
-                  {i.observaciones && <p className="mt-1 text-[13px]">{i.observaciones}</p>}
-                </li>
-              ))}
-            </ul>
-          </Seccion>
-        </>
-      )}
-    </CampoLayout>
   );
 }
 

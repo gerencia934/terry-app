@@ -196,6 +196,16 @@ ahí. Ejemplo para la página del sitio:
 </script>
 ```
 
+## Portal Logístico ↔ Mantenimiento (llave compartida)
+
+Residuos le pregunta a Mantenimiento por el preoperacional del día. Los dos servidores comparten una llave larga y
+aleatoria, que se guarda solo como secreto de cada Worker (nunca en el repositorio):
+- `MANTENIMIENTO_TOKEN` en el Worker `terra-residuos-api`;
+- `TERRYGO_INTEGRACION_TOKEN` en el Worker `terra-mto-api`, con el mismo valor.
+
+La dirección (`MANTENIMIENTO_URL`) ya está en `despliegue/cloudflare/api/wrangler.jsonc`. Sin la llave, ninguna ruta se
+abre en el Portal Logístico, salvo una excepción de la oficina.
+
 ## 5. Después de publicar
 
 - **Claves que pasaron por el chat** (R2, Siigo, Wialon): generar unas nuevas en cada servicio y cambiarlas en las claves

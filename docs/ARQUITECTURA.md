@@ -16,7 +16,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 88 tablas, 37 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 88 tablas, 38 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel y CSV) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Usuarios | `GET/POST usuarios`, `PATCH usuarios/:id`, `POST usuarios/:id/invitacion`; `GET roles`, `GET roles/catalogo`, `POST roles`, `PATCH roles/:id`, `POST roles/:id/restaurar`, `DELETE roles/:id` (solo administración) | Nadie escribe contraseñas: el usuario nuevo recibe una invitación de 72 horas para crear la suya; nada se borra: inactivar cierra sus sesiones al instante; nadie se inactiva ni se cambia el rol a sí mismo; desbloquear tras intentos fallidos; roles configurables con sus funciones (Ajustes › Roles) |
@@ -52,6 +52,7 @@ certificado ante la CAS o el cliente.
 | Portal de clientes | Solo usuarios de un cliente: `GET portal/yo · resumen · declaraciones[/:id] · solicitudes · manifiestos · certificados · informe?anio=`, `POST portal/manifiestos/:id/enlace · certificados/:id/enlace`, `POST portal/declaraciones/cargue/:plantilla/vista-previa · confirmar`, `GET portal/solicitudes/opciones`, `POST portal/solicitudes`, `POST portal/solicitudes/:id/cancelar`, `GET/POST portal/usuarios`, `PATCH portal/usuarios/:id`, `POST portal/usuarios/:id/invitacion · 2fa/restablecer`. Oficina: `GET/POST clientes/:id/usuarios-portal`, `PATCH …/:uid`, `POST …/:uid/invitacion · …/:uid/2fa/restablecer` (`clientes.editar`). Pública: `GET descargas/:token` | Ver «Portal de clientes» abajo |
 | App del conductor (campo) | `GET campo/paquete?fecha · mi-vehiculo`, `PATCH campo/rutas/:id/estado`, `POST campo/rutas/:id/rastreo · manifiestos`, `POST campo/preoperacionales` (+ `:id/fotos`), `PATCH campo/manifiestos/:id/items/:itemId`, `POST campo/manifiestos/:id/evidencias · grabar`, `POST campo/manifiestos/:id/items/:itemId/no-recogido`, `POST campo/paradas/:id/no-atendida` (`rutas.operar` / `manifiestos.operar`) | Es todo lo que le responde el servidor a un token de campo (ver «Tres módulos» abajo). Cada consulta elige columna por columna (sin tarifas, valor del flete ni historial del cliente); solo las rutas en que la persona es conductor o auxiliar (o quien programa rutas). Novedades sin castigo: residuo no recogido o parada no atendida con causal o nota; la línea sale del manifiesto, la ruta libera el ítem, el manifiesto sin líneas se anula con la nota (la parada queda no atendida solo si no le queda nada más por recoger) y la oficina recibe el aviso. Al abrir los manifiestos el conductor no elige el gestor aliado: se abre lo demás, la oficina recibe el aviso y la parada muestra «Sin manifiesto todavía» |
 | Bitácora de tiempos | `GET bitacora/tipos · mios`, `POST bitacora` (el id lo pone el celular: reenviar no duplica), `PATCH/DELETE bitacora/:id`, `POST bitacora/:id/foto` (`bitacora.registrar`, también campo); `GET bitacora/equipo` (`bitacora.equipo`); `GET bitacora/tipos/todos`, `POST bitacora/tipos`, `PATCH bitacora/tipos/:id` (`configuracion.editar`) | Tabla `tiempos_logisticos` (los minutos los calcula la base; migración `20261212000300`). Tipos en el catálogo `TIEMPO_LOGISTICO` (trancón, portería, insumos, tanqueo, falla, descargue, trámites, otro). Cada quien corrige lo suyo hasta 7 días; nada en el futuro; el día va en hora de Colombia. Vista del equipo por tipo, persona, vehículo y ruta, con el % de tiempo muerto de cada ruta |
+| Portal Logístico ↔ Mantenimiento | `POST rutas/:id/preoperacional/consultar` (`rutas.programar`), `POST rutas/:id/preoperacional/excepcion` (`rutas.autorizar_sin_preop`, motivo de 10 a 300 caracteres). Residuos consulta `GET {MANTENIMIENTO_URL}/api/v1/mto/integraciones/terrygo/vehiculos/:placa/preoperacional?fecha=` con `x-integracion-token` (3 s como máximo) y le envía el kilometraje de la ruta a `…/terrygo/lecturas`. `POST preoperacionales` (oficina y campo) y `GET campo/mi-vehiculo` responden 410: eso vive en Mantenimiento | Ver «Portal Logístico» abajo |
 | Mesa de ayuda | `GET ayuda/contacto` (oficina, campo y portal) | Guías paso a paso y preguntas frecuentes por acceso en `packages/shared/src/ayuda.ts` (botón «?» de cada pantalla); el contacto de campo y el de clientes se configuran en Ajustes › Empresa (`configuracion.ayuda`); sin contacto de clientes usa el de la empresa |
 
 Detalle de la cadena operativa: `docs/operacion/MODELO_OPERACION.md`.
@@ -92,6 +93,22 @@ bitácora, los avisos push) ni `@CuentaPropia()` (su sesión, la política de da
 ayuda); en la web, una persona de campo siempre cae en `#campo`. Decisión de la gerencia: **campo no consulta clientes
 ni precios** (los clientes son el activo de la empresa); de cada parada recibe solo la sede (dirección, ubicación,
 horario y a quién llamar) y, en solo lectura, el mantenimiento de su vehículo (`campo/mi-vehiculo`).
+
+**Portal Logístico (21-11-2026).** El módulo de campo se llama Portal Logístico. El preoperacional, los vehículos y los
+reportes de fallas viven en Mantenimiento: Residuos no crea tablas de eso (las suyas de antes, `preoperacionales` y
+`vehiculos`, quedan como histórico y como copia para rutas y manifiestos). Regla de Terra Viva: **sin preoperacional
+apto no hay ruta ni manifiesto**.
+- `mantenimiento/mantenimiento.module.ts` le pregunta a Mantenimiento si el vehículo de la ruta tiene preoperacional apto
+  ese día. Manda el último del día, y lo debe haber hecho el conductor o el auxiliar de la ruta (por correo, la identidad
+  común). La ruta anota qué la autorizó (`preop_autorizacion`, `preop_referencia`, `preop_detalle`): el preoperacional o
+  una excepción de la oficina (`rutas.autorizar_sin_preop`, solo el Jefe de Operaciones de fábrica, con motivo y
+  auditoría). La regla de la base (`fn_bloqueo_preoperacional`) no deja salir una ruta sin esa anotación.
+- Bloqueada, la ruta llega al celular sin paradas ni datos del cliente y sin manifiestos; no se puede salir ni abrir
+  manifiestos (409 `PREOPERACIONAL`). Si Mantenimiento no responde, vale lo último confirmado; si nunca se confirmó, sigue
+  bloqueada. Un «no apto» posterior vuelve a bloquear.
+- La barra del celular tiene cinco botones: Mi ruta, Preoperacional y Reportar falla (abren Mantenimiento con el vehículo
+  elegido: `…/?volver=residuos#campo-preop-<activoId>`, misma cuenta, y vuelven a «Mi ruta»), Tiempos y Más (mi vehículo,
+  mis reportes, envíos y ayuda). `activoId` = uuidv5 de la placa, la misma regla de Mantenimiento.
 
 **Cadena del servicio (20-11-2026).**
 1. *Creación:* el cliente y sus sedes los crea Comercial o el Jefe de Operaciones (`clientes.editar`); el Líder de

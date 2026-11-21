@@ -83,7 +83,7 @@ export function Login() {
     <AuthLayout>
       <MarcaTerryApp />
       <p className="mt-7 text-[15px] text-muted">Hola, soy Terry. Ingrese con su cuenta de Terra Viva.</p>
-      <p className="mt-1 text-[12px] text-subtle">Conductores y auxiliares entran directo a su app de campo, y los clientes, a su portal.</p>
+      <p className="mt-1 text-[12px] text-subtle">Conductores, auxiliares y operarios entran directo a su Portal Logístico, y los clientes, a su portal.</p>
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
         <Field label="Correo" id="login-email"><Input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@terravivasas.com" /></Field>
         <Field label="Contraseña" id="login-pass">

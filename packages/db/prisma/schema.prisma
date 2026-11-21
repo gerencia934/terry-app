@@ -417,6 +417,7 @@ model Usuario {
   eps                     EntidadSeguridadSocial?  @relation("UsuarioEps", fields: [epsId], references: [id])
   rutasConductor          Ruta[]                   @relation("RutaConductor")
   rutasAuxiliar           Ruta[]                   @relation("RutaAuxiliar")
+  rutasPreopExcepcion     Ruta[]                   @relation("RutaPreopExcepcion")
   preopConductor          Preoperacional[]         @relation("PreopConductor")
   preopAuxiliar           Preoperacional[]         @relation("PreopAuxiliar")
   manifiestos             Manifiesto[]             @relation("MfConductor")
@@ -1172,8 +1173,15 @@ model Ruta {
   horaSalida        DateTime? @map("hora_salida") @db.Timestamptz
   horaLlegadaPlanta DateTime? @map("hora_llegada_planta") @db.Timestamptz
   observaciones     String?
+  // Portal Logístico: qué autorizó la ruta. El preoperacional vive en Mantenimiento; aquí solo queda la constancia.
+  preopAutorizacion    String?   @map("preop_autorizacion") @db.VarChar(16) // PREOPERACIONAL | EXCEPCION
+  preopReferencia      String?   @map("preop_referencia") @db.VarChar(60) // id del preoperacional en Mantenimiento
+  preopDetalle         String?   @map("preop_detalle") @db.VarChar(300) // hora y quién lo hizo, o el motivo de la excepción
+  preopAutorizadoPorId String?   @map("preop_autorizado_por") @db.Uuid // la oficina, en una excepción
+  preopAutorizadoEn    DateTime? @map("preop_autorizado_en") @db.Timestamptz
 
   empresa          Empresa          @relation(fields: [empresaId], references: [id])
+  preopAutorizadoPor Usuario?      @relation("RutaPreopExcepcion", fields: [preopAutorizadoPorId], references: [id])
   zona             Zona?            @relation(fields: [zonaId], references: [id])
   vehiculo         Vehiculo?        @relation(fields: [vehiculoId], references: [id])
   conductor        Usuario?         @relation("RutaConductor", fields: [conductorId], references: [id])

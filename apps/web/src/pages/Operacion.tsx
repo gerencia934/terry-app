@@ -36,7 +36,7 @@ export function Inspecciones() {
   return (
     <>
       <PageHeader eyebrow="Campo y HSEQ" title="Inspecciones vehiculares" subtitle="Inspección diaria antes de salir (PESV, Res. 40595 de 2022). Un ítem crítico no aprobado impide que el vehículo inicie el recorrido."
-        actions={<Button onClick={() => go('campo-preop')}><Smartphone size={16} /> Abrir en la app del conductor</Button>} />
+        actions={<Button onClick={() => go('campo')}><Smartphone size={16} /> Abrir el Portal Logístico</Button>} />
       <FilterBar active={[f.vehiculo, f.resultado].filter(Boolean).length} onClear={() => setF({ desde: '2026-11-01', hasta: '2026-11-30', vehiculo: '', resultado: '' })}>
         <Field label="Desde" id="in-d"><Input id="in-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
         <Field label="Hasta" id="in-h"><Input id="in-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>

@@ -63,6 +63,12 @@ const Esquema = z.object({
   // Consulta automática cada tantos segundos (30 a 300); false = solo con el botón «Actualizar» (pruebas)
   WIALON_CONSULTAR: sinVacio(z.enum(['true', 'false']).default('true')).transform((v) => v === 'true'),
   WIALON_INTERVALO: sinVacio(z.coerce.number().int().min(30).max(300).default(60)),
+  // Mantenimiento (Portal Logístico): el preoperacional, los vehículos y las fallas viven allá. Residuos le pregunta de
+  // servidor a servidor con un token propio (solo secreto del Worker). Vacío = sin conexión: ninguna ruta se abre sin una
+  // excepción de la oficina. MANTENIMIENTO_VOLVER es la clave que Mantenimiento conoce para devolver al conductor a su ruta.
+  MANTENIMIENTO_URL: z.string().trim().default(''),
+  MANTENIMIENTO_TOKEN: z.string().trim().default(''),
+  MANTENIMIENTO_VOLVER: z.string().trim().regex(/^[a-z-]{1,30}$/).default('residuos'),
   // Notificaciones push (Web Push): llaves VAPID (se generan una vez). Sin ellas no hay avisos y la app sigue igual.
   VAPID_PUBLICA: z.string().trim().default(''),
   VAPID_PRIVADA: z.string().trim().default(''),

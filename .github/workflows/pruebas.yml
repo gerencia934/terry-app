@@ -133,6 +133,9 @@ jobs:
           FORMULARIO_WEB_EMPRESA_NIT: 901089780-8
           # Avisos push simulados: no salen a Google ni a Apple; se revisan en GET /notificaciones/push/pruebas
           PUSH_PRUEBAS: 'true'
+          # Mantenimiento simulado por la prueba de punta a punta (puerto 3997): el preoperacional del Portal Logístico
+          MANTENIMIENTO_URL: http://localhost:3997
+          MANTENIMIENTO_TOKEN: mto-prueba
         run: |
           nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for i in $(seq 1 30); do

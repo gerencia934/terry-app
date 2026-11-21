@@ -45,6 +45,9 @@
     "FORMULARIO_WEB_EMPRESA_NIT": "901089780-8",
     // Entrada única del ecosistema (docs/ECOSISTEMA.md): el portal y su clave pública (no es secreta; la privada vive
     // solo en el proyecto de Pages «terry-portal»). Si se cambia la clave del portal, se cambia aquí también.
+    // Portal Logístico (docs/ECOSISTEMA.md): Residuos le pregunta a Mantenimiento por el preoperacional del día. La llave
+    // MANTENIMIENTO_TOKEN es secreto del Worker y debe ser igual a TERRYGO_INTEGRACION_TOKEN del Worker «terra-mto-api».
+    "MANTENIMIENTO_URL": "https://mantenimiento.terravivasas.net",
     "PORTAL_URL": "https://app.terravivasas.net",
     "PORTAL_CLAVE_PUBLICA": "qxwH-n5vCgFXv6DHqzIRe_JpnHDS4me-Hl-ioQk6YXk"
   }
