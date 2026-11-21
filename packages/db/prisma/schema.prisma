@@ -702,6 +702,11 @@ model Vehiculo {
   // Unidad de Wialon (GPS de la flota): se enlaza sola si el nombre de la unidad trae la placa, o a mano en Flota
   wialonUnidadId Int?         @map("wialon_unidad_id")
   wialonNombre   String?      @map("wialon_nombre") @db.VarChar(100)
+  // Flota única (gerencia, 21-11-2026): la hoja de vida de los vehículos propios vive en Mantenimiento. Con estos campos
+  // llenos, marca, tipo, capacidad, documentos y activo llegan de allá (solo lectura aquí, estándar 5); color y volumen son de Residuos.
+  mtoSincronizadoEn DateTime? @map("mto_sincronizado_en") @db.Timestamptz
+  mtoEstado         String?   @map("mto_estado") @db.VarChar(20) // OPERATIVO, RESTRINGIDO, EN_TALLER, FUERA_SERVICIO, DADO_DE_BAJA
+  mtoApto           Boolean?  @map("mto_apto") // documentos al día y sin hallazgos críticos, según Mantenimiento
 
   empresa          Empresa          @relation(fields: [empresaId], references: [id])
   bodega           Bodega?          @relation(fields: [bodegaId], references: [id])

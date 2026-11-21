@@ -41,7 +41,7 @@ const excel = async (id, filas) => formDe(await excelBuf(id, filas), `${id}.xlsx
 
 // Mantenimiento simulado en el puerto 3997 (Portal Logístico): el API apunta a él con MANTENIMIENTO_URL y el token «mto-prueba».
 // Cada prueba dice qué preoperacional hay para una placa y un día; «caido» simula que no responde (servidor despertando).
-const mtoSim = { preops: new Map(), caido: false, lecturas: [], noRegistradas: new Set() };
+const mtoSim = { preops: new Map(), caido: false, lecturas: [], noRegistradas: new Set(), flota: [] };
 const simPreop = (placa, fecha, { aprobado = true, email, nombre = 'Conductor de prueba' } = {}) =>
   mtoSim.preops.set(`${placa}|${fecha}`, { id: randomUUID(), terminadoEn: `${fecha}T11:05:00.000Z`, aprobado, fallas: aprobado ? 0 : 1, criticas: aprobado ? 0 : 1, usuario: { email, nombre } });
 const mantenimientoSimulado = http.createServer((req, res) => {
@@ -57,6 +57,7 @@ const mantenimientoSimulado = http.createServer((req, res) => {
       return json(200, { placa: m[1], activoId: '0f0e0d0c-0b0a-5908-8706-' + Buffer.from(m[1]).toString('hex').padEnd(12, '0').slice(0, 12), fecha: u.searchParams.get('fecha'),
         realizados: ultimo ? 1 : 0, aprobado: !!ultimo?.aprobado, ultimo, disponibilidad: { apto: true, estadoOperativo: 'OPERATIVO', motivos: [] } });
     }
+    if (req.method === 'GET' && u.pathname === '/api/v1/mto/integraciones/terrygo/flota') return json(200, { generado: new Date().toISOString(), vehiculos: mtoSim.flota });
     if (req.method === 'POST' && u.pathname === '/api/v1/mto/integraciones/terrygo/lecturas') { mtoSim.lecturas.push(JSON.parse(b || '{}')); return json(201, { id: randomUUID(), valida: true }); }
     json(404, { mensaje: 'Ruta no simulada' });
   });
@@ -700,22 +701,45 @@ prueba('…el detalle trae cada ítem con su grupo y el crítico no aprobado', r
   && r.json.respuestas.some((x) => x.resultado === 'NO_OK' && x.elemento.critico), JSON.stringify(r.json).slice(0, 200));
 r = await llamar('GET', '/inspecciones?desde=2026-11-01&hasta=2026-12-31&resultado=no-aprobada', { token: T });
 prueba('…y filtra por resultado', r.status === 200 && r.json.total >= 1 && r.json.filas.every((p) => p.aprobado === false), JSON.stringify(r.json).slice(0, 200));
-r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'xyz-987', tipo: 'Furgón RESPEL', capacidad: 3500, unidadCap: 'KG', soatVence: fechaEn(20), rtmVence: fechaEn(200), polizaRcVence: fechaEn(300) } });
-const vehNuevo = r.json;
-prueba('flota: crear un vehículo normaliza la placa (xyz-987 → XYZ987)', r.status === 201 && vehNuevo.placa === 'XYZ987', JSON.stringify(r.json).slice(0, 200));
-r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'XYZ987', tipo: 'Furgón', capacidad: 1 } });
-prueba('…no repite una placa', r.status === 400 && /ya está registrada/.test(r.json.mensaje), JSON.stringify(r.json));
-r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: '12', tipo: 'Furgón', capacidad: 1 } });
-prueba('…y valida el formato de la placa', r.status === 400, JSON.stringify(r.json));
+// Flota única (gerencia, 21-11-2026): los vehículos propios nacen en Mantenimiento y llegan solos; aquí solo los contratados
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'xyz-987', tipo: 'Furgón RESPEL', capacidad: 3500, unidadCap: 'KG' } });
+prueba('flota única: un vehículo propio no se crea en Residuos (se crea en Mantenimiento) → 409', r.status === 409 && /Mantenimiento/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+const vehMto = (soat, activo = true) => ({ placa: 'XYZ987', nombre: 'Chevrolet NPR furgón', activo, estadoOperativo: activo ? 'OPERATIVO' : 'DADO_DE_BAJA', fechaBaja: null, marca: 'Chevrolet', linea: 'NPR',
+  modelo: 2022, clase: 'CAMIÓN', carroceria: 'FURGÓN', tipo: 'Furgón RESPEL', capacidad: 3500, unidadCapacidad: 'KG', apto: true, hallazgosCriticos: 0,
+  documentos: { SOAT: { vence: soat, estado: 'VIGENTE' }, RTM: { vence: fechaEn(200), estado: 'VIGENTE' }, POLIZA_RCE: { vence: fechaEn(300), estado: 'VIGENTE' } }, actualizado: new Date().toISOString() });
+mtoSim.flota = [vehMto(fechaEn(20))];
+r = await llamar('POST', '/vehiculos/sincronizar-mantenimiento', { token: T });
+prueba('…llega desde Mantenimiento al sincronizar, con su hoja de vida', r.status === 200 && r.json.creados >= 1, JSON.stringify(r.json));
+const vehNuevo = (await llamar('GET', '/vehiculos', { token: T })).json.find((v) => v.placa === 'XYZ987');
+prueba('…con marca, tipo, capacidad, documentos y estado de Mantenimiento', !!vehNuevo && vehNuevo.marca === 'Chevrolet' && Number(vehNuevo.capacidad) === 3500 && vehNuevo.mtoEstado === 'OPERATIVO' && vehNuevo.mtoApto === true && !!vehNuevo.mtoSincronizadoEn, JSON.stringify(vehNuevo).slice(0, 300));
+r = await llamar('POST', '/vehiculos/sincronizar-mantenimiento', { token: T });
+prueba('…sincronizar otra vez no lo duplica', r.status === 200 && r.json.creados === 0 && (await db.vehiculo.count({ where: { placa: 'XYZ987' } })) === 1, JSON.stringify(r.json));
 r = await llamar('POST', '/vehiculos', { token: thseq, cuerpo: { placa: 'XYZ988', tipo: 'Furgón', capacidad: 1 } });
 prueba('…lo crea quien programa rutas (HSEQ no) → 403', r.status === 403, String(r.status));
 r = await llamar('GET', '/alertas', { token: T });
-prueba('el SOAT que vence en 20 días sale en las alertas', r.status === 200 && r.json.some((x) => x.tipo === 'flota' && x.titulo.startsWith('XYZ987') && /SOAT/.test(x.titulo)), JSON.stringify(r.json.filter?.((x) => x.tipo === 'flota')).slice(0, 300));
+prueba('el SOAT que vence en 20 días (según Mantenimiento) sale en las alertas', r.status === 200 && r.json.some((x) => x.tipo === 'flota' && x.titulo.startsWith('XYZ987') && /SOAT/.test(x.titulo)), JSON.stringify(r.json.filter?.((x) => x.tipo === 'flota')).slice(0, 300));
 r = await llamar('PATCH', `/vehiculos/${vehNuevo.id}`, { token: T, cuerpo: { soatVence: fechaEn(365) } });
+prueba('…el SOAT no se edita en Residuos: se renueva en Mantenimiento (no se duplica) → 409', r.status === 409 && /Mantenimiento/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/vehiculos/${vehNuevo.id}`, { token: T, cuerpo: { color: '#123456', volumenM3: 12 } });
+prueba('…el color y el volumen sí son de Residuos', r.status === 200 && r.json.color === '#123456', JSON.stringify(r.json).slice(0, 200));
+mtoSim.flota = [vehMto(fechaEn(365))];
+await llamar('POST', '/vehiculos/sincronizar-mantenimiento', { token: T });
 const alertasFlota = await llamar('GET', '/alertas', { token: T });
-prueba('…al registrar el SOAT renovado, la alerta desaparece', r.status === 200 && !alertasFlota.json.some((x) => x.titulo.startsWith('XYZ987')), JSON.stringify(r.json).slice(0, 200));
-r = await llamar('PATCH', `/vehiculos/${vehNuevo.id}`, { token: T, cuerpo: { activo: false } });
-const audVeh = await db.auditoria.findFirst({ where: { entidad: 'vehiculo', entidadId: vehNuevo.id, accion: 'INACTIVAR' } });
+prueba('…al renovar el SOAT en Mantenimiento, la alerta desaparece en Residuos', !alertasFlota.json.some((x) => x.titulo.startsWith('XYZ987')), JSON.stringify(alertasFlota.json.filter?.((x) => x.tipo === 'flota')).slice(0, 200));
+mtoSim.flota = [vehMto(fechaEn(365), false)];
+await llamar('POST', '/vehiculos/sincronizar-mantenimiento', { token: T });
+prueba('…dado de baja en Mantenimiento, queda inactivo en Residuos (no se borra)', (await db.vehiculo.findUnique({ where: { placa: 'XYZ987' } }))?.activo === false);
+// Los de transportadores contratados siguen siendo de Residuos
+const transp = await db.proveedor.create({ data: { empresaId: vehNuevo.empresaId, nit: '900777555', razonSocial: 'Transportes Aliados E2E', esDestino: false, esTransportador: true } });
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'xyz-986', tipo: 'Volqueta', capacidad: 8000, unidadCap: 'KG', proveedorId: transp.id, soatVence: fechaEn(200) } });
+const vehContratado = r.json;
+prueba('un vehículo contratado sí se crea en Residuos y normaliza la placa (xyz-986 → XYZ986)', r.status === 201 && vehContratado.placa === 'XYZ986', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: 'XYZ986', tipo: 'Furgón', capacidad: 1, proveedorId: transp.id } });
+prueba('…no repite una placa', r.status === 400 && /ya está registrada/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('POST', '/vehiculos', { token: T, cuerpo: { placa: '12', tipo: 'Furgón', capacidad: 1, proveedorId: transp.id } });
+prueba('…y valida el formato de la placa', r.status === 400, JSON.stringify(r.json));
+r = await llamar('PATCH', `/vehiculos/${vehContratado.id}`, { token: T, cuerpo: { activo: false } });
+const audVeh = await db.auditoria.findFirst({ where: { entidad: 'vehiculo', entidadId: vehContratado.id, accion: 'INACTIVAR' } });
 prueba('inactivar un vehículo no lo borra y queda en la auditoría', r.status === 200 && r.json.activo === false && !!audVeh, JSON.stringify(r.json).slice(0, 200));
 
 console.log('\n5. Roles y permisos');

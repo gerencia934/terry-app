@@ -1,12 +1,13 @@
 import {
   BadRequestException, Body, Controller, Get, Injectable, Logger, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors,
-  type OnApplicationBootstrap, type OnModuleDestroy,
+  type OnApplicationBootstrap, type OnModuleDestroy, ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EstadoPermiso, UnidadMedida } from '@prisma/client';
 import { z } from 'zod';
 import { Notificaciones } from '../notificaciones/notificaciones.module';
+import { CAMPOS_DE_MANTENIMIENTO, MantenimientoCliente, MantenimientoModule } from '../mantenimiento/mantenimiento.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Correo } from '../common/servicios';
 import type { Config } from '../config';
@@ -88,7 +89,8 @@ export interface Alerta { tipo: 'cumplimiento' | 'flota' | 'personal' | 'operaci
 
 @Injectable()
 class CumplimientoService {
-  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly gps: GpsService, private readonly comercial: ComercialService) {}
+  constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly gps: GpsService, private readonly comercial: ComercialService,
+    private readonly mto: MantenimientoCliente) {}
 
   /** Disposiciones de la empresa por código (para ligar un acto o un gestor a lo que ampara). */
   private async disposicionesPorCodigo(a: Actor, codigos: string[], soloDeAliados = false) {
@@ -373,6 +375,10 @@ class CumplimientoService {
   }
   async crearVehiculo(a: Actor, b: z.infer<typeof CrearVehiculo>) {
     await this.validarTransportador(a, b.proveedorId);
+    // Flota única: los vehículos propios nacen en Mantenimiento (hoja de vida) y llegan solos; aquí solo los contratados
+    if (!b.proveedorId && this.mto.conectado) {
+      throw new ConflictException({ mensaje: 'Los vehículos propios se crean en Mantenimiento (Configuración → Vehículos y equipos) y llegan solos a Residuos. Aquí solo se registran los de transportadores contratados.' });
+    }
     if (await this.db.vehiculo.findUnique({ where: { placa: b.placa } })) throw new BadRequestException({ mensaje: `La placa ${b.placa} ya está registrada.` });
     const v = await this.db.vehiculo.create({ data: { ...b, empresaId: a.empresaId } });
     await this.audit.registrar(a, 'vehiculo', v.id, 'CREAR', undefined, v);
@@ -383,6 +389,11 @@ class CumplimientoService {
     const v = await this.db.vehiculo.findFirst({ where: { id, empresaId: a.empresaId } });
     if (!v) throw new NotFoundException({ mensaje: 'Vehículo no encontrado.' });
     await this.validarTransportador(a, b.proveedorId);
+    if (v.mtoSincronizadoEn && !v.proveedorId) {
+      const bloqueados = CAMPOS_DE_MANTENIMIENTO.filter((k) => b[k] !== undefined);
+      if (bloqueados.length) throw new ConflictException({ mensaje: `Marca, tipo, capacidad, documentos y estado de ${v.placa} se actualizan en su hoja de vida en Mantenimiento y llegan solos (no se duplican aquí). Aquí solo cambian el color y el volumen.`, campos: bloqueados });
+      if (b.proveedorId) throw new ConflictException({ mensaje: `${v.placa} es un vehículo propio registrado en Mantenimiento: no se puede marcar como contratado.` });
+    }
     const r = await this.db.vehiculo.update({ where: { id }, data: b });
     await this.audit.registrar(a, 'vehiculo', id, b.activo === false && v.activo ? 'INACTIVAR' : 'EDITAR',
       { soatVence: v.soatVence, rtmVence: v.rtmVence, polizaRcVence: v.polizaRcVence, activo: v.activo, capacidad: v.capacidad }, b);
@@ -536,5 +547,5 @@ class CumplimientoController {
   }
 }
 
-@Module({ controllers: [CumplimientoController], providers: [CumplimientoService, ResumenDiario] })
+@Module({ imports: [MantenimientoModule], controllers: [CumplimientoController], providers: [CumplimientoService, ResumenDiario] })
 export class CumplimientoModule {}

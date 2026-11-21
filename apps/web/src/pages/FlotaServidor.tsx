@@ -2,7 +2,7 @@
 // - Inspecciones: vista de oficina de los preoperacionales que diligencian los conductores en la app de campo.
 // - Flota: vehículos con sus vencimientos (SOAT, revisión técnico-mecánica, póliza), crear y editar; nada se borra.
 import { useState, type FormEvent } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Loader2, Pencil, Plus, RefreshCw, Satellite, Smartphone, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Loader2, Pencil, Plus, RefreshCw, Satellite, Smartphone, XCircle, Wrench } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, Card, ColorBadge, DefList, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { api, ErrorApi, tienePermiso } from '../lib/api';
@@ -14,7 +14,12 @@ import { hace, type EstadoGps } from '../components/gps';
 interface Vehiculo {
   id: string; placa: string; marca: string | null; color: string; tipo: string; capacidad: string; unidadCap: string; volumenM3: string | null; activo: boolean;
   soatVence: string | null; rtmVence: string | null; polizaRcVence: string | null; proveedor: { id: string; razonSocial: string } | null;
+  mtoSincronizadoEn: string | null; mtoEstado: string | null; mtoApto: boolean | null;
 }
+/** Flota única: los vehículos propios vienen de Mantenimiento (hoja de vida); aquí solo los contratados y lo operativo. */
+interface EstadoMto { conectado: boolean; web: string | null; ultima: { en: string; resultado: { creados: number; actualizados: number; soloEnResiduos: string[]; deTransportador: string[] } } | null }
+const deMto = (v?: Vehiculo) => !!v?.mtoSincronizadoEn && !v.proveedor;
+const ESTADO_MTO: Record<string, string> = { OPERATIVO: 'Operativo', RESTRINGIDO: 'Restringido', EN_TALLER: 'En taller', FUERA_SERVICIO: 'Fuera de servicio', DADO_DE_BAJA: 'Dado de baja' };
 interface Inspeccion {
   id: string; numero: string; fechaProgramada: string; fechaReal: string | null; aprobado: boolean | null; km: number | null; observaciones: string | null;
   vehiculo: { placa: string; color: string; tipo: string }; conductor: { nombre: string }; auxiliar: { nombre: string } | null; ruta: { codigo: string } | null; _count: { respuestas: number };
@@ -141,6 +146,17 @@ export function FlotaServidor() {
   const toast = useToast();
   const puede = tienePermiso('rutas.programar');
   const vehiculos = useApi<Vehiculo[]>('/vehiculos');
+  const mto = useApi<EstadoMto>('/vehiculos/mantenimiento');
+  const conMto = !!mto.datos?.conectado;
+  const [sincronizando, setSincronizando] = useState(false);
+  const sincronizar = async () => {
+    setSincronizando(true);
+    try {
+      const r = await api<{ creados: number; actualizados: number; soloEnResiduos: string[]; deTransportador: string[] }>('/vehiculos/sincronizar-mantenimiento', { cuerpo: {} });
+      toast(`Flota al día con Mantenimiento: ${r.creados} nuevo(s), ${r.actualizados} actualizado(s).${r.soloEnResiduos.length ? ` Propios que Mantenimiento no tiene: ${r.soloEnResiduos.join(', ')}.` : ''}`, 'ok');
+    } catch (e) { toast(mensajeError(e, 'No se pudo leer la flota de Mantenimiento.'), 'warn'); }
+    vehiculos.recargar(); mto.recargar(); setSincronizando(false);
+  };
   const [panel, setPanel] = useState<null | { id?: string }>(null);
   // GPS de Wialon: estado de la conexión, unidades de la cuenta y la unidad de cada vehículo
   const gps = useApi<EstadoGps>(puede ? '/gps/estado' : null);
@@ -173,12 +189,24 @@ export function FlotaServidor() {
         ? <span className="block max-w-[180px] text-[13px]"><span className="block truncate">{x.unidadNombre ?? `Unidad ${x.unidadId}`}</span><span className="text-[12px] text-muted">{x.posicion ? `Posición ${hace(x.posicion.posicionEn)}` : 'Sin posición todavía'}</span></span>
         : <Badge tone="neutral">Sin enlazar</Badge>;
     } } as Column<Vehiculo>] : []),
-    { key: 'e', header: 'Estado', render: (v) => <Badge tone={v.activo ? 'ok' : 'neutral'}>{v.activo ? 'Activo' : 'Inactivo'}</Badge>, priority: 2 },
+    { key: 'e', header: 'Estado', render: (v) => <span className="flex flex-wrap gap-1"><Badge tone={v.activo ? 'ok' : 'neutral'}>{v.activo ? 'Activo' : 'Inactivo'}</Badge>
+      {deMto(v) && v.mtoEstado && v.mtoEstado !== 'OPERATIVO' && <Badge tone="warn">{ESTADO_MTO[v.mtoEstado] ?? v.mtoEstado}</Badge>}
+      {deMto(v) && v.mtoApto === false && v.activo && <Badge tone="bad">No apto</Badge>}</span>, priority: 2 },
+    ...(conMto ? [{ key: 'o', header: 'Hoja de vida', priority: 1, render: (v: Vehiculo) => (deMto(v) ? <Badge tone="info">Mantenimiento</Badge> : v.proveedor ? <span className="text-[12px] text-muted">Contratado</span> : <Badge tone="warn">Falta en Mantenimiento</Badge>) } as Column<Vehiculo>] : []),
   ];
   return (
     <>
       <PageHeader eyebrow="Ajustes" title="Flota" subtitle="Vehículos con su color en la programación y el control de vencimientos: el sistema avisa 30 días antes. Nada se borra: un vehículo se inactiva."
-        actions={<><Button onClick={() => go('importar')}>Importar</Button>{puede && <Button variant="primary" onClick={() => setPanel({})}><Plus size={16} /> Nuevo vehículo</Button>}</>} />
+        actions={<>{!conMto && <Button onClick={() => go('importar')}>Importar</Button>}{puede && <Button variant="primary" onClick={() => setPanel({})}><Plus size={16} /> {conMto ? 'Vehículo contratado' : 'Nuevo vehículo'}</Button>}</>} />
+      {conMto && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-brand-soft px-4 py-2.5 text-[13px] text-fg">
+          <span className="flex items-start gap-2"><Wrench size={16} className="mt-px shrink-0 text-brand" />
+            <span>Los vehículos propios vienen de su hoja de vida en Mantenimiento (marca, tipo, capacidad, documentos y estado) y se actualizan solos cada 30 minutos. Aquí se registran los de transportadores contratados y el color, el volumen y el GPS.
+              {mto.datos?.ultima && <span className="block text-muted">Última lectura: {hace(mto.datos.ultima.en)}.</span>}</span></span>
+          <span className="flex gap-2">{mto.datos?.web && <a className="text-[13px] font-medium text-brand underline" href={mto.datos.web} target="_blank" rel="noreferrer">Abrir Mantenimiento</a>}
+            {puede && <Button size="sm" disabled={sincronizando} onClick={sincronizar}><RefreshCw size={14} className={sincronizando ? 'animate-spin' : ''} /> Sincronizar ahora</Button>}</span>
+        </div>
+      )}
       {g && (() => {
         const enlazados = g.vehiculos.filter((v) => v.unidadId).length;
         const tono = g.conectado ? 'bg-ok/10 text-ok' : g.ultimoOk || g.fallosSeguidos ? 'bg-warn/10 text-warn' : 'bg-surface-2 text-muted';
@@ -199,13 +227,15 @@ export function FlotaServidor() {
             cardTitle={(v) => <span className="num">{v.placa} · {v.tipo}</span>} cardBadge={(v) => <Badge tone={v.activo ? 'ok' : 'neutral'}>{v.activo ? 'Activo' : 'Inactivo'}</Badge>}
             cardMeta={(v) => `SOAT ${fecha(v.soatVence)} · RTM ${fecha(v.rtmVence)}`} empty="No hay vehículos. Créelos aquí o impórtelos desde Excel." />}
       <Sheet open={!!panel} onClose={() => setPanel(null)} title={panel?.id ? 'Editar vehículo' : 'Nuevo vehículo'}>
-        {panel && <FormVehiculo v={panel.id ? vehiculos.datos?.find((x) => x.id === panel.id) : undefined} gps={g} listo={() => { setPanel(null); vehiculos.recargar(); gps.recargar(); }} />}
+        {panel && <FormVehiculo v={panel.id ? vehiculos.datos?.find((x) => x.id === panel.id) : undefined} gps={g} conMto={conMto} listo={() => { setPanel(null); vehiculos.recargar(); gps.recargar(); }} />}
       </Sheet>
     </>
   );
 }
 
-function FormVehiculo({ v, gps, listo }: { v?: Vehiculo; gps?: EstadoGps | null; listo: () => void }) {
+function FormVehiculo({ v, gps, conMto, listo }: { v?: Vehiculo; gps?: EstadoGps | null; conMto: boolean; listo: () => void }) {
+  const soloLectura = deMto(v); // la hoja de vida manda: aquí solo color, volumen y GPS
+  const soloContratado = conMto && !v; // con Mantenimiento conectado, aquí solo se crean los de transportadores
   const toast = useToast();
   const actual = v ? gps?.vehiculos.find((x) => x.id === v.id) : undefined;
   const unidadAntes = actual?.unidadId ? String(actual.unidadId) : '';
@@ -220,13 +250,15 @@ function FormVehiculo({ v, gps, listo }: { v?: Vehiculo; gps?: EstadoGps | null;
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
     const capacidad = Number(x.capacidad.replace(',', '.')), volumen = x.volumenM3.trim() ? Number(x.volumenM3.replace(',', '.')) : null;
-    if (!(capacidad > 0)) { toast('Escriba la capacidad (un número mayor que cero).', 'warn'); return; }
+    if (!soloLectura && !(capacidad > 0)) { toast('Escriba la capacidad (un número mayor que cero).', 'warn'); return; }
+    if (soloContratado && !x.proveedorId) { toast('Elija el transportador: los vehículos propios se crean en Mantenimiento.', 'warn'); return; }
     setEnviando(true);
-    const datos = { marca: x.marca, tipo: x.tipo, capacidad, unidadCap: x.unidadCap, volumenM3: volumen, color: x.color, proveedorId: x.proveedorId || null, soatVence: x.soatVence, rtmVence: x.rtmVence, polizaRcVence: x.polizaRcVence };
+    const datos = soloLectura ? { volumenM3: volumen, color: x.color }
+      : { marca: x.marca, tipo: x.tipo, capacidad, unidadCap: x.unidadCap, volumenM3: volumen, color: x.color, proveedorId: x.proveedorId || null, soatVence: x.soatVence, rtmVence: x.rtmVence, polizaRcVence: x.polizaRcVence };
     try {
-      if (v) await api(`/vehiculos/${v.id}`, { metodo: 'PATCH', cuerpo: { ...datos, activo: x.activo } });
+      if (v) await api(`/vehiculos/${v.id}`, { metodo: 'PATCH', cuerpo: soloLectura ? datos : { ...datos, activo: x.activo } });
       if (v && gps && unidad !== unidadAntes) await api(`/vehiculos/${v.id}/wialon`, { metodo: 'PATCH', cuerpo: { unidadId: unidad ? Number(unidad) : null } });
-      else await api('/vehiculos', { metodo: 'POST', cuerpo: { ...datos, placa: x.placa } });
+      if (!v) await api('/vehiculos', { metodo: 'POST', cuerpo: { ...datos, placa: x.placa } });
       toast(v ? (v.activo && !x.activo ? `${v.placa} inactivo: ya no se ofrece para programar rutas.` : 'Vehículo actualizado.') : 'Vehículo creado.');
       listo();
     } catch (err) { toast(mensajeError(err, 'No se pudo guardar.'), 'warn'); }
@@ -235,22 +267,29 @@ function FormVehiculo({ v, gps, listo }: { v?: Vehiculo; gps?: EstadoGps | null;
   return (
     <form onSubmit={guardar} className="flex flex-col gap-4">
       {v ? <p className="text-[13px] text-muted">Placa <span className="num font-medium text-fg">{v.placa}</span>: no cambia.</p>
-        : <Field label="Placa" id="fv-p"><Input id="fv-p" value={x.placa} onChange={(e) => setX((s) => ({ ...s, placa: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) }))} placeholder="ABC123" required /></Field>}
+        : <>{soloContratado && <p className="rounded-lg bg-brand-soft px-3 py-2 text-[13px] text-fg">Aquí se registran los vehículos de transportadores contratados. Los propios se crean en Mantenimiento (Configuración → Vehículos y equipos) y llegan solos.</p>}<Field label="Placa" id="fv-p"><Input id="fv-p" value={x.placa} onChange={(e) => setX((s) => ({ ...s, placa: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) }))} placeholder="ABC123" required /></Field></>}
+      {soloLectura && <p className="rounded-lg bg-brand-soft px-3 py-2 text-[13px] text-fg">Marca, tipo, capacidad, documentos y estado vienen de la hoja de vida en Mantenimiento{v?.mtoEstado ? ` (hoy: ${ESTADO_MTO[v.mtoEstado] ?? v.mtoEstado}${v.mtoApto === false ? ', no apto' : ''})` : ''}. Cámbielos allá; aquí solo el color, el volumen y el GPS.</p>}
+      <fieldset disabled={soloLectura} className="contents">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Tipo" id="fv-t"><Input id="fv-t" list="fv-tipos" value={x.tipo} onChange={set('tipo')} maxLength={40} required /></Field>
         <datalist id="fv-tipos">{TIPOS.map((t) => <option key={t} value={t} />)}</datalist>
         <Field label="Marca" id="fv-m"><Input id="fv-m" value={x.marca} onChange={set('marca')} maxLength={40} /></Field>
         <Field label="Capacidad" id="fv-c"><Input id="fv-c" inputMode="decimal" value={x.capacidad} onChange={set('capacidad')} required /></Field>
         <Field label="Unidad" id="fv-u"><Select id="fv-u" value={x.unidadCap} onChange={set('unidadCap')}>{Object.entries(UNIDAD).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
+      </div>
+      </fieldset>
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Volumen (m³)" id="fv-vol"><Input id="fv-vol" inputMode="decimal" value={x.volumenM3} onChange={set('volumenM3')} /></Field>
         <Field label="Color en la programación" id="fv-col"><Input id="fv-col" type="color" value={x.color} onChange={set('color')} className="p-1" /></Field>
       </div>
-      <Field label="Propietario" id="fv-pr" hint="Un vehículo de un transportador tercero cobra flete."><Select id="fv-pr" value={x.proveedorId} onChange={set('proveedorId')}><option value="">Propio de Terra Viva</option>{(transportadores.datos ?? []).map((t) => <option key={t.id} value={t.id}>{t.razonSocial}</option>)}</Select></Field>
+      <fieldset disabled={soloLectura} className="contents">
+      <Field label="Propietario" id="fv-pr" hint="Un vehículo de un transportador tercero cobra flete."><Select id="fv-pr" value={x.proveedorId} onChange={set('proveedorId')}>{!soloContratado && <option value="">Propio de Terra Viva</option>}{soloContratado && <option value="">Elija el transportador…</option>}{(transportadores.datos ?? []).map((t) => <option key={t.id} value={t.id}>{t.razonSocial}</option>)}</Select></Field>
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="SOAT vence" id="fv-s"><Input id="fv-s" type="date" value={x.soatVence} onChange={set('soatVence')} /></Field>
         <Field label="Técnico-mecánica vence" id="fv-r"><Input id="fv-r" type="date" value={x.rtmVence} onChange={set('rtmVence')} /></Field>
         <Field label="Póliza RC vence" id="fv-po"><Input id="fv-po" type="date" value={x.polizaRcVence} onChange={set('polizaRcVence')} /></Field>
       </div>
+      </fieldset>
       {v && gps && (
         <Field label="Unidad de Wialon (GPS)" id="fv-w" hint="Se enlaza sola si el nombre de la unidad en Wialon trae la placa; si no, elíjala aquí.">
           <Select id="fv-w" value={unidad} onChange={(e) => setUnidad(e.target.value)}>
@@ -264,7 +303,7 @@ function FormVehiculo({ v, gps, listo }: { v?: Vehiculo; gps?: EstadoGps | null;
           </Select>
         </Field>
       )}
-      {v && (
+      {v && !soloLectura && (
         <label className="flex items-start gap-2 rounded-lg border border-line p-3 text-[13px]">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={x.activo} onChange={(e) => setX((s) => ({ ...s, activo: e.target.checked }))} />
           <span><span className="font-medium">Vehículo activo</span><br /><span className="text-muted">Inactivo no se borra: deja de ofrecerse para programar rutas y sale de las alertas.</span></span>

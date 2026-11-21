@@ -68,9 +68,9 @@ Todo módulo, de los actuales o de los que vengan, cumple estos siete estándare
    |---|---|---|
    | Cuenta de la persona y su entrada | Portal | Todos |
    | Colaboradores, cargos, licencias de conducción, certificaciones y exámenes | HSEQ y Talento Humano | Residuos (conductores), Mtto (PESV) |
-   | Vehículos y equipos: hoja de vida, SOAT, RTM, pólizas, capacidad y GPS | Mtto | Residuos (flota de las rutas) |
+   | Vehículos y equipos: hoja de vida, SOAT, RTM, pólizas, capacidad y GPS | Mtto | Residuos (flota de las rutas: copia de solo lectura que se refresca cada 30 min; los vehículos de transportadores contratados sí son de Residuos) |
    | Preoperacionales y fallas | Mtto | Residuos (Portal Logístico) |
-   | Clientes, contactos y oportunidades | Por acordar con el CRM | Residuos, CRM |
+   | Prospectos, clientes, contactos y oportunidades | CRM (decisión de la gerencia, 21-11-2026) | Residuos (aviso «trato ganado») |
    | Servicios, rutas, manifiestos y certificados | Residuos | CRM (historial del cliente), Planta |
 
 6. **Los ajustes se editan sin tocar código.**
@@ -135,6 +135,7 @@ pase y abre ese módulo. Si la cuenta no tiene acceso, se queda en el menú.
 | Ítems NO OK del preoperacional | Residuos → Mantenimiento | Retirado el 21-11-2026: el preoperacional ya se hace en Mantenimiento |
 | Kilómetros de una ruta o tanqueo | Residuos → Mantenimiento | `POST /api/v1/mto/integraciones/terrygo/lecturas` |
 | Coordenadas de la sede (check-in comercial) | CRM → Residuos | (se define con el CRM) |
+| Flota única (hoja de vida de los vehículos propios) | Mantenimiento → Residuos | Residuos lee `GET /api/v1/mto/integraciones/terrygo/flota` cada 30 min y con «Sincronizar ahora» |
 | Vehículo que llega a planta (F-09) | Residuos → Planta | (se define con Planta) |
 
 Los contratos con Mantenimiento ya existen de su lado (ver su `docs/DESPLIEGUE.md`). Cada integración se autentica con
