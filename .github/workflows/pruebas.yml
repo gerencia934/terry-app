@@ -44,9 +44,9 @@ jobs:
       ADMIN_DB_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_ci
       TZ: America/Bogota
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -184,9 +184,9 @@ jobs:
       # Base desechable del contenedor de pruebas (no son credenciales reales)
       ADMIN_DB_URL: postgresql://terraviva:terraviva@localhost:5432/terraviva_ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
