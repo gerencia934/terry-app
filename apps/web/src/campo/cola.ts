@@ -72,7 +72,8 @@ export function procesar(): Promise<void> {
           }
           await tx('readwrite', (s) => s.delete(op.id!));
         } catch (e) {
-          if (e instanceof ErrorApi && e.status === 0) return; // sin señal: se reintenta después
+          // Sin señal o servidor encendiéndose (la sesión sigue): se reintenta después, sin marcarlo como fallido
+          if (e instanceof ErrorApi && [0, 502, 503, 504].includes(e.status)) return;
           const mensaje = e instanceof Error ? e.message : 'Error desconocido';
           await tx('readwrite', (s) => s.put({ ...op, intentos: op.intentos + 1, error: mensaje }));
           bloqueados.add(op.grupo);

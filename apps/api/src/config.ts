@@ -10,7 +10,7 @@ const Esquema = z.object({
   WEB_URL: z.string().default('http://localhost:5173'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres'),
   JWT_ACCESS_MIN: z.coerce.number().default(15),
-  REFRESH_DIAS: z.coerce.number().default(30),
+  REFRESH_DIAS: z.coerce.number().int().min(1).max(730).default(365), // estándar 1 del ERP: un año sin uso (se cambia en Ajustes)
   SMTP_HOST: z.string().optional().default(''),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(''),

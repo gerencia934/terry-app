@@ -1080,18 +1080,34 @@ prueba('…ni por ID directo → 404', r.status === 404);
 console.log('\n7. Sesiones');
 r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R } });
 prueba('renovar entrega tokens nuevos', r.status === 200 && r.json.refreshToken !== R);
-const R2 = r.json.refreshToken, T2 = r.json.accessToken;
+const R2 = r.json.refreshToken;
+// Estándar 1 del ERP: si la respuesta se perdió (señal del celular, servidor reiniciando), el token anterior recupera la sesión
 r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R } });
-prueba('reutilizar un token viejo → 401 y cierra todas las sesiones', r.status === 401 && /cerraron/.test(r.json.mensaje));
-r = await llamar('GET', '/auth/yo', { token: T2 });
-prueba('…el token de acceso de esa sesión deja de servir', r.status === 401);
-r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R2 } });
+const R3 = r.json.refreshToken;
+prueba('si se perdió la respuesta, el token anterior recupera la sesión (su reemplazo nunca se usó) y queda en la auditoría',
+  r.status === 200 && !!R3 && R3 !== R2 && !!(await db.auditoria.findFirst({ where: { accion: 'SESION_RECUPERADA' } })), JSON.stringify(r.json).slice(0, 200));
+const sesR3 = await db.sesion.findUnique({ where: { id: R3.split('.')[0] } });
+prueba('…la sesión queda abierta un año sin uso (estándar 1 del ERP)', !!sesR3 && sesR3.expiraEn.getTime() - Date.now() > 360 * 86_400_000, String(sesR3?.expiraEn));
+r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R3 } });
+const R4 = r.json.refreshToken, T4 = r.json.accessToken;
+r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R } });
+prueba('otra pestaña renovó hace menos de 60 s → 401 YA_RENOVADA, sin cerrar nada', r.status === 401 && r.json.codigo === 'YA_RENOVADA'
+  && (await llamar('GET', '/auth/yo', { token: T4 })).status === 200, JSON.stringify(r.json));
+await db.sesion.update({ where: { id: R.split('.')[0] }, data: { revocadaEn: new Date(Date.now() - 120_000) } });
+r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R } });
+prueba('pasado ese margen, un token viejo cuyo reemplazo ya se usó → 401 y cierra todas las sesiones (posible robo)', r.status === 401 && /cerraron/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('GET', '/auth/yo', { token: T4 });
+prueba('…el token de acceso de la sesión vigente deja de servir', r.status === 401);
+r = await llamar('POST', '/auth/renovar', { cuerpo: { refreshToken: R4 } });
 prueba('…y el token de renovación más reciente también', r.status === 401);
 for (let i = 0; i < 5; i++) await llamar('POST', '/auth/login', { cuerpo: { email: conductor.email, clave: 'mala' } });
 r = await llamar('POST', '/auth/login', { cuerpo: { email: conductor.email, clave: 'Conductor2026!' } });
 prueba('5 intentos fallidos bloquean la cuenta 15 minutos → 403', r.status === 403 && /bloqueada/.test(r.json.mensaje));
 r = await llamar('POST', '/auth/recuperar', { cuerpo: { email: 'no-existe@x.com' } });
 prueba('recuperar responde igual aunque el correo no exista (202)', r.status === 202);
+r = await llamar('POST', '/auth/recuperar', { cuerpo: { email: conductor.email } });
+const pidio = await db.usuario.findUnique({ where: { email: conductor.email }, select: { id: true, restablecerPedidoEn: true } });
+prueba('«Olvidé mi contraseña» sin correo de salida: la solicitud queda a la vista del administrador (estándar 2 del ERP)', r.status === 202 && !!pidio?.restablecerPedidoEn);
 
 console.log('\n8. Núcleo operativo: de la solicitud al certificado');
 // La sección 7 cerró las sesiones del administrador: se entra de nuevo. El ingreso tiene límite de
@@ -1102,6 +1118,15 @@ for (let intento = 0; intento < 20 && !T8; intento++) {
   if (x.status === 200) T8 = x.json.accessToken; else await new Promise((ok) => setTimeout(ok, 5000));
 }
 prueba('el límite de intentos de ingreso se libera después de un minuto', !!T8);
+{
+  const lista = await llamar('GET', `/usuarios?q=${encodeURIComponent(conductor.email)}`, { token: T8 });
+  const fila = (lista.json.filas ?? lista.json.data ?? []).find?.((x) => x.id === pidio.id);
+  const enlace = await llamar('POST', `/usuarios/${pidio.id}/invitacion`, { token: T8 });
+  const atendida = await db.usuario.findUnique({ where: { id: pidio.id }, select: { restablecerPedidoEn: true } });
+  prueba('…el administrador la ve en Usuarios, envía el enlace por WhatsApp y la solicitud queda atendida',
+    !!fila?.restablecerPedidoEn && enlace.status === 200 && /#restablecer/.test(enlace.json.enlace ?? '') && !atendida.restablecerPedidoEn,
+    JSON.stringify({ fila: !!fila, pedido: fila?.restablecerPedidoEn, enlace: enlace.status, atendida: atendida.restablecerPedidoEn }));
+}
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const archivoForm = (bytes, nombre, campos = {}) => { const f = new FormData(); f.append('archivo', new Blob([bytes]), nombre); Object.entries(campos).forEach(([k, v]) => f.append(k, v)); return f; };
 /** Cola de trabajos: pide el archivo, espera a que esté listo y lo baja con su enlace firmado (sin sesión). */

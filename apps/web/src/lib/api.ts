@@ -26,7 +26,8 @@ export class ErrorApi extends Error {
 
 const CLAVE = 'tv-sesion';
 let sesion: Sesion | null = (() => { try { return JSON.parse(localStorage.getItem(CLAVE) ?? 'null'); } catch { return null; } })();
-let renovando: Promise<boolean> | null = null;
+type Renovacion = 'ok' | 'cerrada' | 'sin-red';
+let renovando: Promise<Renovacion> | null = null;
 const oyentes = new Set<(s: Sesion | null) => void>();
 
 function guardar(s: Sesion | null) {
@@ -60,33 +61,78 @@ export const tienePermiso = (p: string) => !!sesion && (sesion.usuario.permisos.
 export const moduloDe = (s: Sesion | null): 'CLIENTE' | 'CAMPO' | 'OFICINA' =>
   !s ? 'OFICINA' : s.usuario.cliente ? 'CLIENTE' : s.usuario.acceso ?? (s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'CAMPO' : 'OFICINA');
 
-async function renovar(): Promise<boolean> {
-  if (!sesion) return false;
-  const usada = sesion.refreshToken;
-  /** ¿Otra pestaña ya renovó o entró de nuevo? Entonces se usa su sesión en lugar de gastar un token ya cambiado. */
-  const adoptarOtra = () => {
-    const otra = leerGuardada();
-    if (!otra || otra.refreshToken === usada) return false;
-    sesion = otra; oyentes.forEach((f) => f(otra));
-    return true;
-  };
-  const trabajo = async () => {
-    if (adoptarOtra()) return true;
-    try {
-      const r = await fetch(`${API_URL}/auth/renovar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: usada }) });
-      if (!r.ok) { if (adoptarOtra()) return true; guardar(null); return false; }
-      guardar(await r.json()); return true;
-    } catch { return false; }
-  };
-  renovando ??= (async () => {
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** ¿Otra pestaña ya renovó o entró de nuevo? Entonces se usa su sesión en lugar de gastar un token ya cambiado. */
+function adoptarDeOtraPestana(): boolean {
+  const otra = leerGuardada();
+  if (!otra || !sesion || otra.refreshToken === sesion.refreshToken) return false;
+  sesion = otra; oyentes.forEach((f) => f(otra));
+  return true;
+}
+
+/**
+ * Renueva el token de acceso (estándar 1 del ERP Terry-App, igual que Mantenimiento). La sesión SOLO se cierra cuando el
+ * servidor confirma que ya no es válida (la persona salió, cambió la clave o un administrador la cerró). Si el servidor
+ * se está encendiendo, no hay señal o la respuesta se pierde, la sesión se conserva y se reintenta: el servidor recupera
+ * la renovación perdida. Las pestañas renuevan por turnos (Web Locks) para no gastar el mismo token dos veces.
+ */
+function renovar(): Promise<Renovacion> {
+  if (!sesion) return Promise.resolve('cerrada');
+  renovando ??= (async (): Promise<Renovacion> => {
+    const tarea = async (): Promise<Renovacion> => {
+      if (adoptarDeOtraPestana()) return 'ok';
+      for (const pausa of [0, 1500, 4000, 8000]) {
+        if (pausa) await esperar(pausa);
+        if (!sesion) return 'cerrada';
+        let r: Response;
+        try { r = await fetch(`${API_URL}/auth/renovar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: sesion.refreshToken }) }); }
+        catch { continue; } // sin señal: se reintenta
+        if (r.ok) { guardar(await r.json()); return 'ok'; }
+        if (r.status !== 401) continue; // servidor encendiéndose (503) u otro error pasajero: la sesión sigue
+        const d = (await r.json().catch(() => ({}))) as { codigo?: string };
+        if (adoptarDeOtraPestana()) return 'ok';
+        // Otra pestaña acaba de renovar: se espera a que guarde su sesión y se usa esa
+        if (d.codigo === 'YA_RENOVADA') { await esperar(1500); return adoptarDeOtraPestana() ? 'ok' : 'sin-red'; }
+        guardar(null);
+        return 'cerrada';
+      }
+      return 'sin-red';
+    };
     try {
       // Una sola pestaña renueva a la vez (Web Locks); las demás esperan y toman la sesión nueva
       const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
-      return locks ? await locks.request('tv-renovar-sesion', trabajo) : await trabajo();
-    } finally { setTimeout(() => { renovando = null; }, 0); }
+      return locks ? await locks.request('tv-renovar-sesion', tarea) : await tarea();
+    } catch { return 'sin-red'; } finally { setTimeout(() => { renovando = null; }, 0); }
   })();
   return renovando;
 }
+
+/** Segundos que le quedan al token de acceso (se leen del propio JWT). */
+function segundosRestantes(): number {
+  try {
+    const p = JSON.parse(atob(sesion!.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+    return (p.exp ?? 0) - Date.now() / 1000;
+  } catch { return 0; }
+}
+
+/**
+ * Renueva antes de que el token venza: cada minuto con la app a la vista, al volver a ella (celular en segundo plano),
+ * al recuperar la señal y al enfocar la ventana. Así nunca aparece «sesión vencida» por haber dejado la app quieta.
+ */
+function mantenerSesionViva() {
+  const revisar = () => {
+    if (!sesion || renovando || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+    if (segundosRestantes() < 240) void renovar();
+  };
+  setInterval(() => { if (document.visibilityState === 'visible') revisar(); }, 60_000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revisar(); });
+  window.addEventListener('online', revisar);
+  window.addEventListener('focus', revisar);
+  revisar();
+}
+if (MODO_REAL && typeof window !== 'undefined') mantenerSesionViva();
+
+export const RECONECTANDO = 'Reconectando con el servidor… Su sesión sigue abierta; intente de nuevo en unos segundos.';
 
 /** Llamada autenticada. Si el token venció, lo renueva una vez y reintenta. */
 export async function api<T = unknown>(ruta: string, opciones: { metodo?: string; cuerpo?: unknown; form?: FormData; blob?: boolean } = {}, reintento = true): Promise<T> {
@@ -97,10 +143,12 @@ export async function api<T = unknown>(ruta: string, opciones: { metodo?: string
   try {
     r = await fetch(`${API_URL}${ruta}`, { method: opciones.metodo ?? (opciones.cuerpo || opciones.form ? 'POST' : 'GET'), headers, body: opciones.form ?? (opciones.cuerpo !== undefined ? JSON.stringify(opciones.cuerpo) : undefined) });
   } catch {
-    throw new ErrorApi(0, 'No hay conexión con el servidor. Verifique que el API esté encendido y la dirección en VITE_API_URL.');
+    throw new ErrorApi(0, 'Sin conexión con el servidor. Revise la señal: su sesión sigue abierta.');
   }
   if (r.status === 401 && reintento && sesion && !ruta.startsWith('/auth/')) {
-    if (await renovar()) return api<T>(ruta, opciones, false);
+    const res = await renovar();
+    if (res === 'ok') return api<T>(ruta, opciones, false);
+    if (res === 'sin-red') throw new ErrorApi(503, RECONECTANDO);
   }
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));

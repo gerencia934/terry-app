@@ -176,6 +176,27 @@ test('administración: crear una cuenta con acceso solo a Residuos', async () =>
   assert.equal((await llamar('PATCH', `cuentas/${yoMismo.id}`, { cookie: admin.cookie, cuerpo: { esAdmin: false } })).status, 400, 'no se quita a sí mismo la administración');
 });
 
+test('la sesión dura un año sin uso y cada uso corre el plazo (estándar 1 del ERP)', async () => {
+  const id = admin.cookie.split('=')[1].split('.')[0];
+  const [s] = (await cliente.query('SELECT expira_en FROM sesiones WHERE id = $1', [id])).rows;
+  assert.ok(new Date(s.expira_en).getTime() - Date.now() > 360 * 86_400_000, 'un año');
+  await cliente.query("UPDATE sesiones SET expira_en = now() + interval '10 days' WHERE id = $1", [id]);
+  assert.equal((await llamar('GET', 'yo', { cookie: admin.cookie })).status, 200);
+  const [s2] = (await cliente.query('SELECT expira_en FROM sesiones WHERE id = $1', [id])).rows;
+  assert.ok(new Date(s2.expira_en).getTime() - Date.now() > 360 * 86_400_000, 'al usarla vuelve a un año');
+});
+
+test('olvidé mi contraseña: la solicitud aparece en Cuentas y se atiende con un enlace (estándar 2 del ERP)', async () => {
+  const r = await llamar('POST', 'olvide', { cuerpo: { email: 'operario@prueba.co' }, ip: '198.51.100.9' });
+  assert.equal(r.status, 202);
+  assert.equal((await llamar('POST', 'olvide', { cuerpo: { email: 'nadie@prueba.co' }, ip: '198.51.100.9' })).status, 202, 'igual si el correo no existe');
+  let op = (await llamar('GET', 'cuentas', { cookie: admin.cookie })).json.find((x: any) => x.email === 'operario@prueba.co');
+  assert.ok(op.restablecerPedidoEn, 'el administrador ve la solicitud');
+  assert.equal((await llamar('POST', `cuentas/${op.id}/enlace`, { cookie: admin.cookie })).status, 200);
+  op = (await llamar('GET', 'cuentas', { cookie: admin.cookie })).json.find((x: any) => x.email === 'operario@prueba.co');
+  assert.equal(op.restablecerPedidoEn, null, 'con el enlace queda atendida');
+});
+
 test('cambiar la contraseña cierra las otras sesiones', async () => {
   const otra = await llamar('POST', 'ingresar', { cuerpo: { email: 'gerencia@prueba.co', clave: 'Gerencia-2026-ok' } });
   const s2 = await llamar('POST', 'ingresar/codigo', { cuerpo: { desafio: otra.json.desafio, codigo: admin.respaldo[1] } });

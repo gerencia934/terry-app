@@ -441,6 +441,8 @@ model Usuario {
   pasesPortal             PasePortal[]
   intentosFallidos        Int                      @default(0) @map("intentos_fallidos")
   bloqueadoHasta          DateTime?                @map("bloqueado_hasta") @db.Timestamptz
+  /// «Olvidé mi contraseña» sin correo de salida: el administrador ve la solicitud y envía el enlace por WhatsApp
+  restablecerPedidoEn     DateTime?                @map("restablecer_pedido_en") @db.Timestamptz
   auditoria               Auditoria[]
   declaracionesAprobadas  Declaracion[]            @relation("DeclAprobadaPor")
   declaracionesAceptadas  Declaracion[]            @relation("DeclAceptadaPor")
@@ -488,6 +490,8 @@ model Sesion {
   viaPortal  Boolean   @default(false) @map("via_portal")
   /// Por qué se cerró: «ROTACION» al renovar (reusarla hace sospechar un robo), «REUSO», o vacío (salida, cambio de clave…)
   cerradaPor String?   @map("cerrada_por") @db.VarChar(20)
+  /// Sesión que la reemplazó al renovar: si la respuesta se perdió, el token anterior la recupera (estándar 1 del ERP)
+  reemplazadaPorId String? @map("reemplazada_por_id") @db.Uuid
   usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
   @@index([usuarioId])

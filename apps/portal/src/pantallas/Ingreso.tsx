@@ -7,6 +7,7 @@ import { api, descargarTexto, ErrorApi, mensajeDe } from '../lib';
 
 type Paso =
   | { tipo: 'clave' }
+  | { tipo: 'olvide' }
   | { tipo: 'codigo'; desafio: string }
   | { tipo: 'configurar'; desafio: string }
   | { tipo: 'respaldo'; codigos: string[] };
@@ -20,6 +21,7 @@ export function Ingreso({ alEntrar, avisoInicial }: { alEntrar: () => void; avis
     <PantallaIngreso>
       <MarcaTerryApp />
       {paso.tipo === 'clave' && <PasoClave aviso={aviso} alSeguir={(p) => { setAviso(''); setPaso(p); }} />}
+      {paso.tipo === 'olvide' && <PasoOlvide alVolver={() => setPaso({ tipo: 'clave' })} />}
       {paso.tipo === 'codigo' && <PasoCodigo desafio={paso.desafio} alEntrar={alEntrar} alVencer={volver} />}
       {paso.tipo === 'configurar' && <PasoConfigurar desafio={paso.desafio} alListo={(codigos) => setPaso({ tipo: 'respaldo', codigos })} alVencer={volver} />}
       {paso.tipo === 'respaldo' && <PasoRespaldo codigos={paso.codigos} alSeguir={alEntrar} />}
@@ -57,8 +59,40 @@ function PasoClave({ aviso, alSeguir }: { aviso: string; alSeguir: (p: Paso) => 
         </Field>
         <Aviso>{err}</Aviso>
         <Button variant="primary" size="lg" type="submit" disabled={enviando}>{enviando ? 'Verificando…' : 'Ingresar'}</Button>
-        <p className="text-[12px] text-subtle">¿Olvidó su contraseña? Pídale al administrador del portal un enlace nuevo.</p>
+        <button type="button" className="self-end text-[13px] font-medium text-brand hover:underline" onClick={() => alSeguir({ tipo: 'olvide' })}>Olvidé mi contraseña</button>
       </form>
+    </>
+  );
+}
+
+/** «Olvidé mi contraseña» (estándar 2 del ERP): la solicitud le llega al administrador, que envía el enlace por WhatsApp. */
+function PasoOlvide({ alVolver }: { alVolver: () => void }) {
+  const [email, setEmail] = useState('');
+  const [listo, setListo] = useState('');
+  const [err, setErr] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const enviar = async (e: FormEvent) => {
+    e.preventDefault(); setErr(''); setEnviando(true);
+    try { setListo((await api<{ mensaje: string }>('olvide', { email })).mensaje); }
+    catch (x) { setErr(mensajeDe(x)); } finally { setEnviando(false); }
+  };
+  return (
+    <>
+      <h1 className="mt-8 flex items-center gap-2 font-display text-[24px] font-bold text-fg"><KeyRound className="text-brand" size={26} /> Olvidé mi contraseña</h1>
+      {listo ? (
+        <div className="mt-6 flex flex-col gap-4">
+          <Aviso tono="ok">{listo}</Aviso>
+          <Button onClick={alVolver}>Volver a ingresar</Button>
+        </div>
+      ) : (
+        <form className="mt-6 flex flex-col gap-4" onSubmit={enviar}>
+          <p className="text-muted">Escriba su correo. El administrador del portal recibirá su solicitud y le enviará por WhatsApp un enlace para crear una contraseña nueva.</p>
+          <Field label="Correo" id="ol-correo"><Input id="ol-correo" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+          <Aviso>{err}</Aviso>
+          <Button variant="primary" size="lg" type="submit" disabled={enviando}>{enviando ? 'Enviando…' : 'Enviar solicitud'}</Button>
+          <button type="button" className="text-[13px] font-medium text-brand hover:underline" onClick={alVolver}>Volver</button>
+        </form>
+      )}
     </>
   );
 }
