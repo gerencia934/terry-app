@@ -3,7 +3,7 @@ import { Proteccion } from './components/Proteccion';
 import { ToastProvider } from './components/ui';
 import { RouterProvider, useRouter } from './lib/router';
 import { StoreProvider } from './lib/store';
-import { MODO_REAL, paseDelPortal, tienePermiso, useSesion } from './lib/api';
+import { MODO_REAL, moduloDe, paseDelPortal, tienePermiso, useSesion } from './lib/api';
 import { FacturacionServidor } from './pages/FacturacionServidor';
 import { ComercialServidor } from './pages/ComercialServidor';
 import AceptarDatos from './pages/AceptarDatos';
@@ -68,6 +68,9 @@ function Screen() {
   // Portal de clientes: el usuario de un cliente solo ve su portal (cualquier otra ruta lo lleva al inicio del portal),
   // y el personal de Terra Viva no entra al portal. El servidor lo exige igual: esto solo evita pantallas vacías.
   if (MODO_REAL && sesion?.usuario.cliente) return <PortalApp />;
+  // App del conductor (decisión de la gerencia): el personal de campo solo ve su app del celular, escriba la dirección que
+  // escriba. El servidor también le niega lo demás (403): esto evita que vea el panel de oficina vacío.
+  if (MODO_REAL && moduloDe(sesion) === 'CAMPO' && !route.startsWith('campo')) return <IrA ruta="campo" />;
   if (route.startsWith('portal')) return <IrA ruta="inicio" />;
   switch (route) {
     // App del conductor: conectada al API (con cola sin señal) o de demostración

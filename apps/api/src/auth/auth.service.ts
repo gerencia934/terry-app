@@ -253,11 +253,13 @@ export class AuthService {
     // Con el pase del portal no aplica: la verificación la hizo el portal, también para las renovaciones de esa sesión.
     const obligatorio = this.obligatorio(u);
     const pendiente2fa = obligatorio && !u.totpSecreto && !viaPortal;
-    const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id, dat: aceptada,
+    // Módulo del usuario (oficina, campo o portal): lo decide el acceso de su rol y el guard lo hace cumplir
+    const acceso = u.clienteId ? 'CLIENTE' : u.rol.acceso;
+    const accessToken = await this.jwt.signAsync({ sub: u.id, emp: u.empresaId, rol: u.rol.nombre, prm: permisos, nom: u.nombre, sid: sesion.id, dat: aceptada, acc: acceso,
       ...(u.clienteId ? { cli: u.clienteId, pp: u.perfilPortal } : {}), ...(pendiente2fa ? { c2f: true } : {}) });
     return {
       accessToken, refreshToken: `${sesion.id}.${secreto}`, expiraEnSeg: this.cfg.get('JWT_ACCESS_MIN', { infer: true }) * 60,
-      usuario: { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol.nombre, permisos, empresa: { id: u.empresa.id, razonSocial: u.empresa.razonSocial, nit: u.empresa.nit },
+      usuario: { id: u.id, nombre: u.nombre, email: u.email, rol: u.rol.nombre, acceso, permisos, empresa: { id: u.empresa.id, razonSocial: u.empresa.razonSocial, nit: u.empresa.nit },
         requiereAceptarDatos: !aceptada, politicaDatos: { version, url: this.cfg.get('POLITICA_DATOS_URL', { infer: true }) || null },
         requiereConfigurar2fa: pendiente2fa, dobleFactor: { activo: !!u.totpSecreto, obligatorio },
         ...(u.clientePortal ? { cliente: { id: u.clientePortal.id, razonSocial: u.clientePortal.razonSocial, nit: u.clientePortal.nit }, perfilPortal: u.perfilPortal } : {}) },

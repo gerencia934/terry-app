@@ -702,9 +702,53 @@ const conductor = await db.usuario.upsert({ where: { email: 'conductor.e2e@terra
     passwordHash: await (await import('@node-rs/argon2')).hash('Conductor2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
 const tc = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: conductor.email, clave: 'Conductor2026!' } })).json)).accessToken;
 r = await llamar('PATCH', `/declaraciones/${agua.id}/estado`, { token: tc, cuerpo: { estado: 'AUTORIZADA' } });
-prueba('un conductor NO puede autorizar declaraciones → 403', r.status === 403 && /permiso/.test(r.json.mensaje));
-r = await llamar('GET', '/declaraciones', { token: tc });
-prueba('…pero sí puede consultar', r.status === 200);
+prueba('un conductor NO puede autorizar declaraciones → 403 (la app de campo no llega a la oficina)', r.status === 403 && r.json.codigo === 'CAMPO', JSON.stringify(r.json));
+
+console.log('\n5a. App de campo: el conductor solo ve su ruta, sin clientes ni precios (decisión de la gerencia)');
+const sesCond = (await llamar('POST', '/auth/login', { cuerpo: { email: conductor.email, clave: 'Conductor2026!' } })).json;
+prueba('campo: el ingreso del conductor dice que su módulo es la app de campo', sesCond.usuario?.acceso === 'CAMPO', JSON.stringify(sesCond.usuario ?? sesCond).slice(0, 200));
+const oficina = await Promise.all(['/clientes', '/declaraciones', '/manifiestos', '/rutas', '/solicitudes', '/alertas', '/vehiculos'].map((p) => llamar('GET', p, { token: tc })));
+prueba('campo: ni clientes, ni declaraciones, ni manifiestos, rutas, solicitudes, alertas o flota de oficina → 403', oficina.every((x) => x.status === 403 && x.json.codigo === 'CAMPO'),
+  oficina.map((x) => x.status).join(','));
+prueba('…pero sí su cuenta (quién soy) y sus avisos al celular', (await llamar('GET', '/auth/yo', { token: tc })).status === 200
+  && (await llamar('GET', '/notificaciones/push/configuracion', { token: tc })).status === 200);
+const solCampo = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-26', items: [{ declaracionId: lodo.id, cantidadEstimada: 300 }] } })).json;
+const solAjena = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-11-26', items: [{ declaracionId: lodo.id, cantidadEstimada: 50 }] } })).json;
+const rutaCampo = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-K${Date.now() % 100000}`, fechaProgramada: '2026-11-26', vehiculoId: veh2.id, conductorId: conductor.id, valorFlete: 450000, solicitudes: [solCampo.id] } })).json;
+const rutaAjena = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-J${Date.now() % 100000}`, fechaProgramada: '2026-11-26', vehiculoId: veh.id, conductorId: yo.id, solicitudes: [solAjena.id] } })).json;
+r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
+const paqTxt = JSON.stringify(r.json);
+prueba('campo: el paquete del día trae solo su ruta, con la sede y lo que hay que recoger', r.status === 200 && r.json.rutas?.length === 1 && r.json.rutas[0].id === rutaCampo.id
+  && !!r.json.rutas[0].paradas[0]?.sucursal?.nombre && r.json.rutas[0].paradas[0].items.length === 1 && r.json.catalogos?.etapas?.length > 0, paqTxt.slice(0, 300));
+prueba('…sin precios, tarifas ni valor del flete', !/precio|valorFlete|tarifa|subtotal|"total"/i.test(paqTxt), paqTxt.match(/.{0,40}(precio|valorFlete|tarifa|subtotal|"total").{0,40}/i)?.[0]);
+r = await llamar('PATCH', `/campo/rutas/${rutaAjena.id}/estado`, { token: tc, cuerpo: { estadoRecorridoId: enCamino.id } });
+prueba('…ni toca una ruta que no es suya → 403', r.status === 403, JSON.stringify(r.json));
+r = await llamar('POST', `/campo/rutas/${rutaAjena.id}/manifiestos`, { token: tc });
+prueba('…ni le abre manifiestos → 403', r.status === 403, JSON.stringify(r.json));
+r = await llamar('POST', '/campo/preoperacionales', { token: tc, cuerpo: { vehiculoId: veh.id, rutaId: rutaAjena.id, fechaProgramada: '2026-11-26', km: 1, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
+prueba('…ni inspecciona un vehículo que no está en su ruta → 403', r.status === 403, JSON.stringify(r.json));
+r = await llamar('POST', '/campo/preoperacionales', { token: tc, cuerpo: { vehiculoId: veh2.id, rutaId: rutaCampo.id, fechaProgramada: '2026-11-26', km: 90100, respuestas: elementos.json.map((e) => ({ elementoId: e.id, resultado: 'OK' })) } });
+prueba('campo: inspecciona su vehículo', r.status === 201 && r.json.aprobado === true, JSON.stringify(r.json));
+r = await llamar('PATCH', `/campo/rutas/${rutaCampo.id}/estado`, { token: tc, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 90100 } });
+prueba('…y sale a ruta', r.status === 200 && r.json.estadoRecorridoId === enCamino.id, JSON.stringify(r.json));
+r = await llamar('POST', `/campo/rutas/${rutaCampo.id}/manifiestos`, { token: tc });
+prueba('campo: abre los manifiestos de su ruta', r.status === 201 && r.json.length === 1 && Object.keys(r.json[0]).join() === 'id,numero', JSON.stringify(r.json));
+const mfCampo = r.json[0];
+r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
+const mfPaq = r.json.manifiestos?.find((m) => m.id === mfCampo.id);
+prueba('…le llegan con lo necesario para imprimirlos sin señal (cliente, NIT, residuo, transportador), sin precio', !!mfPaq && !!mfPaq.cliente?.nit && !!mfPaq.items[0]?.declaracion?.nombre
+  && !!r.json.emisor?.nit && !!mfPaq.vehiculo?.placa && !!mfPaq.conductor?.nombre && !/precio/i.test(JSON.stringify(mfPaq)), JSON.stringify(mfPaq).slice(0, 300));
+r = await llamar('PATCH', `/campo/manifiestos/${mfCampo.id}/items/${mfPaq.items[0].id}`, { token: tc, cuerpo: { cantidad: 280, embalajes: 3 } });
+prueba('…anota la cantidad real', r.status === 200 && r.json.ok === true, JSON.stringify(r.json));
+r = await llamar('POST', `/campo/manifiestos/${mfCampo.id}/grabar`, { token: tc, cuerpo: { firma: `data:image/png;base64,${PNG_1X1}`, firmaNombre: 'Quien Entrega E2E', firmaDocumento: '7654321',
+  horaLlegada: '2026-11-26T09:00:00-05:00', horaSalida: '2026-11-26T09:30:00-05:00' } });
+prueba('…y graba el manifiesto: la respuesta no trae precios ni totales', r.status === 201 && r.json.estado === 'REALIZADO' && !/precio|total/i.test(JSON.stringify(r.json)), JSON.stringify(r.json));
+prueba('…la oficina sí ve el precio del manifiesto', Number((await llamar('GET', `/manifiestos/${mfCampo.id}`, { token: T })).json.items?.[0]?.precioUnitario) > 0);
+r = await llamar('GET', '/campo/mi-vehiculo?fecha=2026-11-26', { token: tc });
+prueba('campo: «mi vehículo» en solo lectura (vencimientos e inspecciones con sus fallas)', r.status === 200 && r.json.vehiculo?.placa === veh2.placa && r.json.inspecciones?.length >= 1
+  && 'soatVence' in r.json.vehiculo && !/cliente|precio/i.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: T });
+prueba('campo: quien programa rutas (oficina) abre la app del conductor con las rutas del día', r.status === 200 && r.json.rutas.some((x) => x.id === rutaAjena.id), JSON.stringify(r.json).slice(0, 200));
 
 console.log('\n5b. Usuarios y roles (fase 1c)');
 r = await llamar('GET', '/usuarios', { token: thseq });
@@ -1199,7 +1243,7 @@ r = await llamar('GET', '/informes/inicio', { token: T8 });
 prueba('inicio: cadena del mes, agenda, obligaciones y cifras del mes para quien ve informes', r.status === 200 && typeof r.json.cadena?.solicitadas === 'number' && r.json.negocio !== null
   && Array.isArray(r.json.obligaciones) && Array.isArray(r.json.rutasHoy) && typeof r.json.agenda?.semana === 'number', JSON.stringify(r.json).slice(0, 300));
 r = await llamar('GET', '/informes/inicio', { token: tAux });
-prueba('…quien no ve informes recibe la operación, sin cifras de dinero', r.status === 200 && r.json.negocio === null && typeof r.json.cadena?.programadas === 'number', JSON.stringify(r.json).slice(0, 200));
+prueba('…el auxiliar (app de campo) no ve el tablero de oficina → 403', r.status === 403 && r.json.codigo === 'CAMPO', JSON.stringify(r.json).slice(0, 200));
 
 console.log('\n9. Portal de clientes: doble barrera (requisitos de producción §2)');
 const clienteA = await db.cliente.findUnique({ where: { id: suc.clienteId } });

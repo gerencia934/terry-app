@@ -22,7 +22,7 @@ let temporizador: ReturnType<typeof setInterval> | null = null;
 function vaciarLote() {
   if (!rutaGps || !lote.length) return;
   const puntos = lote; lote = [];
-  void encolar({ grupo: `gps:${rutaGps}`, descripcion: `Ubicación (${puntos.length} puntos)`, metodo: 'POST', ruta: `/rutas/${rutaGps}/rastreo`, cuerpo: { puntos } });
+  void encolar({ grupo: `gps:${rutaGps}`, descripcion: `Ubicación (${puntos.length} puntos)`, metodo: 'POST', ruta: `/campo/rutas/${rutaGps}/rastreo`, cuerpo: { puntos } });
 }
 
 /** Empieza a registrar la ubicación cada ~30 s y la envía en lotes (también sin señal). */

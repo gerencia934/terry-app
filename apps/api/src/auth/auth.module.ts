@@ -5,7 +5,7 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import { InjectThrottlerOptions, InjectThrottlerStorage, Throttle, ThrottlerGuard, ThrottlerStorage, type ThrottlerModuleOptions } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
-import { ActorActual, LimiteCredenciales, PERMISO, PERMITE_PORTAL, PUBLICO, Permiso, PermitePortal, Publico, SIN_2FA, SIN_DATOS, SOLO_PORTAL, SinAceptarDatos, SinDobleFactor, Zod, type Actor } from '../common/http';
+import { ActorActual, CuentaPropia, LimiteCredenciales, PERMISO, PERMITE_CAMPO, PERMITE_PORTAL, PUBLICO, Permiso, Publico, SIN_2FA, SIN_DATOS, SOLO_PORTAL, SinAceptarDatos, SinDobleFactor, Zod, type Actor } from '../common/http';
 import type { Config } from '../config';
 import { AuthService } from './auth.service';
 
@@ -39,23 +39,23 @@ class AuthController {
   @Publico() @Post('salir') @HttpCode(204)
   salir(@Body(new Zod(Token)) b: z.infer<typeof Token>) { return this.auth.salir(b.refreshToken); }
 
-  @SinAceptarDatos() @SinDobleFactor() @PermitePortal() @Get('yo') yo(@ActorActual() a: Actor) { return this.auth.yo(a); }
+  @SinAceptarDatos() @SinDobleFactor() @CuentaPropia() @Get('yo') yo(@ActorActual() a: Actor) { return this.auth.yo(a); }
 
   /** Ley 1581: aceptar la política de tratamiento de datos personales (primer ingreso o versión nueva). */
-  @SinAceptarDatos() @SinDobleFactor() @PermitePortal() @Post('aceptar-datos') @HttpCode(200)
+  @SinAceptarDatos() @SinDobleFactor() @CuentaPropia() @Post('aceptar-datos') @HttpCode(200)
   aceptarDatos(@ActorActual() a: Actor, @Body(new Zod(AceptarDatos)) b: z.infer<typeof AceptarDatos>, @Req() req: Request) { return this.auth.aceptarDatos(a, b.version, meta(req)); }
 
-  @SinAceptarDatos() @SinDobleFactor() @PermitePortal() @Post('salir-todos') @HttpCode(204)
+  @SinAceptarDatos() @SinDobleFactor() @CuentaPropia() @Post('salir-todos') @HttpCode(204)
   salirTodos(@ActorActual() a: Actor) { return this.auth.salirTodos(a); }
 
   // Verificación en dos pasos (TOTP): segundo paso del ingreso, configurarla, códigos de respaldo y desactivarla
   @Publico() @LimiteCredenciales(10) @Post('2fa/verificar') @HttpCode(200)
   verificar2fa(@Body(new Zod(Verificar2fa)) b: z.infer<typeof Verificar2fa>, @Req() req: Request) { return this.auth.verificar2fa(b.desafio, b.codigo, meta(req)); }
-  @SinDobleFactor() @PermitePortal() @Post('2fa/iniciar') @HttpCode(200) iniciar2fa(@ActorActual() a: Actor) { return this.auth.iniciar2fa(a); }
-  @SinDobleFactor() @PermitePortal() @Post('2fa/confirmar') @HttpCode(200)
+  @SinDobleFactor() @CuentaPropia() @Post('2fa/iniciar') @HttpCode(200) iniciar2fa(@ActorActual() a: Actor) { return this.auth.iniciar2fa(a); }
+  @SinDobleFactor() @CuentaPropia() @Post('2fa/confirmar') @HttpCode(200)
   confirmar2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>, @Req() req: Request) { return this.auth.confirmar2fa(a, b.codigo, meta(req)); }
-  @PermitePortal() @Post('2fa/codigos') @HttpCode(200) codigos2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>) { return this.auth.codigos2fa(a, b.codigo); }
-  @PermitePortal() @Post('2fa/desactivar') @HttpCode(204) desactivar2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>) { return this.auth.desactivar2fa(a, b.codigo); }
+  @CuentaPropia() @Post('2fa/codigos') @HttpCode(200) codigos2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>) { return this.auth.codigos2fa(a, b.codigo); }
+  @CuentaPropia() @Post('2fa/desactivar') @HttpCode(204) desactivar2fa(@ActorActual() a: Actor, @Body(new Zod(Codigo)) b: z.infer<typeof Codigo>) { return this.auth.desactivar2fa(a, b.codigo); }
 
   /** Antes de entrar: si hay correo configurado (si no, el enlace de acceso lo entrega el administrador). */
   @Publico() @Get('opciones') opciones() { return this.auth.opciones(); }
@@ -88,16 +88,21 @@ class GuardAutenticacion implements CanActivate {
     const req = ctx.switchToHttp().getRequest<Request & { actor?: Actor }>();
     const [tipo, token] = (req.headers.authorization ?? '').split(' ');
     if (tipo !== 'Bearer' || !token) throw new UnauthorizedException({ mensaje: 'Debe iniciar sesión.' });
-    let p: { sub: string; emp: string; rol: string; prm: string[]; nom: string; sid: string; dat?: boolean; cli?: string; pp?: 'ADMIN' | 'CONSULTA'; c2f?: boolean };
+    let p: { sub: string; emp: string; rol: string; prm: string[]; nom: string; sid: string; dat?: boolean; cli?: string; pp?: 'ADMIN' | 'CONSULTA'; c2f?: boolean; acc?: 'OFICINA' | 'CAMPO' | 'CLIENTE' };
     try { p = await this.jwt.verifyAsync(token); } catch { throw new UnauthorizedException({ mensaje: 'La sesión venció. Renueve el token.' }); }
     if (!(await this.auth.sesionActiva(p.sid))) throw new UnauthorizedException({ mensaje: 'La sesión fue cerrada. Ingrese de nuevo.' });
-    req.actor = { id: p.sub, empresaId: p.emp, rol: p.rol, permisos: p.prm, nombre: p.nom, sesionId: p.sid, ...(p.cli ? { clienteId: p.cli, perfilPortal: p.pp ?? 'CONSULTA' } : {}) };
+    req.actor = { id: p.sub, empresaId: p.emp, rol: p.rol, permisos: p.prm, nombre: p.nom, sesionId: p.sid, acceso: p.cli ? 'CLIENTE' : p.acc ?? 'OFICINA',
+      ...(p.cli ? { clienteId: p.cli, perfilPortal: p.pp ?? 'CONSULTA' } : {}) };
     // Portal de clientes (requisitos de producción §2): el usuario de un cliente solo usa las rutas hechas para él.
     // Todo lo demás (incluidos los listados de oficina sin permiso propio) le responde 403.
     const soloPortal = this.reflector.getAllAndOverride<boolean>(SOLO_PORTAL, objetivo);
     if (p.cli && !soloPortal && !this.reflector.getAllAndOverride<boolean>(PERMITE_PORTAL, objetivo))
       throw new ForbiddenException({ mensaje: 'Esta sección no está disponible en el portal de clientes.', codigo: 'PORTAL' });
     if (soloPortal && !p.cli) throw new ForbiddenException({ mensaje: 'Esta sección es solo para los usuarios del portal de clientes.' });
+    // App de campo (decisión de la gerencia, 20-11-2026): conductores y auxiliares solo usan las rutas hechas para el celular
+    // (su ruta del día, sin clientes ni precios). Todo lo demás, también los listados de oficina sin permiso propio, es 403.
+    if (p.acc === 'CAMPO' && !this.reflector.getAllAndOverride<boolean>(PERMITE_CAMPO, objetivo))
+      throw new ForbiddenException({ mensaje: 'Esta sección no está disponible en la app de campo.', codigo: 'CAMPO' });
     if (p.dat !== true && !this.reflector.getAllAndOverride<boolean>(SIN_DATOS, objetivo))
       throw new ForbiddenException({ mensaje: 'Para continuar debe aceptar la política de tratamiento de datos personales.', codigo: 'ACEPTAR_DATOS' });
     // Verificación en dos pasos obligatoria y sin configurar: el token solo sirve para configurarla (requisitos §4)

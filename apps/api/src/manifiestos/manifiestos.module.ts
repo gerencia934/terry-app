@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
 import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
-import { pdfManifiesto, pdfRecibo, type DatosManifiesto } from './pdf';
+import { notaBascula, pdfManifiesto, pdfRecibo, type DatosManifiesto } from './pdf';
 
 type Tx = Prisma.TransactionClient;
 const id = z.string().uuid();
@@ -36,7 +36,7 @@ const Crear = z.object({
   items: z.array(Linea).max(200).default([]),
 });
 const DesdeRuta = z.object({ rutaId: id, paradaIds: z.array(id).default([]), destinoId: id.optional() });
-const EditarLinea = z.object({
+export const EditarLinea = z.object({
   cantidad: z.number().positive().refine(dosDecimales, 'Máximo 2 decimales.').optional(), embalajes: z.number().int().nonnegative().nullish(), observaciones: z.string().trim().max(300).nullish(),
 });
 const Actualizar = z.object({
@@ -44,7 +44,7 @@ const Actualizar = z.object({
   pesoEntrada: peso.nullish(), pesoSalida: peso.nullish(), pesoNeto: peso.nullish(), horaLlegada: z.coerce.date().nullish(), horaSalida: z.coerce.date().nullish(),
   observaciones: texto(2000), vehiculoId: id.nullish(), conductorId: id.nullish(), auxiliarId: id.nullish(), transporte: Transporte.optional(),
 });
-const Grabar = z.object({
+export const Grabar = z.object({
   firma: z.string().max(700_000, 'La firma es demasiado grande.'), firmaNombre: z.string().trim().min(3).max(150), firmaDocumento: z.string().trim().min(3).max(20),
   horaLlegada: z.coerce.date(), horaSalida: z.coerce.date(), pesoEntrada: peso.optional(), pesoSalida: peso.optional(), pesoNeto: peso.optional(), observaciones: texto(2000),
   // Descarga en planta: también firma el receptor de Terra Viva (documentos reales §2)
@@ -52,7 +52,7 @@ const Grabar = z.object({
   receptorDocumento: z.string().trim().min(3).max(20).optional(),
 });
 const Anular = z.object({ causalId: id.optional(), motivo: texto(300) }).refine((b) => b.causalId || b.motivo, { message: 'Indique la causal o el motivo.' });
-const Evidencia = z.object({ tipo: z.enum(['FOTO', 'PDF']), tomadaEn: z.coerce.date().optional(), latitud: z.coerce.number().min(-5).max(14).optional(), longitud: z.coerce.number().min(-82).max(-66).optional() });
+export const Evidencia = z.object({ tipo: z.enum(['FOTO', 'PDF']), tomadaEn: z.coerce.date().optional(), latitud: z.coerce.number().min(-5).max(14).optional(), longitud: z.coerce.number().min(-82).max(-66).optional() });
 const Filtros = z.object({
   desde: z.coerce.date().optional(), hasta: z.coerce.date().optional(), numero: z.string().max(20).optional(), clienteId: id.optional(), rutaId: id.optional(),
   tipo: z.nativeEnum(TipoManifiesto).optional(), estado: z.nativeEnum(EstadoManifiesto).optional(), pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional(),
@@ -280,20 +280,11 @@ export class ManifiestosService {
     } });
     if (!m) throw new NotFoundException({ mensaje: 'Manifiesto no encontrado.' });
     const leer = async (clave: string | null) => (clave ? (await this.archivos.leer(clave, a.empresaId).catch(() => null))?.buf ?? null : null);
-    const conf = (m.empresa.configuracion ?? {}) as { notaBascula?: string; bascula?: { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string } };
-    // Nota de báscula (respuesta C2): cita el certificado de calibración; vencido a la fecha del servicio, sale con alerta
-    const b = conf.bascula;
-    const fecha = (iso: string) => iso.split('-').reverse().join('-');
-    const notaBascula = b?.certificado?.trim()
-      ? `${b.vigenteHasta && b.vigenteHasta < m.fechaServicio.toISOString().slice(0, 10) ? `ATENCIÓN: el certificado de calibración venció el ${fecha(b.vigenteHasta)}; HSEQ debe revisar este pesaje. ` : ''}`
-        + `Pesaje en báscula ${b.identificacion?.trim() || ''}, calibrada según el certificado N.° ${b.certificado.trim()}${b.fecha ? ` del ${fecha(b.fecha)}` : ''}`
-        + `${b.laboratorio?.trim() ? `, expedido por ${b.laboratorio.trim()}` : ''}${b.vigenteHasta ? `, vigente hasta ${fecha(b.vigenteHasta)}` : ''}.`
-      : conf.notaBascula?.trim() || null;
     const t = m.transporte;
     const n = (v: Prisma.Decimal | null) => (v === null ? null : Number(v));
     return {
       numero: m.numero, tipo: m.tipo, estado: m.estado, fechaServicio: m.fechaServicio.toISOString(),
-      emisor: { razonSocial: m.empresa.razonSocial, nit: m.empresa.nit, notaBascula },
+      emisor: { razonSocial: m.empresa.razonSocial, nit: m.empresa.nit, notaBascula: notaBascula(m.empresa.configuracion, m.fechaServicio) },
       cliente: { razonSocial: m.cliente.razonSocial, nit: `${m.cliente.nit}${m.cliente.dv ? `-${m.cliente.dv}` : ''}` },
       destino: m.destino.razonSocial, ordenCompra: m.ordenCompra, manifiestoCliente: m.manifiestoCliente, ruta: m.ruta?.codigo ?? null,
       transporte: t

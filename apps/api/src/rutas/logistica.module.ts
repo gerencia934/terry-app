@@ -53,7 +53,7 @@ const EditarRuta = z.object({
   frecuenciaDias: z.number().int().min(1).max(366).nullish(), recurrenteActiva: z.boolean().optional(),
 });
 const LineasRuta = z.object({ items: z.array(z.string().uuid()).min(1).max(500) });
-const Rastreo = z.object({ puntos: z.array(z.object({
+export const Rastreo = z.object({ puntos: z.array(z.object({
   latitud: z.number().min(-5).max(14), longitud: z.number().min(-82).max(-66), precisionM: z.number().nonnegative().max(100000).optional(),
   velocidadKmh: z.number().nonnegative().max(300).optional(), registradoEn: z.coerce.date(),
 })).min(1).max(1000) });
@@ -65,8 +65,8 @@ const FiltroInspecciones = z.object({
   desde: z.coerce.date(), hasta: z.coerce.date(), vehiculoId: z.string().uuid().optional(), resultado: z.enum(['aprobada', 'no-aprobada', 'pendiente']).optional(),
   pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional(),
 });
-const EstadoRuta = z.object({ estadoRecorridoId: z.string().uuid(), kmInicial: z.number().int().optional(), kmFinal: z.number().int().optional() });
-const Preop = z.object({
+export const EstadoRuta = z.object({ estadoRecorridoId: z.string().uuid(), kmInicial: z.number().int().optional(), kmFinal: z.number().int().optional() });
+export const Preop = z.object({
   vehiculoId: z.string().uuid(), rutaId: z.string().uuid().optional(), fechaProgramada: z.coerce.date(), km: z.number().int().nonnegative(), auxiliarId: z.string().uuid().optional(), observaciones: z.string().max(500).optional(),
   respuestas: z.array(z.object({ elementoId: z.string().uuid(), resultado: z.nativeEnum(ResultadoChequeo) })).min(1),
   // El teléfono genera el id: si el envío se repite (sin señal), no se duplica la inspección
@@ -80,7 +80,7 @@ const Parada = z.object({
 const rango = (f: { desde?: Date; hasta?: Date }) => (f.desde || f.hasta ? { gte: f.desde, lte: f.hasta } : undefined);
 
 @Injectable()
-class LogisticaService {
+export class LogisticaService {
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly archivos: Archivos, private readonly notificaciones: Notificaciones) {}
 
   async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
@@ -439,5 +439,5 @@ class LogisticaController {
   @Permiso('rutas.operar') @Patch('paradas/:id') parada(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Parada)) b: z.infer<typeof Parada>) { return this.s.parada(a, id, b); }
 }
 
-@Module({ controllers: [LogisticaController], providers: [LogisticaService] })
+@Module({ controllers: [LogisticaController], providers: [LogisticaService], exports: [LogisticaService] })
 export class LogisticaModule {}

@@ -9,6 +9,8 @@ export const MODO_REAL = API_URL.length > 0;
 export interface Sesion {
   accessToken: string; refreshToken: string; expiraEnSeg: number;
   usuario: { id: string; nombre: string; email: string; rol: string; permisos: string[]; empresa: { razonSocial: string; nit: string };
+    /** Módulo del usuario según el acceso de su rol: administrador (oficina), app del conductor (campo) o portal de clientes. */
+    acceso?: 'OFICINA' | 'CAMPO' | 'CLIENTE';
     /** Ley 1581: falta aceptar la versión vigente de la política de tratamiento de datos. */
     requiereAceptarDatos?: boolean; politicaDatos?: { version: string; url: string | null };
     /** Usuario del portal de clientes: su empresa y su perfil (administrador o consulta). La oficina no lo trae. */
@@ -51,6 +53,12 @@ export function useSesion() {
   return s;
 }
 export const tienePermiso = (p: string) => !!sesion && (sesion.usuario.permisos.includes('*') || sesion.usuario.permisos.includes(p));
+/**
+ * Módulo al que entra una sesión: portal de clientes, app del conductor (campo) o administrador. Las sesiones guardadas
+ * antes de que el servidor enviara el acceso se reconocen por el rol.
+ */
+export const moduloDe = (s: Sesion | null): 'CLIENTE' | 'CAMPO' | 'OFICINA' =>
+  !s ? 'OFICINA' : s.usuario.cliente ? 'CLIENTE' : s.usuario.acceso ?? (s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'CAMPO' : 'OFICINA');
 
 async function renovar(): Promise<boolean> {
   if (!sesion) return false;

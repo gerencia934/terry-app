@@ -12,7 +12,11 @@ import { ZodError, type ZodSchema } from 'zod';
  * Quién hace la petición. Un usuario del portal de clientes lleva su `clienteId` y su perfil: solo puede usar las rutas
  * marcadas @PermitePortal() o @SoloPortal() (el guard global lo impide en todas las demás).
  */
-export interface Actor { id: string; empresaId: string; rol: string; permisos: string[]; nombre: string; sesionId?: string; clienteId?: string; perfilPortal?: 'ADMIN' | 'CONSULTA' }
+export interface Actor {
+  id: string; empresaId: string; rol: string; permisos: string[]; nombre: string; sesionId?: string; clienteId?: string; perfilPortal?: 'ADMIN' | 'CONSULTA';
+  /** Módulo del usuario según el acceso de su rol: oficina (administrador), campo (app del conductor) o portal de clientes. */
+  acceso?: 'OFICINA' | 'CAMPO' | 'CLIENTE';
+}
 export const ActorActual = createParamDecorator((_: unknown, ctx: ExecutionContext): Actor => ctx.switchToHttp().getRequest().actor);
 
 export const PUBLICO = 'publico';
@@ -33,6 +37,14 @@ export const SOLO_PORTAL = 'soloPortal';
 export const PermitePortal = () => SetMetadata(PERMITE_PORTAL, true);
 /** Ruta solo para usuarios del portal de clientes (el personal de Terra Viva recibe 403). */
 export const SoloPortal = () => SetMetadata(SOLO_PORTAL, true);
+export const PERMITE_CAMPO = 'permiteCampo';
+/**
+ * La ruta también la puede usar el personal de campo (conductores y auxiliares, desde el celular). Como con el portal,
+ * el guard global les niega todas las demás: la app de campo no ve listados de oficina, clientes ni precios.
+ */
+export const PermiteCampo = () => SetMetadata(PERMITE_CAMPO, true);
+/** Cuenta propia (quién soy, política de datos, salir, verificación en dos pasos): la usan los tres módulos. */
+export const CuentaPropia = () => applyDecorators(SetMetadata(PERMITE_PORTAL, true), SetMetadata(PERMITE_CAMPO, true));
 
 export const TECHO_IP = 'techoPorIp';
 /**

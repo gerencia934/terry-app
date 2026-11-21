@@ -3,7 +3,7 @@ import { Eye, EyeOff, ShieldCheck, ArrowLeft, MailCheck, KeyRound, Server, Flask
 import { Button, Field, Input } from '../components/ui';
 import { Logo } from '../components/AppShell';
 import { useRouter } from '../lib/router';
-import { API_URL, MODO_REAL, PORTAL_URL, api, ingresar, ingresarConPortal, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
+import { API_URL, MODO_REAL, PORTAL_URL, api, ingresar, ingresarConPortal, moduloDe, verificarDobleFactor, ErrorApi, type Sesion } from '../lib/api';
 import { Carrusel } from '../components/Carrusel';
 import { MarcaTerryApp } from '../components/Marca';
 
@@ -40,7 +40,8 @@ export function Login() {
   // Segundo paso (verificación en dos pasos): el desafío que entregó el servidor y el código de la app
   const [desafio, setDesafio] = useState('');
   const [codigo, setCodigo] = useState('');
-  const entrar = (s: Sesion) => go(s.usuario.cliente ? 'portal' : s.usuario.rol === 'Conductor' || s.usuario.rol === 'Auxiliar' ? 'campo' : 'inicio');
+  // Cada quien a su módulo: portal de clientes, app del conductor (campo) o administrador
+  const entrar = (s: Sesion) => { const m = moduloDe(s); go(m === 'CLIENTE' ? 'portal' : m === 'CAMPO' ? 'campo' : 'inicio'); };
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr('');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setErr('Escriba su correo completo, por ejemplo nombre@terravivasas.com.');

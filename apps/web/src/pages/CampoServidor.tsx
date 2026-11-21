@@ -5,7 +5,7 @@ import { AlertOctagon, ArrowLeft, Camera, CheckCircle2, ChevronRight, ClipboardC
 import { Badge, Button, Field, Input, Select, useToast } from '../components/ui';
 import { Logo } from '../components/AppShell';
 import { useRouter } from '../lib/router';
-import { api, ErrorApi, sesionActual, tienePermiso } from '../lib/api';
+import { api, ErrorApi, sesionActual } from '../lib/api';
 import { cx } from '../lib/format';
 import { borrarBorrador, descartar, encolar, guardarBorrador, guardarPaquete, leerBorrador, leerPaquete, listar, procesar, reintentar, useCola, type Operacion } from '../campo/cola';
 import { comprimirFoto, detenerGps, iniciarGps } from '../campo/medios';
@@ -54,21 +54,14 @@ async function enviar<T>(op: Omit<Operacion, 'creadoEn' | 'intentos'>): Promise<
   return { enCola: true };
 }
 
-/** Descarga la ruta del día, sus manifiestos y las listas, y los guarda en el teléfono. */
+/** Descarga la ruta del día, sus manifiestos y las listas (una sola consulta a la puerta de campo) y los guarda en el teléfono. */
 async function descargarPaquete(anterior: Paquete | null): Promise<Paquete> {
   const yo = sesionActual()!.usuario, f = hoy();
-  let rutas = await api<Ruta[]>(`/rutas?desde=${f}&hasta=${f}&conductorId=${yo.id}`);
-  if (!rutas.length && (tienePermiso('rutas.programar') || tienePermiso('manifiestos.operar'))) rutas = await api<Ruta[]>(`/rutas?desde=${f}&hasta=${f}`);
-  const [catalogos, elementos] = await Promise.all([api<Catalogos>('/catalogos/operacion'), api<Elemento[]>('/elementos-chequeo')]);
-  const manifiestos: Record<string, Manifiesto> = {};
-  for (const r of rutas) {
-    const lista = await api<{ filas: { id: string; estado: string }[] }>(`/manifiestos?rutaId=${r.id}&porPagina=100`);
-    for (const m of lista.filas.filter((x) => x.estado !== 'ANULADO')) manifiestos[m.id] = await api<Manifiesto>(`/manifiestos/${m.id}`);
-  }
-  const vehiculos = [...new Set(rutas.map((r) => r.vehiculoId).filter(Boolean))] as string[];
-  const inspecciones = (await Promise.all(vehiculos.map((v) => api<Inspeccion[]>(`/preoperacionales?vehiculoId=${v}&fecha=${f}`)))).flat();
+  const d = await api<{ rutas: Ruta[]; manifiestos: Manifiesto[]; catalogos: Catalogos; elementos: Elemento[]; inspecciones: Inspeccion[] }>(`/campo/paquete?fecha=${f}`);
+  const rutas = d.rutas;
+  const manifiestos: Record<string, Manifiesto> = Object.fromEntries(d.manifiestos.map((m) => [m.id, { ...m, transporte: null }]));
   const rutaSel = anterior?.rutaSel && rutas.some((r) => r.id === anterior.rutaSel) ? anterior.rutaSel : rutas[0]?.id ?? null;
-  const p: Paquete = { fecha: f, usuarioId: yo.id, actualizado: new Date().toISOString(), rutaSel, rutas, manifiestos, enCola: {}, catalogos, elementos, inspecciones };
+  const p: Paquete = { fecha: f, usuarioId: yo.id, actualizado: new Date().toISOString(), rutaSel, rutas, manifiestos, enCola: {}, catalogos: d.catalogos, elementos: d.elementos, inspecciones: d.inspecciones };
   guardarPaquete(p);
   return p;
 }
@@ -145,7 +138,7 @@ export function CampoRutaServidor() {
     const termina = e.esFinal && !e.cancela;
     const cuerpo = { estadoRecorridoId: e.id, ...(sale && kmValor !== undefined ? { kmInicial: kmValor } : {}), ...(termina && kmValor !== undefined ? { kmFinal: kmValor } : {}) };
     try {
-      const r = await enviar({ grupo: `ruta:${ruta.id}`, descripcion: `Etapa «${e.nombre}» · ${ruta.codigo}`, metodo: 'PATCH', ruta: `/rutas/${ruta.id}/estado`, cuerpo });
+      const r = await enviar({ grupo: `ruta:${ruta.id}`, descripcion: `Etapa «${e.nombre}» · ${ruta.codigo}`, metodo: 'PATCH', ruta: `/campo/rutas/${ruta.id}/estado`, cuerpo });
       cambiar((x) => ({ ...x, rutas: x.rutas.map((rr) => rr.id === ruta.id ? { ...rr, estadoRecorrido: e } : rr) }));
       toast(r.enCola ? `Etapa «${e.nombre}» guardada en el teléfono: se enviará al volver la señal.` : `Etapa «${e.nombre}».`);
     } catch (err) { toast(err instanceof ErrorApi ? err.message : 'No se pudo cambiar la etapa.', 'warn'); }
@@ -153,7 +146,7 @@ export function CampoRutaServidor() {
   };
   const abrirManifiestos = async () => {
     if (!navigator.onLine) { toast('Necesita señal para abrir los manifiestos de la ruta.', 'warn'); return; }
-    try { await api('/manifiestos/desde-ruta', { cuerpo: { rutaId: ruta.id } }); await actualizar(true); toast('Manifiestos listos en el teléfono.'); }
+    try { await api(`/campo/rutas/${ruta.id}/manifiestos`, { metodo: 'POST' }); await actualizar(true); toast('Manifiestos listos en el teléfono.'); }
     catch (e) { toast(e instanceof ErrorApi ? e.message : 'No se pudieron crear los manifiestos.', 'warn'); }
   };
 
@@ -269,12 +262,12 @@ export function CampoInspeccionServidor() {
     const id = crypto.randomUUID(); // el mismo id en cada reintento: la inspección no se duplica
     const cuerpo = { id, firma, vehiculoId: ruta.vehiculoId, rutaId: ruta.id, fechaProgramada: hoy(), km: Number(km), observaciones: obs || undefined, respuestas: p.elementos.map((e) => ({ elementoId: e.id, resultado: res[e.id] })) };
     try {
-      const r = await enviar<{ id: string; numero: string; aprobado: boolean; fallasCriticas: string[] }>({ grupo: `ruta:${ruta.id}`, descripcion: `Inspección del vehículo ${ruta.vehiculo?.placa ?? ''}`, metodo: 'POST', ruta: '/preoperacionales', cuerpo });
+      const r = await enviar<{ id: string; numero: string; aprobado: boolean; fallasCriticas: string[] }>({ grupo: `ruta:${ruta.id}`, descripcion: `Inspección del vehículo ${ruta.vehiculo?.placa ?? ''}`, metodo: 'POST', ruta: '/campo/preoperacionales', cuerpo });
       // Las fotos van después, en orden y en la misma cola (si no hay señal, esperan a la inspección)
       let n = 0;
       for (const [elementoId, f] of Object.entries(fotos)) {
         const el = p.elementos.find((x) => x.id === elementoId);
-        await encolar({ grupo: `ruta:${ruta.id}`, descripcion: `Foto de la inspección · ${el?.nombre ?? ''}`, metodo: 'POST', ruta: `/preoperacionales/${id}/fotos`,
+        await encolar({ grupo: `ruta:${ruta.id}`, descripcion: `Foto de la inspección · ${el?.nombre ?? ''}`, metodo: 'POST', ruta: `/campo/preoperacionales/${id}/fotos`,
           form: { campos: { elementoId }, archivo: f.blob, nombre: `inspeccion-${id.slice(0, 8)}-${++n}.jpg` } });
       }
       const aprobado = r.respuesta ? r.respuesta.aprobado : !criticasMal.length;
@@ -363,7 +356,7 @@ export function CampoManifiestoServidor() {
     if (b.fotos >= 2) { toast('Ya hay 2 fotos (el máximo).', 'warn'); return; }
     try {
       const blob = await comprimirFoto(f);
-      await encolar({ grupo: `mf:${id}`, descripcion: `Foto ${b.fotos + 1} · ${m.numero}`, metodo: 'POST', ruta: `/manifiestos/${id}/evidencias`,
+      await encolar({ grupo: `mf:${id}`, descripcion: `Foto ${b.fotos + 1} · ${m.numero}`, metodo: 'POST', ruta: `/campo/manifiestos/${id}/evidencias`,
         form: { campos: { tipo: 'FOTO', tomadaEn: new Date().toISOString() }, archivo: blob, nombre: `foto-${m.numero}-${b.fotos + 1}.jpg` } });
       setMiniaturas((x) => [...x, URL.createObjectURL(blob)]);
       set('fotos', b.fotos + 1);
@@ -377,13 +370,13 @@ export function CampoManifiestoServidor() {
       for (const i of m.items) {
         const cantidad = num(b.cantidades[i.id]); const embalajes = b.embalajes[i.id] ? Number(b.embalajes[i.id]) : null;
         if (cantidad !== Number(i.cantidad) || embalajes !== i.embalajes)
-          await encolar({ grupo, descripcion: `Cantidad de ${i.declaracion.nombre} · ${m.numero}`, metodo: 'PATCH', ruta: `/manifiestos/${id}/items/${i.id}`, cuerpo: { cantidad, embalajes } });
+          await encolar({ grupo, descripcion: `Cantidad de ${i.declaracion.nombre} · ${m.numero}`, metodo: 'PATCH', ruta: `/campo/manifiestos/${id}/items/${i.id}`, cuerpo: { cantidad, embalajes } });
       }
       if (descargue && m.transporte && (b.conductorArlId !== (m.transporte.conductorArlId ?? '') || b.conductorEpsId !== (m.transporte.conductorEpsId ?? '')))
         await encolar({ grupo, descripcion: `Seguridad social del conductor · ${m.numero}`, metodo: 'PATCH', ruta: `/manifiestos/${id}`,
           cuerpo: { transporte: { empresaTransportadora: m.transporte.empresaTransportadora, placa: m.transporte.placa ?? undefined, conductorNombre: m.transporte.conductorNombre ?? undefined,
             conductorDocumento: m.transporte.conductorDocumento ?? undefined, conductorArlId: b.conductorArlId, conductorEpsId: b.conductorEpsId } } });
-      await encolar({ grupo, descripcion: `Grabar manifiesto ${m.numero}`, metodo: 'POST', ruta: `/manifiestos/${id}/grabar`, cuerpo: {
+      await encolar({ grupo, descripcion: `Grabar manifiesto ${m.numero}`, metodo: 'POST', ruta: `/campo/manifiestos/${id}/grabar`, cuerpo: {
         firma: b.firma, firmaNombre: b.firmaNombre.trim(), firmaDocumento: b.firmaDocumento.trim(),
         horaLlegada: isoColombia(m.fechaServicio, b.horaLlegada), horaSalida: isoColombia(m.fechaServicio, b.horaSalida),
         ...(b.pesoEntrada ? { pesoEntrada: num(b.pesoEntrada) } : {}), ...(b.pesoSalida ? { pesoSalida: num(b.pesoSalida) } : {}), ...(b.observaciones ? { observaciones: b.observaciones } : {}),

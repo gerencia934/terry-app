@@ -20,6 +20,18 @@ export interface DatosManifiesto {
   realizadoEn: string | null; anulacion: string | null;
 }
 
+/** Nota de la báscula (respuesta C2): cita el certificado de calibración; vencido a la fecha del servicio, sale con alerta. */
+export function notaBascula(configuracion: unknown, fechaServicio: Date): string | null {
+  const conf = (configuracion ?? {}) as { notaBascula?: string; bascula?: { identificacion?: string; certificado?: string; fecha?: string; laboratorio?: string; vigenteHasta?: string } };
+  const b = conf.bascula;
+  const f = (iso: string) => iso.split('-').reverse().join('-');
+  return b?.certificado?.trim()
+    ? `${b.vigenteHasta && b.vigenteHasta < fechaServicio.toISOString().slice(0, 10) ? `ATENCIÓN: el certificado de calibración venció el ${f(b.vigenteHasta)}; HSEQ debe revisar este pesaje. ` : ''}`
+      + `Pesaje en báscula ${b.identificacion?.trim() || ''}, calibrada según el certificado N.° ${b.certificado.trim()}${b.fecha ? ` del ${f(b.fecha)}` : ''}`
+      + `${b.laboratorio?.trim() ? `, expedido por ${b.laboratorio.trim()}` : ''}${b.vigenteHasta ? `, vigente hasta ${f(b.vigenteHasta)}` : ''}.`
+    : conf.notaBascula?.trim() || null;
+}
+
 const VERDE = '#0C481E', VERDE_CLARO = '#E2F1E5', GRIS = '#55615B';
 const fecha = (iso: string) => { const [a, m, d] = iso.slice(0, 10).split('-'); return `${d}/${m}/${a}`; };
 const hora = (iso: string | null) => (iso ? new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '—');

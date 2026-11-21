@@ -7,7 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import webpush from 'web-push';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorActual, Zod, type Actor } from '../common/http';
+import { ActorActual, PermiteCampo, Zod, type Actor } from '../common/http';
 import type { Config } from '../config';
 
 /** Lo que muestra el aviso. «ruta» es la sección de la app que abre al tocarlo; «etiqueta» agrupa avisos del mismo tema. */
@@ -97,6 +97,8 @@ export class Notificaciones {
   }
 }
 
+// Los avisos al celular también los usa la app de campo (cada quien solo maneja sus propios equipos)
+@PermiteCampo()
 @Controller('notificaciones/push')
 class NotificacionesController {
   constructor(private readonly n: Notificaciones, private readonly cfg: ConfigService<Config, true>) {}
