@@ -97,6 +97,11 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   (API + RLS), enlace firmado de 5 minutos, usuarios del cliente (administrador y consulta, sedes opcionales) e informe
   anual en Excel. Con el visto bueno del usuario («Sí, sigue») el administrador del cliente también carga sus
   declaraciones (quedan en revisión), pide servicios (quedan «por confirmar») y cancela los que nadie ha confirmado.
+  - ✅ autogestión (20-11-2026, pedido de la gerencia tras revisar Grinclic y el rol «Todos los clientes»): sedes con
+    ubicación GPS, declaraciones una por una con ficha de seguridad en PDF (corregir, retirar, inactivar), pedidos de
+    varias sedes con especificaciones y PDF, corregir y repetir pedidos, entrega en planta con vehículo, ARL y EPS, e
+    informe general por servicio (conciliado, precio, valor, factura y certificado). 113 pruebas de reglas y 522 e2e OK.
+    Producción no tenía clientes cargados al 20-11-2026: el portal sirve cuando se carguen clientes, sedes y usuarios.
 - Verificación en dos pasos (requisitos de producción §4): ✅ el 19-11-2026. App de autenticación (TOTP) con códigos de
   respaldo; obligatoria para el personal en producción (o antes, con el interruptor de Ajustes › Empresa) y opcional
   en el portal; la restablece otro administrador. 85 pruebas de reglas y 376 e2e OK.

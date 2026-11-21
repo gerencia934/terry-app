@@ -1,16 +1,18 @@
 // Portal de clientes: consulta y descarga de lo suyo. Los PDF se abren con un enlace firmado de 5 minutos que el API
 // entrega solo después de verificar que el documento es de la empresa (y de las sedes) del usuario.
 import { useState, type ReactNode } from 'react';
-import { Award, BadgeCheck, BarChart3, CalendarDays, Clock, Download, ExternalLink, FileStack, FileText, Loader2, MapPin, Plus, ShieldCheck, Truck, Upload, type LucideIcon } from 'lucide-react';
+import { Award, BadgeCheck, BarChart3, CalendarDays, Clock, Copy, Download, ExternalLink, FileStack, FileText, Loader2, MapPin, Paperclip, Pencil, Plus, Power, ShieldCheck, Trash2, Truck, Upload, Warehouse, type LucideIcon } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../../components/data';
-import { Badge, Button, Card, DefList, EstadoBadge, Field, Input, Kpi, PageHeader, Select, Sheet, useToast } from '../../components/ui';
+import { Badge, Button, Card, DefList, EstadoBadge, Field, Input, Kpi, PageHeader, Select, Sheet, Tabs, useToast } from '../../components/ui';
 import { API_URL, api } from '../../lib/api';
 import { PieLista, cant, fechaHoraCo, hoyCo, msg, useApi, usePaginado } from '../../lib/servidor';
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtNum } from '../../lib/format';
 import { descargar } from '../../cargues/descargar';
 import { nitConDv, puedeEscribir, usePortal } from './PortalApp';
-import { CancelarSolicitud, CargueDeclaraciones, PedirServicio, pedirAlEntrar } from './Escritura';
+import { CancelarSolicitud, CargueDeclaraciones, PedirServicio, pedirAlEntrar, type FormularioSolicitud } from './Escritura';
+import { FormDeclaracionPortal } from './FormDeclaracion';
+import { abrirEnlace, areaCls, errorPortal } from './comun';
 
 /** Pide el enlace firmado (5 minutos) y abre el PDF en otra pestaña. La pestaña se abre antes de esperar para que el navegador no la bloquee. */
 async function abrirDocumento(ruta: string) {
@@ -75,7 +77,9 @@ export function PortalInicio() {
         </Card>
         <Card title="Accesos rápidos">
           <div className="flex flex-col gap-2">
-            {puedeEscribir(yo) && <Acceso icon={Truck} titulo="Pedir un servicio" texto="Una recolección en sus sedes" onClick={() => { pedirAlEntrar.valor = true; go('portal-solicitudes'); }} />}
+            {puedeEscribir(yo) && <Acceso icon={Truck} titulo="Pedir una recolección" texto="Terra Viva recoge en sus sedes" onClick={() => { pedirAlEntrar.valor = true; go('portal-solicitudes'); }} />}
+            {puedeEscribir(yo) && <Acceso icon={Warehouse} titulo="Entrega en planta" texto="Usted lleva el residuo en su vehículo" onClick={() => { pedirAlEntrar.valor = 'DESCARGA'; go('portal-solicitudes'); }} />}
+            {puedeEscribir(yo) && <Acceso icon={FileText} titulo="Declarar un residuo" texto="Un residuo o servicio nuevo, con su ficha" onClick={() => { declararAlEntrar.valor = true; go('portal-declaraciones'); }} />}
             <Acceso icon={Award} titulo="Descargar certificados" texto="De tratamiento, disposición final y aprovechamiento" onClick={() => go('portal-certificados')} />
             {yo.cliente.activo && <AccesoCertificacionComercial />}
             <Acceso icon={FileStack} titulo="Ver manifiestos" texto="Cada recolección, con lo pesado en planta" onClick={() => go('portal-manifiestos')} />
@@ -107,9 +111,11 @@ interface DeclFila {
   id: string; numero: number; tipo: 'RESIDUO' | 'SERVICIO'; nombre: string; codigoInterno: string | null; estado: string; activa: boolean; esPeligroso: boolean | null;
   frecuenciaDias: number | null; cantidadFrecuencia: string | null; lineaServicio: { nombre: string } | null;
   sucursales: { sucursal: { id: string; codigo: string | null; nombre: string } }[]; disposiciones: { principal: boolean; disposicion: { nombre: string } }[]; precio: Precio | null;
+  estadoFisico: string | null; inflamable: boolean | null; tieneFichaSeguridad: boolean; codigoY: { codigo: string } | null; codigoA: { codigo: string } | null;
 }
 interface DeclDetalle extends Omit<DeclFila, 'sucursales' | 'precio'> {
-  composicion: string | null; descripcionProceso: string | null; descripcionServicio: string | null; estadoFisico: string | null; tieneFichaSeguridad: boolean;
+  composicion: string | null; descripcionProceso: string | null; descripcionServicio: string | null; estadoFisico: string | null; tieneFichaSeguridad: boolean; tieneCaracterizacion: boolean;
+  inflamable: boolean | null; contieneHidrocarburos: boolean; codigoUn: string | null; riesgos: { riesgo: { nombre: string } }[]; presentacion: string | null; material: { nombre: string } | null;
   observaciones: string | null; aprobadaEn: string | null; responsabilidadAceptada: boolean; aceptadaEn: string | null;
   categoria: { nombre: string } | null; tipoResiduo: { nombre: string } | null; codigoY: { codigo: string; descripcion: string } | null; codigoA: { codigo: string; descripcion: string } | null;
   tipoEmbalaje: { nombre: string } | null; sucursales: { activa: boolean; sucursal: { codigo: string | null; nombre: string } }[];
@@ -125,42 +131,59 @@ function EstadoDecl({ estado, activa }: { estado: string; activa: boolean }) {
 }
 const principal = (d: { disposiciones: { principal: boolean; disposicion: { nombre: string } }[] }) => (d.disposiciones.find((x) => x.principal) ?? d.disposiciones[0])?.disposicion.nombre;
 
+/** Abre el formulario de declaración al entrar (desde el acceso rápido del inicio). */
+export const declararAlEntrar = { valor: false };
+
 export function PortalDeclaraciones() {
   const yo = usePortal();
+  const toast = useToast();
   const [cargar, setCargar] = useState(false);
-  const vacio = { q: '', estado: '', tipo: '' };
+  const [formulario, setFormulario] = useState<null | { id?: string }>(() => { const v = declararAlEntrar.valor && puedeEscribir(yo); declararAlEntrar.valor = false; return v ? {} : null; });
+  const vacio = { q: '', estado: '', tipo: '', activa: '' };
   const [f, setF] = useState(vacio);
   const [texto, setTexto] = useState('');
   const [sel, setSel] = useState<string | null>(null);
-  const qs = new URLSearchParams({ ...(f.q && { q: f.q }), ...(f.estado && { estado: f.estado }), ...(f.tipo && { tipo: f.tipo }) }).toString();
+  const qs = new URLSearchParams({ ...(f.q && { q: f.q }), ...(f.estado && { estado: f.estado }), ...(f.tipo && { tipo: f.tipo }), ...(f.activa && { activa: f.activa }) }).toString();
   const lista = usePaginado<DeclFila>(`/portal/declaraciones?${qs}`);
+  const escribe = puedeEscribir(yo);
+  if (formulario) return (
+    <FormDeclaracionPortal id={formulario.id} volver={() => setFormulario(null)} listo={(r) => {
+      toast(formulario.id ? `Declaración N.° ${r.numero} corregida: queda en revisión de Terra Viva${r.estabaAutorizada ? ' (no se puede pedir hasta que la autoricen de nuevo)' : ''}.`
+        : `Declaración N.° ${r.numero} enviada: Terra Viva la revisa, fija la tarifa y la autoriza.`);
+      setFormulario(null); setSel(null); lista.recargar();
+    }} />
+  );
   const cols: Column<DeclFila>[] = [
     { key: 'n', header: 'N.º', render: (d) => <span className="num font-medium">{d.numero}</span>, priority: 3 },
     { key: 'nom', header: 'Residuo o servicio', render: (d) => <span className="flex max-w-[320px] flex-col"><span className="truncate font-medium">{d.nombre}</span>{d.codigoInterno && <span className="text-[12px] text-muted">Su código: {d.codigoInterno}</span>}</span>, priority: 3 },
-    { key: 't', header: 'Tipo', render: (d) => <span className="flex flex-wrap gap-1"><Badge>{d.tipo === 'RESIDUO' ? 'Residuo' : 'Servicio'}</Badge>{d.esPeligroso && <Badge tone="warn">Peligroso</Badge>}</span>, priority: 2 },
+    { key: 't', header: 'Clasificación', render: (d) => <span className="flex flex-wrap gap-1"><Badge>{d.tipo === 'RESIDUO' ? 'Residuo' : 'Servicio'}</Badge>{d.esPeligroso && <Badge tone="warn">Peligroso{d.codigoY || d.codigoA ? ` · ${[d.codigoY?.codigo, d.codigoA?.codigo].filter(Boolean).join(' / ')}` : ''}</Badge>}{d.inflamable && <Badge tone="bad">Inflamable</Badge>}</span>, priority: 2 },
+    { key: 'ef', header: 'Estado físico', render: (d) => (d.estadoFisico ? FISICO[d.estadoFisico] ?? d.estadoFisico : '—'), priority: 1 },
     { key: 's', header: 'Sedes', render: (d) => <span className="block max-w-[220px] truncate">{d.sucursales.map((s) => s.sucursal.nombre).join(', ') || '—'}</span>, priority: 1 },
     { key: 'disp', header: 'Tratamiento', render: (d) => <span className="block max-w-[220px] truncate">{principal(d) ?? '—'}</span>, priority: 1 },
+    { key: 'fds', header: 'Ficha', render: (d) => (d.tieneFichaSeguridad ? <span title="Ficha de datos de seguridad en el expediente" className="text-ok"><Paperclip size={15} /></span> : <span className="text-subtle">—</span>), priority: 1 },
     { key: 'p', header: 'Tarifa vigente', align: 'right', render: (d) => (d.precio ? <span className="whitespace-nowrap">{precioTexto(d.precio)}</span> : '—'), priority: 2 },
     { key: 'e', header: 'Estado', render: (d) => <EstadoDecl estado={d.estado} activa={d.activa} />, priority: 3 },
   ];
   return (
     <>
-      <PageHeader title="Declaraciones" subtitle="Los residuos y servicios que su empresa tiene declarados con Terra Viva. Una declaración autorizada y activa es la que se puede pedir y recoger; las que usted carga quedan en revisión."
-        actions={puedeEscribir(yo) ? <Button variant="primary" onClick={() => setCargar(true)}><Upload size={16} /> Cargar declaraciones</Button> : undefined} />
-      <FilterBar active={Number(!!f.q) + Number(!!f.estado) + Number(!!f.tipo)} onClear={() => { setF(vacio); setTexto(''); }}>
+      <PageHeader title="Declaraciones" subtitle="Los residuos y servicios que su empresa tiene declarados con Terra Viva. Una declaración autorizada y activa es la que se puede pedir y recoger; las que usted declara o corrige quedan en revisión."
+        actions={escribe ? <div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => setFormulario({})}><Plus size={16} /> Nueva declaración</Button>
+          <Button onClick={() => setCargar(true)}><Upload size={16} /> Cargar varias desde Excel</Button></div> : undefined} />
+      <FilterBar active={Number(!!f.q) + Number(!!f.estado) + Number(!!f.tipo) + Number(!!f.activa)} onClear={() => { setF(vacio); setTexto(''); }}>
         <Field label="Buscar" id="pd-q"><Input id="pd-q" value={texto} onChange={(e) => setTexto(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setF((s) => ({ ...s, q: texto.trim() }))}
           onBlur={() => setF((s) => ({ ...s, q: texto.trim() }))} placeholder="Nombre o su código · Enter" /></Field>
         <Field label="Estado" id="pd-e"><Select id="pd-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}>
           <option value="">Todos</option><option value="AUTORIZADA">Autorizadas</option><option value="PENDIENTE">En revisión</option><option value="BORRADOR">En preparación</option><option value="RECHAZADA">Rechazadas</option>
         </Select></Field>
+        <Field label="Activo / inactivo" id="pd-a"><Select id="pd-a" value={f.activa} onChange={(e) => setF((s) => ({ ...s, activa: e.target.value }))}><option value="">Todos</option><option value="true">Activos</option><option value="false">Inactivos</option></Select></Field>
         <Field label="Tipo" id="pd-t"><Select id="pd-t" value={f.tipo} onChange={(e) => setF((s) => ({ ...s, tipo: e.target.value }))}><option value="">Todos</option><option value="RESIDUO">Residuos</option><option value="SERVICIO">Servicios</option></Select></Field>
       </FilterBar>
       {lista.error ? <Aviso texto={lista.error} /> : !lista.filas ? <Cargando />
         : <ResponsiveTable rows={lista.filas} columns={cols} rowKey={(d) => d.id} onRowClick={(d) => setSel(d.id)} cardTitle={(d) => d.nombre} cardBadge={(d) => <EstadoDecl estado={d.estado} activa={d.activa} />}
             cardMeta={(d) => `N.º ${d.numero}${d.codigoInterno ? ` · su código ${d.codigoInterno}` : ''}`}
             footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />}
-            empty="No hay declaraciones con estos filtros." />}
-      <Sheet open={!!sel} onClose={() => setSel(null)} title="Declaración">{sel && <DetalleDeclaracion id={sel} />}</Sheet>
+            empty={escribe ? 'No hay declaraciones con estos filtros. Declare un residuo o servicio con «Nueva declaración».' : 'No hay declaraciones con estos filtros.'} />}
+      <Sheet open={!!sel} onClose={() => setSel(null)} title="Declaración">{sel && <DetalleDeclaracion id={sel} escribe={escribe} corregir={() => setFormulario({ id: sel })} cambio={() => { setSel(null); lista.recargar(); }} />}</Sheet>
       <Sheet open={cargar} onClose={() => setCargar(false)} title="Cargar declaraciones">
         {cargar && <CargueDeclaraciones listo={() => { setCargar(false); lista.recargar(); }} />}
       </Sheet>
@@ -168,13 +191,28 @@ export function PortalDeclaraciones() {
   );
 }
 
-function DetalleDeclaracion({ id }: { id: string }) {
+function DetalleDeclaracion({ id, escribe, corregir, cambio }: { id: string; escribe: boolean; corregir: () => void; cambio: () => void }) {
+  const toast = useToast();
   const { datos: d, error } = useApi<DeclDetalle>(`/portal/declaraciones/${id}`);
+  const [accion, setAccion] = useState<'' | 'retirar' | 'inactivar'>('');
+  const [motivo, setMotivo] = useState('');
+  const [ocupado, setOcupado] = useState(false);
   if (error) return <Aviso texto={error} />;
   if (!d) return <Cargando />;
   const hoy = hoyCo();
   const vigente = d.tarifas.find((t) => t.vigenteDesde.slice(0, 10) <= hoy && (!t.vigenteHasta || t.vigenteHasta.slice(0, 10) >= hoy));
   const residuo = d.tipo === 'RESIDUO';
+  const autorizada = d.estado === 'AUTORIZADA';
+  const ver = (cual: 'ficha' | 'caracterizacion') => abrirEnlace(`/portal/declaraciones/${id}/${cual}/enlace`).catch((e) => toast(errorPortal(e, 'No se pudo abrir el documento.'), 'warn'));
+  const confirmar = async () => {
+    setOcupado(true);
+    try {
+      await api(`/portal/declaraciones/${id}/${accion}`, { cuerpo: { motivo: motivo.trim() } });
+      toast(accion === 'retirar' ? `Declaración N.° ${d.numero} retirada.` : `Declaración N.° ${d.numero} inactivada: ya no se puede pedir. Para volver a activarla, escríbale a Terra Viva.`);
+      cambio();
+    } catch (e) { toast(errorPortal(e, 'No se pudo completar.'), 'warn'); }
+    setOcupado(false);
+  };
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -185,19 +223,26 @@ function DetalleDeclaracion({ id }: { id: string }) {
         ['Número', <span className="num">{d.numero}</span>], ['Su código', d.codigoInterno ?? '—'], ['Línea de servicio', d.lineaServicio?.nombre ?? '—'],
         ...(residuo ? [
           ['Categoría', d.categoria?.nombre ?? '—'], ['Tipo de residuo', d.tipoResiduo?.nombre ?? '—'], ['Estado físico', d.estadoFisico ? FISICO[d.estadoFisico] ?? d.estadoFisico : '—'],
-          ['Embalaje', d.tipoEmbalaje?.nombre ?? '—'],
-          ...(d.esPeligroso ? [['Corriente Y / código A', [d.codigoY && `${d.codigoY.codigo} ${d.codigoY.descripcion}`, d.codigoA && `${d.codigoA.codigo} ${d.codigoA.descripcion}`].filter(Boolean).join(' · ') || '—'] as [string, ReactNode]] : []),
+          ['Inflamable', d.inflamable === null ? '—' : d.inflamable ? 'Sí' : 'No'], ['Contiene hidrocarburos', d.contieneHidrocarburos ? 'Sí' : 'No'],
+          ['Embalaje', [d.tipoEmbalaje?.nombre, d.material?.nombre, d.presentacion].filter(Boolean).join(' · ') || '—'],
+          ...(d.esPeligroso ? [['Corriente Y / código A', [d.codigoY && `${d.codigoY.codigo} ${d.codigoY.descripcion}`, d.codigoA && `${d.codigoA.codigo} ${d.codigoA.descripcion}`].filter(Boolean).join(' · ') || '—'] as [string, ReactNode],
+            ['Características de peligrosidad', d.riesgos.map((r) => r.riesgo.nombre).join(', ') || '—'] as [string, ReactNode], ['Número UN', d.codigoUn ?? '—'] as [string, ReactNode]] : []),
           ['Composición', d.composicion ?? '—'], ['Proceso que lo genera', d.descripcionProceso ?? '—'],
-          ['Ficha de datos de seguridad', d.tieneFichaSeguridad ? 'En el expediente de Terra Viva' : 'No cargada'],
         ] as [string, ReactNode][] : [['Descripción', d.descripcionServicio ?? '—'] as [string, ReactNode]]),
         ['Frecuencia', d.frecuenciaDias ? `Cada ${d.frecuenciaDias} días${d.cantidadFrecuencia ? ` · ${cant(d.cantidadFrecuencia)} por servicio` : ''}` : 'A solicitud'],
-        ['Tratamiento', d.disposiciones.map((x) => `${x.disposicion.nombre}${x.principal && d.disposiciones.length > 1 ? ' (principal)' : ''}`).join(' · ') || '—'],
+        ['Tratamiento', d.disposiciones.map((x) => `${x.disposicion.nombre}${x.principal && d.disposiciones.length > 1 ? ' (principal)' : ''}`).join(' · ') || 'Lo define Terra Viva'],
         ['Sedes', d.sucursales.filter((s) => s.activa).map((s) => `${s.sucursal.codigo ? `${s.sucursal.codigo} · ` : ''}${s.sucursal.nombre}`).join(', ') || '—'],
         ['Tarifa vigente', vigente ? precioTexto(vigente) : '—'],
         ['Autorizada', d.aprobadaEn ? fechaHoraCo(d.aprobadaEn) : '—'],
         ['Responsabilidad del generador', d.responsabilidadAceptada ? `Aceptada${d.aceptadaEn ? ` el ${fechaHoraCo(d.aceptadaEn)}` : ''}` : 'Sin aceptar'],
       ]} />
-      {d.observaciones && <p className="rounded-lg bg-surface-2 p-3 text-[13px] text-muted">{d.observaciones}</p>}
+      {(d.tieneFichaSeguridad || d.tieneCaracterizacion) && (
+        <div className="flex flex-wrap gap-2">
+          {d.tieneFichaSeguridad && <Button size="sm" onClick={() => ver('ficha')}><Paperclip size={14} /> Ficha de datos de seguridad</Button>}
+          {d.tieneCaracterizacion && <Button size="sm" onClick={() => ver('caracterizacion')}><Paperclip size={14} /> Caracterización</Button>}
+        </div>
+      )}
+      {d.observaciones && <p className="whitespace-pre-line rounded-lg bg-surface-2 p-3 text-[13px] text-muted">{d.observaciones}</p>}
       {d.tarifas.length > 1 && (
         <div>
           <h3 className="mb-2 text-[14px] font-semibold">Historial de tarifas</h3>
@@ -206,7 +251,25 @@ function DetalleDeclaracion({ id }: { id: string }) {
           </ul>
         </div>
       )}
-      <p className="text-[12px] text-subtle">¿Necesita corregir algo? Escríbale a su asesor comercial de Terra Viva: los cambios a una declaración autorizada pasan por revisión.</p>
+      {escribe && !accion && (
+        <div className="flex flex-wrap gap-2 border-t border-line pt-4">
+          <Button size="sm" variant="primary" onClick={corregir}><Pencil size={14} /> Corregir</Button>
+          {!autorizada && <Button size="sm" variant="ghost" onClick={() => setAccion('retirar')}><Trash2 size={14} /> Retirar</Button>}
+          {autorizada && d.activa && <Button size="sm" variant="ghost" onClick={() => setAccion('inactivar')}><Power size={14} /> Ya no lo genero: inactivar</Button>}
+        </div>
+      )}
+      {escribe && autorizada && !accion && <p className="text-[12px] text-subtle">Corregir una declaración autorizada la devuelve a revisión: no se puede pedir hasta que Terra Viva la autorice de nuevo.</p>}
+      {accion && (
+        <div className="flex flex-col gap-2 rounded-xl border border-bad/30 bg-bad/5 p-3">
+          <p className="text-[13px] font-medium">{accion === 'retirar' ? '¿Retirar esta declaración? Queda anulada como constancia y su código interno queda libre.' : '¿Inactivarla? Ya no se podrá pedir; para activarla de nuevo, escríbale a Terra Viva.'}</p>
+          <Field label="Motivo" id="dd-m"><textarea id="dd-m" className={areaCls} value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={300} placeholder={accion === 'retirar' ? 'Ej.: la declaramos por error' : 'Ej.: cambiamos el proceso y ya no lo generamos'} /></Field>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { setAccion(''); setMotivo(''); }}>Volver</Button>
+            <Button size="sm" variant="danger" disabled={motivo.trim().length < 5 || ocupado} onClick={confirmar}>{ocupado && <Loader2 size={14} className="animate-spin" />}{accion === 'retirar' ? 'Retirar' : 'Inactivar'}</Button>
+          </div>
+        </div>
+      )}
+      {!escribe && <p className="text-[12px] text-subtle">¿Necesita corregir algo? Pídaselo al administrador de su empresa en el portal o a su asesor comercial de Terra Viva.</p>}
     </div>
   );
 }
@@ -214,25 +277,42 @@ function DetalleDeclaracion({ id }: { id: string }) {
 // ---------------- Solicitudes ----------------
 interface SolFila {
   id: string; numero: number; clase: 'PRE' | 'FORMAL'; operacion: 'CARGA' | 'DESCARGA'; fechaSolicitada: string; aprobacion: 'PENDIENTE' | 'APROBADA' | 'NO_APROBADA'; estado: string;
-  ordenCompra: string | null; observaciones: string | null;
-  items: { id: string; estado: string; cantidadEstimada: string | null; cantidadReal: string | null; declaracion: { nombre: string; codigoInterno: string | null }; sucursal: { nombre: string } }[];
+  ordenCompra: string | null; observaciones: string | null; totalEstimado: number | null; telefonoContacto: string | null; tieneAdjunto: boolean; createdAt: string;
+  destino: { razonSocial: string } | null; transporte: { empresaTransportadora: string; tipoVehiculo: string | null; placa: string | null; conductorNombre: string | null } | null;
+  items: { id: string; estado: string; cantidadEstimada: string | null; cantidadReal: string | null; jornada: string | null; declaracion: { nombre: string; codigoInterno: string | null };
+    sucursal: { nombre: string }; especificaciones: { especificacion: { nombre: string } }[] }[];
 }
 const ITEM: Record<string, { t: string; tono: 'neutral' | 'info' | 'ok' }> = { PENDIENTE: { t: 'Por programar', tono: 'neutral' }, PROGRAMADO: { t: 'Programado', tono: 'info' }, REALIZADO: { t: 'Recogido', tono: 'ok' }, DESCARTADO: { t: 'Descartado', tono: 'neutral' } };
+const JORNADA: Record<string, string> = { AM: 'mañana', PM: 'tarde', DIA: 'todo el día' };
 function EstadoSol({ s }: { s: SolFila }) {
   if (s.aprobacion === 'NO_APROBADA') return <EstadoBadge estado="NO_APROBADA" />;
   if (s.aprobacion === 'PENDIENTE' && s.estado === 'PENDIENTE') return <Badge tone="warn" dot>Por confirmar</Badge>;
   return <EstadoBadge estado={s.estado} />;
 }
 const origen = (s: SolFila) => (s.clase === 'PRE' ? 'Recurrente' : s.operacion === 'DESCARGA' ? 'Entrega en planta' : 'Recolección');
+const porConfirmar = (s: SolFila) => s.clase === 'FORMAL' && s.aprobacion === 'PENDIENTE' && s.estado === 'PENDIENTE';
 
 export function PortalSolicitudes() {
   const yo = usePortal();
-  const admin = yo.perfil === 'ADMIN';
+  const toast = useToast();
   const escribe = puedeEscribir(yo);
-  const lista = usePaginado<SolFila>('/portal/solicitudes');
+  const vacio = { estado: '', operacion: '', desde: '', hasta: '' };
+  const [f, setF] = useState(vacio);
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const lista = usePaginado<SolFila>(`/portal/solicitudes?${qs}`);
   const [sel, setSel] = useState<SolFila | null>(null);
-  const [pedir, setPedir] = useState(() => { const v = pedirAlEntrar.valor && escribe; pedirAlEntrar.valor = false; return v; });
+  const [pedir, setPedir] = useState<null | { modo: 'nuevo' | 'editar' | 'repetir'; base?: FormularioSolicitud; operacion?: 'CARGA' | 'DESCARGA' }>(() => {
+    const v = pedirAlEntrar.valor; pedirAlEntrar.valor = false;
+    return v && escribe ? { modo: 'nuevo', operacion: v === 'DESCARGA' ? 'DESCARGA' : 'CARGA' } : null;
+  });
+  const [abriendo, setAbriendo] = useState(false);
   const residuos = (s: SolFila) => { const n = s.items.map((i) => i.declaracion.nombre); return n.length > 2 ? `${n.slice(0, 2).join(', ')} y ${n.length - 2} más` : n.join(', ') || '—'; };
+  const desde = async (modo: 'editar' | 'repetir', s: SolFila) => {
+    setAbriendo(true);
+    try { const base = await api<FormularioSolicitud>(`/portal/solicitudes/${s.id}/formulario`); setSel(null); setPedir({ modo, base }); }
+    catch (e) { toast(errorPortal(e, 'No se pudo abrir la solicitud.'), 'warn'); }
+    setAbriendo(false);
+  };
   const cols: Column<SolFila>[] = [
     { key: 'n', header: 'N.º', render: (s) => <span className="num font-medium">{s.numero}</span>, priority: 3 },
     { key: 'f', header: 'Fecha', render: (s) => <span className="whitespace-nowrap">{fmtFecha(s.fechaSolicitada)}</span>, priority: 2 },
@@ -244,35 +324,58 @@ export function PortalSolicitudes() {
   ];
   return (
     <>
-      <PageHeader title="Solicitudes de servicio" subtitle="Las recolecciones pedidas para su empresa y en qué van. Lo que usted pide queda «por confirmar» hasta que Terra Viva lo apruebe y lo programe; las recurrentes salen de la frecuencia de cada declaración."
-        actions={escribe ? <Button variant="primary" onClick={() => setPedir(true)}><Plus size={16} /> Pedir un servicio</Button> : undefined} />
+      <PageHeader title="Solicitudes de servicio" subtitle="Las recolecciones y entregas en planta pedidas para su empresa y en qué van. Lo que usted pide queda «por confirmar» hasta que Terra Viva lo apruebe y lo programe; mientras tanto lo puede corregir o cancelar."
+        actions={escribe ? <div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => setPedir({ modo: 'nuevo', operacion: 'CARGA' })}><Plus size={16} /> Pedir una recolección</Button>
+          <Button onClick={() => setPedir({ modo: 'nuevo', operacion: 'DESCARGA' })}><Truck size={16} /> Entrega en planta</Button></div> : undefined} />
+      <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => setF(vacio)}>
+        <Field label="Estado" id="sl-e"><Select id="sl-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}>
+          <option value="">Todos</option><option value="POR_CONFIRMAR">Por confirmar</option><option value="PENDIENTE">Confirmadas, por programar</option><option value="PROGRAMADA">Programadas</option>
+          <option value="EN_CURSO">En curso</option><option value="RECOLECTADA">Recogidas</option><option value="CANCELADA">Canceladas</option><option value="NO_APROBADA">No aprobadas</option>
+        </Select></Field>
+        <Field label="Tipo" id="sl-t"><Select id="sl-t" value={f.operacion} onChange={(e) => setF((s) => ({ ...s, operacion: e.target.value }))}><option value="">Todos</option><option value="CARGA">Recolecciones</option><option value="DESCARGA">Entregas en planta</option></Select></Field>
+        <Field label="Desde" id="sl-d"><Input id="sl-d" type="date" value={f.desde} onChange={(e) => setF((s) => ({ ...s, desde: e.target.value }))} /></Field>
+        <Field label="Hasta" id="sl-h"><Input id="sl-h" type="date" value={f.hasta} onChange={(e) => setF((s) => ({ ...s, hasta: e.target.value }))} /></Field>
+      </FilterBar>
       {lista.error ? <Aviso texto={lista.error} /> : !lista.filas ? <Cargando />
-        : <ResponsiveTable rows={lista.filas} columns={cols} rowKey={(s) => s.id} onRowClick={setSel} cardTitle={(s) => <span>Solicitud <span className="num">{s.numero}</span></span>}
-            cardBadge={(s) => <EstadoSol s={s} />} cardMeta={residuos}
+        : <ResponsiveTable rows={lista.filas} columns={cols} rowKey={(s) => s.id} onRowClick={setSel} cardTitle={(s) => <span>{origen(s)} <span className="num">{s.numero}</span></span>}
+            cardBadge={(s) => <EstadoSol s={s} />} cardMeta={(s) => `${fmtFecha(s.fechaSolicitada)} · ${residuos(s)}`}
             footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />}
-            empty="Su empresa aún no tiene solicitudes de servicio." />}
-      <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? <span>Solicitud <span className="num">{sel.numero}</span></span> : ''}>
+            empty={Object.values(f).some(Boolean) ? 'No hay solicitudes con estos filtros.' : 'Su empresa aún no tiene solicitudes de servicio.'} />}
+      <Sheet open={!!sel} onClose={() => setSel(null)} title={sel ? <span>{origen(sel)} <span className="num">{sel.numero}</span></span> : ''}>
         {sel && (
           <div className="flex flex-col gap-5">
-            <DefList items={[['Fecha', fmtFecha(sel.fechaSolicitada)], ['Tipo', origen(sel)], ['Estado', <EstadoSol s={sel} />], ['Orden de compra', sel.ordenCompra ?? '—'], ...(sel.observaciones ? [['Observaciones', sel.observaciones] as [string, ReactNode]] : [])]} />
+            <DefList items={[['Fecha', fmtFecha(sel.fechaSolicitada)], ['Tipo', origen(sel)], ['Estado', <EstadoSol s={sel} />], ['Orden de compra', sel.ordenCompra ?? '—'],
+              ...(sel.totalEstimado ? [['Valor estimado', fmtCOP(sel.totalEstimado)] as [string, ReactNode]] : []),
+              ...(sel.operacion === 'DESCARGA' ? [['Planta', sel.destino?.razonSocial ?? '—'] as [string, ReactNode],
+                ['Vehículo', sel.transporte ? [sel.transporte.placa, sel.transporte.tipoVehiculo, sel.transporte.empresaTransportadora].filter(Boolean).join(' · ') : '—'] as [string, ReactNode],
+                ['Conductor', sel.transporte?.conductorNombre ?? '—'] as [string, ReactNode], ['Teléfono de contacto', sel.telefonoContacto ?? '—'] as [string, ReactNode]] : []),
+              ...(sel.observaciones ? [['Observaciones', <span className="whitespace-pre-line">{sel.observaciones}</span>] as [string, ReactNode]] : [])]} />
+            {sel.tieneAdjunto && <div><Button size="sm" onClick={() => abrirEnlace(`/portal/solicitudes/${sel.id}/adjunto/enlace`).catch((e) => toast(errorPortal(e, 'No se pudo abrir el PDF.'), 'warn'))}><Paperclip size={14} /> Ver el PDF adjunto</Button></div>}
             <div>
               <h3 className="mb-2 text-[14px] font-semibold">Residuos ({sel.items.length})</h3>
               <ul className="flex flex-col gap-2">
                 {sel.items.map((i) => (
                   <li key={i.id} className="rounded-xl border border-line p-3 text-[13px]">
                     <div className="flex items-start justify-between gap-2"><span className="font-medium">{i.declaracion.nombre}</span><Badge tone={ITEM[i.estado]?.tono ?? 'neutral'}>{ITEM[i.estado]?.t ?? i.estado}</Badge></div>
-                    <p className="mt-1 flex items-center gap-1 text-muted"><MapPin size={12} />{i.sucursal.nombre}</p>
+                    <p className="mt-1 flex items-center gap-1 text-muted"><MapPin size={12} />{i.sucursal.nombre}{i.jornada ? ` · ${JORNADA[i.jornada] ?? i.jornada}` : ''}</p>
                     <p className="mt-0.5 text-muted">Estimado: <span className="num">{cant(i.cantidadEstimada)}</span>{i.cantidadReal !== null && <> · Recogido: <span className="num">{cant(i.cantidadReal)}</span></>}</p>
+                    {i.especificaciones.length > 0 && <p className="mt-1 flex flex-wrap gap-1">{i.especificaciones.map((e) => <Badge key={e.especificacion.nombre}>{e.especificacion.nombre}</Badge>)}</p>}
                   </li>
                 ))}
               </ul>
             </div>
-            {admin && sel.aprobacion === 'PENDIENTE' && sel.estado === 'PENDIENTE' && <CancelarSolicitud id={sel.id} numero={sel.numero} listo={() => { setSel(null); lista.recargar(); }} />}
+            {escribe && (
+              <div className="flex flex-wrap gap-2 border-t border-line pt-4">
+                {porConfirmar(sel) && <Button size="sm" variant="primary" disabled={abriendo} onClick={() => desde('editar', sel)}><Pencil size={14} /> Corregir</Button>}
+                {sel.clase === 'FORMAL' && <Button size="sm" disabled={abriendo} onClick={() => desde('repetir', sel)}><Copy size={14} /> Pedir de nuevo</Button>}
+              </div>
+            )}
+            {yo.perfil === 'ADMIN' && porConfirmar(sel) && <CancelarSolicitud id={sel.id} numero={sel.numero} listo={() => { setSel(null); lista.recargar(); }} />}
           </div>
         )}
       </Sheet>
-      <Sheet open={pedir} onClose={() => setPedir(false)} title="Pedir un servicio">
-        {pedir && <PedirServicio listo={() => { setPedir(false); lista.recargar(); }} />}
+      <Sheet open={!!pedir} onClose={() => setPedir(null)} title={pedir?.modo === 'editar' ? `Corregir la solicitud ${pedir.base?.numero ?? ''}` : pedir?.modo === 'repetir' ? `Pedir de nuevo la ${pedir.base?.numero ?? ''}` : 'Pedir un servicio'}>
+        {pedir && <PedirServicio modo={pedir.modo} base={pedir.base} operacionInicial={pedir.operacion} listo={() => { setPedir(null); lista.recargar(); }} />}
       </Sheet>
     </>
   );
@@ -436,7 +539,7 @@ async function excelInforme(inf: Informe, cliente: { razonSocial: string; nit: s
   descargar(await wb.xlsx.writeBuffer() as ArrayBuffer, `informe-residuos-${inf.anio}-${cliente.nit}.xlsx`);
 }
 
-export function PortalInformes() {
+function InformeAnual({ tabs }: { tabs: ReactNode }) {
   const yo = usePortal();
   const toast = useToast();
   const actual = anioActual();
@@ -451,6 +554,7 @@ export function PortalInformes() {
           setBajando(true);
           try { await excelInforme(inf!, yo.cliente); } catch { toast('No se pudo generar el Excel.', 'warn'); } finally { setBajando(false); }
         }}>{bajando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Descargar Excel</Button>} />
+      <div className="mb-4">{tabs}</div>
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Field label="Año" id="pi-a"><Select id="pi-a" value={anio} onChange={(e) => setAnio(Number(e.target.value))} className="w-32">{Array.from({ length: 6 }, (_, i) => actual - i).map((y) => <option key={y} value={y}>{y}</option>)}</Select></Field>
         {cargando && <Loader2 size={18} className="mb-2.5 animate-spin text-muted" />}
@@ -482,6 +586,119 @@ export function PortalInformes() {
                     {inf.kgPorMes.map((x, i) => <td key={i} className="num px-2 py-2 text-right">{celda(x)}</td>)}
                     <td className="num px-3 py-2 text-right">{cant(inf.totalKg)}</td>
                   </tr>
+                </tbody>
+              </table></div>
+            </Card>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+/** Informes: el resumen del año (por residuo y mes) y el informe general (cada servicio, con lo conciliado y su valor). */
+export function PortalInformes() {
+  const [vista, setVista] = useState<'anio' | 'general'>('anio');
+  const tabs = <Tabs value={vista} onChange={setVista} items={[{ value: 'anio', label: 'Resumen del año' }, { value: 'general', label: 'Informe general por servicio' }]} />;
+  return vista === 'anio' ? <InformeAnual tabs={tabs} /> : <InformeGeneral tabs={tabs} />;
+}
+
+// ---------------- Informe general (detalle por servicio) ----------------
+interface LineaGeneral {
+  id: string; fecha: string; manifiesto: string; tipo: 'CARGUE' | 'DESCARGUE'; ordenCompra: string | null; sede: string; sedeCodigo: string | null; declaracion: number; residuo: string;
+  codigoInterno: string | null; peligroso: boolean | null; cargado: number; unidad: string | null; conciliada: boolean; pesado: number | null; unidadPlanta: string | null;
+  tratamiento: string | null; destino: string; precio: number | null; valor: number | null; negociacion: string | null; factura: string | null; certificado: string | null;
+}
+const NEGOCIACION: Record<string, string> = { COBRO: 'Cobro', COMPRA: 'Compra (Terra Viva le paga)', SIN_COSTO: 'Sin costo', CONTRATO: 'Por contrato' };
+async function excelGeneral(lineas: LineaGeneral[], desde: string, hasta: string, cliente: { razonSocial: string; nit: string; dv: string | null }) {
+  const ExcelJS = ((await import('exceljs')) as unknown as { default: typeof import('exceljs') }).default;
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Terry-App · Terra Viva';
+  const ws = wb.addWorksheet('Informe general');
+  ws.addRow([`Informe general de servicios del ${desde} al ${hasta}`]).font = { bold: true, size: 14 };
+  ws.addRow([`${cliente.razonSocial} · NIT ${nitConDv(cliente)}`]);
+  ws.addRow([`Generado el ${fechaHoraCo(new Date().toISOString())} en el portal de clientes. «En planta», precio y valor aparecen cuando la conciliación está aprobada.`]);
+  ws.addRow([]);
+  const enc = ws.addRow(['Fecha', 'Manifiesto', 'Servicio', 'Sede', 'Código sede', 'N.º declaración', 'Residuo o servicio', 'Su código', 'Peligroso', 'Cargado en la sede', 'Unidad',
+    'Conciliado', 'En planta', 'Unidad en planta', 'Tratamiento', 'Destino', 'Precio unitario', 'Valor', 'Negociación', 'Factura', 'Certificado', 'Orden de compra']);
+  enc.font = { bold: true };
+  enc.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE3F1E0' } }; });
+  for (const l of lineas) ws.addRow([l.fecha, l.manifiesto, l.tipo === 'CARGUE' ? 'Recolección' : 'Entrega en planta', l.sede, l.sedeCodigo ?? '', l.declaracion, l.residuo, l.codigoInterno ?? '',
+    l.peligroso ? 'Sí' : 'No', l.cargado, l.unidad ?? '', l.conciliada ? 'Sí' : 'En revisión', l.pesado ?? '', l.unidadPlanta ?? '', l.tratamiento ?? '', l.destino, l.precio ?? '', l.valor ?? '',
+    l.negociacion ? NEGOCIACION[l.negociacion] ?? l.negociacion : '', l.factura ?? '', l.certificado ?? '', l.ordenCompra ?? '']);
+  const anchos = [11, 12, 16, 26, 12, 14, 40, 12, 10, 14, 9, 12, 12, 12, 32, 30, 14, 15, 18, 14, 14, 16];
+  anchos.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  for (const c of [10, 13]) ws.getColumn(c).numFmt = '#,##0.##';
+  for (const c of [17, 18]) ws.getColumn(c).numFmt = '"$"#,##0';
+  ws.views = [{ state: 'frozen', ySplit: 5 }];
+  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5 + lineas.length, column: anchos.length } };
+  descargar(await wb.xlsx.writeBuffer() as ArrayBuffer, `informe-general-${desde}-a-${hasta}-${cliente.nit}.xlsx`);
+}
+
+function InformeGeneral({ tabs }: { tabs: ReactNode }) {
+  const yo = usePortal();
+  const toast = useToast();
+  const hoy = hoyCo();
+  const [desde, setDesde] = useState(`${hoy.slice(0, 4)}-01-01`);
+  const [hasta, setHasta] = useState(hoy);
+  const [sede, setSede] = useState('');
+  const [bajando, setBajando] = useState(false);
+  const valido = !!desde && !!hasta && desde <= hasta;
+  const { datos, error, cargando } = useApi<{ lineas: LineaGeneral[]; recortado: boolean }>(valido ? `/portal/informe-general?${new URLSearchParams({ desde, hasta, ...(sede ? { sucursalId: sede } : {}) })}` : null);
+  const lineas = datos?.lineas ?? [];
+  const porUnidad = (pares: [string | null, number | null][]) => {
+    const m = new Map<string, number>();
+    for (const [u, x] of pares) if (x !== null) m.set(u ?? '', (m.get(u ?? '') ?? 0) + x);
+    return [...m.entries()].map(([u, x]) => `${cant(x)}${u ? ` ${u}` : ''}`).join(' · ') || '—';
+  };
+  const conciliadas = lineas.filter((l) => l.conciliada);
+  const valor = conciliadas.reduce((s, l) => s + (l.valor ?? 0), 0);
+  return (
+    <>
+      <PageHeader title="Informes" subtitle="Cada servicio del periodo: lo cargado en su sede y, cuando la conciliación está aprobada, lo pesado en planta, el tratamiento, el precio, el valor, la factura y el certificado."
+        actions={<Button variant="primary" disabled={!lineas.length || bajando} onClick={async () => {
+          setBajando(true);
+          try { await excelGeneral(lineas, desde, hasta, yo.cliente); } catch { toast('No se pudo generar el Excel.', 'warn'); } finally { setBajando(false); }
+        }}>{bajando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Descargar Excel</Button>} />
+      <div className="mb-4">{tabs}</div>
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Field label="Desde" id="ig-d"><Input id="ig-d" type="date" value={desde} max={hasta || undefined} onChange={(e) => setDesde(e.target.value)} /></Field>
+        <Field label="Hasta" id="ig-h"><Input id="ig-h" type="date" value={hasta} min={desde || undefined} onChange={(e) => setHasta(e.target.value)} /></Field>
+        {yo.sedes.length > 1 && <Field label="Sede" id="ig-s"><Select id="ig-s" value={sede} onChange={(e) => setSede(e.target.value)} className="min-w-[200px]"><option value="">{yo.restringido ? 'Mis sedes' : 'Todas'}</option>{yo.sedes.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}</Select></Field>}
+        {cargando && <Loader2 size={18} className="mb-2.5 animate-spin text-muted" />}
+      </div>
+      {!valido ? <Aviso texto="Revise el rango de fechas." /> : error ? <Aviso texto={error} /> : !datos ? <Cargando /> : (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Kpi label="Servicios" value={fmtNum(new Set(lineas.map((l) => l.manifiesto)).size)} icon={<FileStack size={16} />} hint={`${fmtNum(lineas.length)} líneas de residuo`} />
+            <Kpi label="Cargado en sus sedes" value={porUnidad(lineas.map((l) => [l.unidad, l.cargado]))} icon={<Truck size={16} />} hint="Según los manifiestos" />
+            <Kpi label="Pesado en planta" value={porUnidad(conciliadas.map((l) => [l.unidadPlanta, l.pesado]))} icon={<BarChart3 size={16} />} hint={`${fmtNum(lineas.length - conciliadas.length)} líneas aún en revisión`} />
+            <Kpi label="Valor conciliado" value={fmtCOP(valor)} icon={<BadgeCheck size={16} />} hint="Precio por lo pesado en planta" />
+          </div>
+          {datos.recortado && <p className="mt-3 rounded-lg bg-warn/10 p-3 text-[13px] text-warn">El periodo tiene más de 5.000 líneas: se muestran las primeras. Pida un rango más corto.</p>}
+          {!lineas.length ? <p className="mt-5 rounded-xl border border-dashed border-line px-4 py-10 text-center text-muted">No hay servicios en estas fechas.</p> : (
+            <Card className="mt-5" pad={false}>
+              <div className="scroll-x"><table className="w-full min-w-[1100px] text-[13px]">
+                <thead className="bg-surface-2 text-left text-[12px] uppercase tracking-[0.04em] text-muted">
+                  <tr><th className="px-3 py-2.5">Fecha</th><th className="px-2 py-2.5">Manifiesto</th><th className="px-2 py-2.5">Sede</th><th className="px-2 py-2.5">Residuo o servicio</th>
+                    <th className="px-2 py-2.5 text-right">Cargado</th><th className="px-2 py-2.5 text-right">En planta</th><th className="px-2 py-2.5">Tratamiento</th>
+                    <th className="px-2 py-2.5 text-right">Precio</th><th className="px-2 py-2.5 text-right">Valor</th><th className="px-2 py-2.5">Factura</th><th className="px-3 py-2.5">Certificado</th></tr>
+                </thead>
+                <tbody>
+                  {lineas.map((l) => (
+                    <tr key={l.id} className="border-t border-line align-top">
+                      <td className="whitespace-nowrap px-3 py-2">{fmtFecha(l.fecha)}</td>
+                      <td className="num whitespace-nowrap px-2 py-2">{l.manifiesto}<span className="block text-[11px] text-subtle">{l.tipo === 'CARGUE' ? 'Recolección' : 'Entrega'}</span></td>
+                      <td className="max-w-[180px] px-2 py-2"><span className="block truncate">{l.sede}</span></td>
+                      <td className="max-w-[260px] px-2 py-2"><span className="block truncate font-medium">{l.residuo}</span><span className="text-[11px] text-subtle">N.º {l.declaracion}{l.peligroso ? ' · peligroso' : ''}</span></td>
+                      <td className="num whitespace-nowrap px-2 py-2 text-right">{cant(l.cargado)} {l.unidad ?? ''}</td>
+                      <td className="num whitespace-nowrap px-2 py-2 text-right">{l.conciliada && l.pesado !== null ? `${cant(l.pesado)} ${l.unidadPlanta ?? ''}` : <span className="text-subtle">en revisión</span>}</td>
+                      <td className="max-w-[200px] px-2 py-2"><span className="block truncate">{l.tratamiento ?? '—'}</span></td>
+                      <td className="num whitespace-nowrap px-2 py-2 text-right">{l.precio !== null ? fmtCOP(l.precio) : '—'}</td>
+                      <td className="num whitespace-nowrap px-2 py-2 text-right">{l.valor !== null ? fmtCOP(l.valor) : '—'}{l.negociacion === 'COMPRA' && <span className="block text-[11px] text-subtle">compra</span>}</td>
+                      <td className="whitespace-nowrap px-2 py-2">{l.factura ?? '—'}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{l.certificado ?? '—'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table></div>
             </Card>

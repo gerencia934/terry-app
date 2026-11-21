@@ -56,7 +56,10 @@ En línea desde el 20-11-2026 en `https://residuos.terravivasas.net`:
 - Wialon y la sincronización diaria de Siigo funcionan;
 - Neon está en el plan pago (*Launch*);
 - R2 usa las llaves del bucket `terra-residuos-archivos`;
-- la política de datos 1.0 está en el Drive (SGI › 02. GESTIÓN COMERCIAL › 2.5 POLÍTICA DE CLIENTES).
+- la política de datos 1.0 está en el Drive (SGI › 02. GESTIÓN COMERCIAL › 2.5 POLÍTICA DE CLIENTES);
+- el portal de clientes tiene autogestión (sedes, declaraciones, pedidos, entregas en planta e informe general), pero la
+  base aún no tiene clientes: hay que cargar clientes, sedes y declaraciones (Ajustes › Importar) y dar el primer acceso
+  al portal desde la ficha de cada cliente.
 
 Cuidado al cambiar claves en el panel de Cloudflare: el panel puede guardar versiones del Worker sin implementarlas. Por
 eso, revise `npx wrangler deployments list` y `npx wrangler versions list`. Si la última versión no está implementada:

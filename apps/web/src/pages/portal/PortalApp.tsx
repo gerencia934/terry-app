@@ -2,7 +2,7 @@
 // lo suyo (declaraciones, solicitudes, manifiestos, certificados e informes). Doble barrera en el servidor: el API filtra
 // por el cliente del token y la base (RLS) lo vuelve a filtrar. Aquí nada depende de datos que mande el navegador.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Award, BarChart3, FileStack, FileText, Home, Info, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
+import { Award, BarChart3, Building2, FileStack, FileText, Home, Info, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
 import { Logo, useTheme } from '../../components/AppShell';
 import { VentanaDobleFactor } from '../../components/DobleFactor';
 import { Proteccion } from '../../components/Proteccion';
@@ -13,6 +13,7 @@ import { useRouter, type RouteName } from '../../lib/router';
 import { cx } from '../../lib/format';
 import { PortalCertificados, PortalDeclaraciones, PortalInformes, PortalInicio, PortalManifiestos, PortalSolicitudes } from './Consulta';
 import { PortalUsuarios } from './UsuariosPortal';
+import { PortalSedes } from './Sedes';
 import { EnlaceAccesoHost } from '../../components/EnlaceAcceso';
 
 export interface SedePortal { id: string; codigo: string | null; nombre: string; municipio?: { nombre: string } | null }
@@ -25,6 +26,8 @@ export interface YoPortal {
   restringido: boolean;
   /** Cliente inactivo: aviso amable según el motivo (consulta y descarga; no pide servicios ni carga declaraciones). */
   aviso: string | null;
+  /** Vuelve a leer «quién soy» (por ejemplo, después de crear o inactivar una sede). */
+  recargar?: () => void;
 }
 /** Puede pedir servicios y cargar declaraciones: perfil Administrador y cliente activo. */
 export const puedeEscribir = (yo: YoPortal) => yo.perfil === 'ADMIN' && yo.cliente.activo;
@@ -37,6 +40,7 @@ export const PERFIL: Record<'ADMIN' | 'CONSULTA', string> = { ADMIN: 'Administra
 interface Item { route: RouteName; label: string; icon: LucideIcon; soloAdmin?: boolean }
 const MENU: Item[] = [
   { route: 'portal', label: 'Inicio', icon: Home },
+  { route: 'portal-sedes', label: 'Sedes', icon: Building2 },
   { route: 'portal-declaraciones', label: 'Declaraciones', icon: FileText },
   { route: 'portal-solicitudes', label: 'Solicitudes', icon: Truck },
   { route: 'portal-manifiestos', label: 'Manifiestos', icon: FileStack },
@@ -63,6 +67,7 @@ export function PortalApp() {
   if (!yo.datos) return <div className="flex min-h-screen items-center justify-center gap-2 bg-bg text-muted"><Loader2 size={18} className="animate-spin" />Cargando su portal…</div>;
   const pagina = (() => {
     switch (route) {
+      case 'portal-sedes': return <PortalSedes />;
       case 'portal-declaraciones': return <PortalDeclaraciones />;
       case 'portal-solicitudes': return <PortalSolicitudes />;
       case 'portal-manifiestos': return <PortalManifiestos />;
@@ -72,7 +77,7 @@ export function PortalApp() {
       default: return <PortalInicio />;
     }
   })();
-  return <Ctx.Provider value={yo.datos}><Marco><Proteccion key={route}>{pagina}</Proteccion></Marco></Ctx.Provider>;
+  return <Ctx.Provider value={{ ...yo.datos, recargar: yo.recargar }}><Marco><Proteccion key={route}>{pagina}</Proteccion></Marco></Ctx.Provider>;
 }
 
 function Marco({ children }: { children: ReactNode }) {

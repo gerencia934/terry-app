@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, Plus, RefreshCw, X, Ban } from 'lucide-react';
 import { FilterBar, ResponsiveTable, type Column } from '../../components/data';
 import { Badge, Button, DefList, EstadoBadge, Field, Input, PageHeader, Select, Sheet, useToast } from '../../components/ui';
-import { api, tienePermiso } from '../../lib/api';
+import { API_URL, api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtFechaCorta } from '../../lib/format';
 import { cant, hoyCo, msg, sumarDias, useApi, usePaginado, PieLista } from '../../lib/servidor';
@@ -16,12 +16,16 @@ const JORNADA: Record<Jornada, string> = { AM: 'Mañana', PM: 'Tarde', DIA: 'Tod
 interface SolItem {
   id: string; estado: string; cantidadEstimada: string | null; cantidadReal: string | null; jornada: Jornada | null; precioUnitario: string | null; observaciones: string | null;
   sucursal: { codigo: string | null; nombre: string }; declaracion: { numero: number; nombre: string; codigoInterno: string | null };
+  especificaciones?: { especificacion: { nombre: string } }[];
 }
 interface Sol {
   id: string; numero: number; clase: 'PRE' | 'FORMAL'; operacion: 'CARGA' | 'DESCARGA'; fechaSolicitada: string; aprobacion: 'PENDIENTE' | 'APROBADA' | 'NO_APROBADA';
   estado: string; totalEstimado: string | null; ordenCompra: string | null; observaciones: string | null; createdAt: string; cliente: { razonSocial: string }; items: SolItem[];
   /** Con clienteId: la pidió el cliente desde su portal. */
   creadoPor?: { nombre: string; clienteId: string | null } | null;
+  /** PDF que adjuntó el cliente (orden de compra, remisión): clave del almacenamiento. */
+  adjuntoUrl?: string | null; telefonoContacto?: string | null; destino?: { razonSocial: string } | null;
+  transporte?: { empresaTransportadora: string; tipoVehiculo: string | null; placa: string | null; conductorNombre: string | null; conductorDocumento: string | null; auxiliarNombre: string | null; auxiliarDocumento: string | null } | null;
 }
 const desdePortal = (s: Sol) => !!s.creadoPor?.clienteId;
 interface DeclCliente {
@@ -120,13 +124,22 @@ function DetalleSolicitud({ s, onClose, onCambio }: { s: Sol | null; onClose: ()
             ...(s.ordenCompra ? [['Orden de compra', s.ordenCompra]] as [string, string][] : []),
             ...(s.totalEstimado ? [['Total estimado', fmtCOP(Number(s.totalEstimado))]] as [string, string][] : []),
             ...(s.observaciones ? [['Observaciones', s.observaciones]] as [string, string][] : []),
+            ...(s.operacion === 'DESCARGA' ? [
+              ['Planta', s.destino?.razonSocial ?? '—'],
+              ['Vehículo', s.transporte ? [s.transporte.placa, s.transporte.tipoVehiculo, s.transporte.empresaTransportadora].filter(Boolean).join(' · ') : '—'],
+              ['Conductor', s.transporte?.conductorNombre ? [s.transporte.conductorNombre, s.transporte.conductorDocumento && 'C.C. ' + s.transporte.conductorDocumento].filter(Boolean).join(' · ') : '—'],
+              ...(s.transporte?.auxiliarNombre ? [['Auxiliar', [s.transporte.auxiliarNombre, s.transporte.auxiliarDocumento && 'C.C. ' + s.transporte.auxiliarDocumento].filter(Boolean).join(' · ')]] : []),
+              ['Teléfono de contacto', s.telefonoContacto ?? '—'],
+            ] as [string, string][] : []),
           ]} />
+          {s.adjuntoUrl && <AdjuntoCliente clave={s.adjuntoUrl} numero={s.numero} />}
           <section className="flex flex-col gap-2">
             <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Líneas</h3>
             {s.items.map((i) => (
               <div key={i.id} className="flex items-start justify-between gap-2 rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
                 <div className="min-w-0"><p className="truncate font-medium">{i.declaracion.nombre}{i.declaracion.codigoInterno ? <span className="num ml-1 text-muted">{i.declaracion.codigoInterno}</span> : null}</p>
-                  <p className="truncate text-muted">{i.sucursal.codigo ? `${i.sucursal.codigo} · ` : ''}{i.sucursal.nombre}{i.jornada ? ` · ${JORNADA[i.jornada]}` : ''} · {cant(i.cantidadReal ?? i.cantidadEstimada)}{i.cantidadReal ? ' recogido' : ' estimado'}</p></div>
+                  <p className="truncate text-muted">{i.sucursal.codigo ? `${i.sucursal.codigo} · ` : ''}{i.sucursal.nombre}{i.jornada ? ` · ${JORNADA[i.jornada]}` : ''} · {cant(i.cantidadReal ?? i.cantidadEstimada)}{i.cantidadReal ? ' recogido' : ' estimado'}</p>
+                  {!!i.especificaciones?.length && <p className="truncate text-[12px] text-subtle">{i.especificaciones.map((e) => e.especificacion.nombre).join(' · ')}</p>}</div>
                 <EstadoBadge estado={i.estado} />
               </div>
             ))}
@@ -210,4 +223,19 @@ function NuevaSolicitud({ abierta, onClose, onListo }: { abierta: boolean; onClo
       </div>
     </Sheet>
   );
+}
+
+/** PDF que el cliente adjuntó a su pedido desde el portal: enlace firmado de 5 minutos. */
+function AdjuntoCliente({ clave, numero }: { clave: string; numero: number }) {
+  const toast = useToast();
+  const abrir = async () => {
+    const v = window.open('', '_blank');
+    try {
+      const nombre = 'solicitud-' + numero + '-adjunto' + clave.slice(clave.lastIndexOf('.'));
+      const r = await api<{ url: string }>('/archivos/enlace?clave=' + encodeURIComponent(clave) + '&nombre=' + encodeURIComponent(nombre));
+      const destino = /^https?:/i.test(r.url) ? r.url : API_URL + r.url;
+      if (v) { v.opener = null; v.location.href = destino; } else window.location.assign(destino);
+    } catch (e) { v?.close(); toast(msg(e, 'No se pudo abrir el adjunto.'), 'warn'); }
+  };
+  return <div><Button size="sm" onClick={abrir}>Ver el PDF que adjuntó el cliente</Button></div>;
 }

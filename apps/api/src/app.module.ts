@@ -27,6 +27,7 @@ import { InformesModule } from './informes/informes.module';
 import { EmpresaModule } from './empresa/empresa.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { PortalModule } from './portal/portal.module';
+import { AutogestionModule } from './portal/autogestion';
 
 @Module({
   imports: [
@@ -44,7 +45,7 @@ import { PortalModule } from './portal/portal.module';
     }),
     PrismaModule, ComunModule, ArchivosModule, TrabajosModule, AuthModule,
     MonitoreoModule, NotificacionesModule, GpsModule, ComercialModule, ClientesModule, CertificadoComercialModule, FinanzasModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
-    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule,
+    ManifiestosModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule, AutogestionModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: FiltroErrores },

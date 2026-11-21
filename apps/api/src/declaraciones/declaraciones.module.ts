@@ -229,9 +229,9 @@ export class DeclaracionesService {
    *   vuelve a «pendiente» (inactiva) y la autoriza otra persona (respuesta D2 de la gerencia).
    * - El precio nunca se sobrescribe: un cambio crea una vigencia nueva desde hoy (el mismo día, corrige la de hoy).
    */
-  async editar(a: Actor, id: string, b: Datos) {
+  async editar(a: Actor, id: string, b: Datos, tx?: Tx) {
     const puedeAutorizar = a.permisos.includes('*') || a.permisos.includes('declaraciones.autorizar');
-    return this.db.$transaction(async (t) => {
+    const ejecutar = async (t: Tx) => {
       const d = await t.declaracion.findFirst({ where: { id, empresaId: a.empresaId }, include: {
         cliente: true, sucursales: true, disposiciones: true,
         tarifas: { where: vigente(), orderBy: { vigenteDesde: 'desc' }, take: 1 },
@@ -341,7 +341,9 @@ export class DeclaracionesService {
           ...(precioCambio ? { precio: b.precio?.precioUnitario ?? null } : {}),
           ...(vuelveARevision ? { nota: criticos.length ? `Cambio crítico (${criticos.join(', ')}): vuelve a revisión y la autoriza otra persona` : 'Editada por un rol que no autoriza: vuelve a revisión' } : {}) }, t);
       return { ...(await t.declaracion.findUniqueOrThrow({ where: { id } })), cambiosCriticos: vuelveARevision ? criticos : [] };
-    });
+    };
+    // Desde el portal corre dentro de su transacción (con app.cliente_id: la base limita lo que escribe)
+    return tx ? ejecutar(tx) : this.db.$transaction(ejecutar);
   }
 
   private async hijos(tx: Tx, declaracionId: string, sedes: string[], b: Datos) {

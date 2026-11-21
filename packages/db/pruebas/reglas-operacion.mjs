@@ -241,8 +241,14 @@ const comoCliente = (fn) => db.$transaction(async (tx) => { await tx.$executeRaw
 const RLS = /row-level security|seguridad de registros/i;
 await rechaza('portal: el cliente no fija tarifas (las fija Terra Viva)', () => comoCliente((tx) => tx.tarifa.create({ data: {
   declaracionId: dSimple.id, precioUnitario: 1, tipoNegociacion: 'COBRO', formaPago: 'CONTADO', vigenteDesde: new Date('2027-01-01'), metricaId: kg } })), RLS);
-const cambioDecl = await comoCliente((tx) => tx.declaracion.updateMany({ where: { id: dSimple.id }, data: { observaciones: 'Cambiada desde el portal' } }));
-prueba('portal: no cambia una declaración ya creada (la revisa y la autoriza Terra Viva)', cambioDecl.count === 0, JSON.stringify(cambioDecl));
+// Autogestión (migración 20261210000000_portal_autogestion): el cliente corrige sus declaraciones, pero siempre quedan
+// inactivas (en revisión, o autorizadas e inactivas si ya no las genera). Nunca las autoriza ni las activa.
+await rechaza('portal: no cambia una declaración autorizada y activa dejándola activa (al corregirla vuelve a revisión)', () => comoCliente((tx) => tx.declaracion.update({
+  where: { id: dSimple.id }, data: { observaciones: 'Cambiada desde el portal' } })), RLS);
+await rechaza('portal: …ni cambia una autorizada aunque la deje inactiva, salvo para inactivarla', () => comoCliente((tx) => tx.declaracion.update({
+  where: { id: dSimple.id }, data: { activa: false, nombre: 'Otro nombre' } })), /solo se inactiva/);
+await rechaza('portal: …ni cambia el precio visible ni la programación automática', () => comoCliente((tx) => tx.declaracion.update({
+  where: { id: dSimple.id }, data: { activa: false, mostrarPrecioApp: true } })), /no se cambia/);
 await rechaza('portal: no crea una solicitud ya aprobada (queda por confirmar)', () => comoCliente((tx) => tx.solicitud.create({ data: {
   empresaId: E, clase: 'FORMAL', clienteId: cliente.id, fechaSolicitada: new Date('2027-01-15'), aprobacion: 'APROBADA', aprobadaEn: new Date() } })), RLS);
 const pedido = await comoCliente(async (tx) => {

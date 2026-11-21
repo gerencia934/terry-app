@@ -9,7 +9,7 @@
 // servicios (quedan «por confirmar») y cancelar los que nadie ha confirmado. La base limita además qué puede escribir una
 // sesión del portal (migración 20261127000000_portal_escritura).
 import {
-  BadRequestException, Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res,
+  BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res,
   UploadedFile, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -17,7 +17,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Jornada, Prisma, PerfilPortal } from '@prisma/client';
 import type { Response } from 'express';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AVISO_CLIENTE_INACTIVO } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -32,10 +32,12 @@ import { ManifiestosModule, ManifiestosService } from '../manifiestos/manifiesto
 import { ImportacionModule, ImportacionService } from '../importacion/importacion.module';
 import { CertificadoComercialModule, CertificadoComercialService } from '../clientes/certificado-comercial.module';
 import { mensajePortal, retencionesCertificados } from '../finanzas/estado';
+import { RefArchivos, esClaveAlmacen } from './archivos-portal';
 
 type Tx = Prisma.TransactionClient;
 const Pagina = z.object({ pagina: z.coerce.number().optional(), porPagina: z.coerce.number().optional() });
-const FiltroDecl = Pagina.extend({ estado: z.enum(['AUTORIZADA', 'PENDIENTE', 'BORRADOR', 'RECHAZADA']).optional(), tipo: z.enum(['RESIDUO', 'SERVICIO']).optional(), q: z.string().max(80).optional() });
+const FiltroDecl = Pagina.extend({ estado: z.enum(['AUTORIZADA', 'PENDIENTE', 'BORRADOR', 'RECHAZADA']).optional(), tipo: z.enum(['RESIDUO', 'SERVICIO']).optional(), q: z.string().max(80).optional(),
+  activa: z.enum(['true', 'false']).optional() });
 const FiltroFechas = Pagina.extend({ desde: z.coerce.date().optional(), hasta: z.coerce.date().optional() });
 const FiltroAnio = Pagina.extend({ anio: z.coerce.number().int().min(2000).max(2100).optional() });
 const FiltroInforme = z.object({ anio: z.coerce.number().int().min(2000).max(2100) });
@@ -46,13 +48,40 @@ const DatosUsuario = z.object({
 });
 const CrearUsuario = DatosUsuario.extend({ email: z.string().trim().toLowerCase().email('Correo inválido').max(150) });
 const EditarUsuario = DatosUsuario.partial().extend({ activo: z.boolean().optional() });
+const FiltroSol = Pagina.extend({
+  estado: z.enum(['POR_CONFIRMAR', 'PENDIENTE', 'PROGRAMADA', 'EN_CURSO', 'RECOLECTADA', 'CANCELADA', 'NO_APROBADA']).optional(),
+  operacion: z.enum(['CARGA', 'DESCARGA']).optional(), desde: z.coerce.date().optional(), hasta: z.coerce.date().optional(),
+});
+/** Vehículo y tripulación del cliente en una entrega en planta (lo exige la planta para dejarlo entrar). */
+const TransportePortal = z.object({
+  empresaTransportadora: z.string().trim().min(2, 'Escriba la empresa transportadora.').max(200),
+  tipoVehiculo: textoOpc(40),
+  placa: z.string().trim().toUpperCase().regex(/^([A-Z]{3}\d{3}|[A-Z]{3}\d{2}[A-Z]|[RS]\d{5})$/, 'Placa inválida (ABC123).'),
+  conductorNombre: z.string().trim().min(3, 'Escriba el nombre del conductor.').max(150),
+  conductorDocumento: z.string().trim().regex(/^[0-9A-Za-z.-]{4,20}$/, 'Cédula del conductor: de 4 a 20 caracteres.'),
+  conductorArlId: z.string().uuid('Elija la ARL del conductor.'), conductorEpsId: z.string().uuid('Elija la EPS del conductor.'),
+  auxiliarNombre: textoOpc(150), auxiliarDocumento: z.string().trim().regex(/^[0-9A-Za-z.-]{4,20}$/, 'Cédula del auxiliar: de 4 a 20 caracteres.').or(z.literal('').transform(() => null)).nullish(),
+  auxiliarArlId: z.string().uuid().nullish(), auxiliarEpsId: z.string().uuid().nullish(),
+});
 const PedirServicio = z.object({
-  sucursalId: z.string().uuid('Elija la sede.'),
+  /** CARGA: Terra Viva recoge en las sedes. DESCARGA: el cliente lleva el residuo a la planta en su propio vehículo. */
+  operacion: z.enum(['CARGA', 'DESCARGA']).default('CARGA'),
+  sucursalId: z.string().uuid('Elija la sede.').optional(), // sede de las líneas que no traen la suya
   fechaSolicitada: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha en formato AAAA-MM-DD.'),
   ordenCompra: textoOpc(40), observaciones: textoOpc(1000),
+  destinoId: z.string().uuid().optional(), transporte: TransportePortal.optional(), telefonoContacto: textoOpc(20),
+  /** Referencia de un PDF subido antes (orden de compra, remisión): undefined = sin cambio; null = quitarlo. */
+  adjunto: z.string().max(1000).nullish(),
   items: z.array(z.object({
-    declaracionId: z.string().uuid(), cantidadEstimada: z.number().positive('La cantidad debe ser mayor que cero.').max(1e9), jornada: z.nativeEnum(Jornada).optional(),
+    declaracionId: z.string().uuid(), sucursalId: z.string().uuid().optional(),
+    cantidadEstimada: z.number().positive('La cantidad debe ser mayor que cero.').max(1e9), jornada: z.nativeEnum(Jornada).optional(),
+    especificacionIds: z.array(z.string().uuid()).max(10).default([]),
   })).min(1, 'Elija al menos un residuo o servicio.').max(50, 'Máximo 50 líneas por solicitud.'),
+}).superRefine((b, ctx) => {
+  if (b.operacion !== 'DESCARGA') return;
+  if (!b.destinoId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['destinoId'], message: 'Elija la planta donde entrega.' });
+  if (!b.transporte) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['transporte'], message: 'Indique el vehículo y el conductor que llevan el residuo.' });
+  if (!b.telefonoContacto) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['telefonoContacto'], message: 'Indique un teléfono de contacto para la entrega.' });
 });
 const Cancelar = z.object({ motivo: z.string().trim().min(5, 'Cuéntenos el motivo (mínimo 5 caracteres).').max(300) });
 const ROL_PORTAL = 'Cliente (portal)';
@@ -63,11 +92,14 @@ type Documento = 'acta' | 'manifiesto' | 'comercial';
 @Injectable()
 export class PortalService {
   private readonly claveDescargas: string;
+  /** Referencias firmadas de los archivos que sube el cliente (orden de compra, ficha de seguridad…). */
+  readonly refs: RefArchivos;
   constructor(private readonly db: PrismaService, private readonly audit: Auditoria, private readonly auth: AuthService, private readonly archivos: Archivos,
     private readonly manifiestos: ManifiestosService, private readonly importacion: ImportacionService, private readonly jwt: JwtService, cfg: ConfigService<Config, true>,
     private readonly comercial: CertificadoComercialService, private readonly notificaciones: Notificaciones) {
     // Clave propia de los enlaces de descarga (distinta de la de las sesiones)
     this.claveDescargas = createHash('sha256').update(`${cfg.get('JWT_SECRET', { infer: true })}:descargas-portal`).digest('base64url');
+    this.refs = new RefArchivos(cfg);
   }
 
   /** Segunda barrera: las consultas del portal corren con app.cliente_id y la base solo deja ver ese cliente. */
@@ -81,11 +113,12 @@ export class PortalService {
   }
 
   /** Lo que escribe en el portal (cargar, pedir, cancelar, gestionar usuarios) lo hace solo el perfil Administrador. */
-  private soloAdmin(a: Actor) {
+  soloAdmin(a: Actor) {
     if (a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Su perfil en el portal es de consulta: pídale a su administrador que lo haga o que le cambie el perfil.' });
   }
 
   /** Sedes que puede ver el usuario (vacío = todas las de su cliente). */
+  async sedesDe(tx: Tx | PrismaService, a: Actor) { return this.sedes(tx, a); }
   private async sedes(tx: Tx | PrismaService, a: Actor) { return (await tx.usuarioSucursal.findMany({ where: { usuarioId: a.id }, select: { sucursalId: true } })).map((s) => s.sucursalId); }
   /**
    * Un administrador del portal limitado a unas sedes solo ve y gestiona usuarios limitados a esas mismas sedes: no puede
@@ -97,7 +130,7 @@ export class PortalService {
    * Cliente inactivo (gerencia, 19-11-2026): sigue consultando y descargando, pero no pide servicios ni carga
    * declaraciones. El aviso es amable y nunca muestra la nota interna de la oficina.
    */
-  private async exigirActivo(tx: Tx, a: Actor) {
+  async exigirActivo(tx: Tx, a: Actor) {
     const c = await tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { activo: true, motivoInactivacion: true } });
     if (!c.activo) throw new ForbiddenException({ mensaje: AVISO_CLIENTE_INACTIVO[c.motivoInactivacion ?? 'OTRO'], codigo: 'CLIENTE_INACTIVO' });
   }
@@ -151,7 +184,7 @@ export class PortalService {
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
       const where: Prisma.DeclaracionWhereInput = {
-        clienteId: a.clienteId, estado: f.estado ?? { not: 'ANULADA' }, tipo: f.tipo,
+        clienteId: a.clienteId, estado: f.estado ?? { not: 'ANULADA' }, tipo: f.tipo, activa: f.activa ? f.activa === 'true' : undefined,
         ...(f.q ? { OR: [{ nombre: { contains: f.q, mode: 'insensitive' } }, { codigoInterno: { contains: f.q, mode: 'insensitive' } }] } : {}),
         ...(sedes.length ? { sucursales: { some: { sucursalId: { in: sedes } } } } : {}),
       };
@@ -160,12 +193,14 @@ export class PortalService {
         tx.declaracion.count({ where }),
         tx.declaracion.findMany({ where, take, skip, orderBy: { numero: 'desc' }, select: {
           id: true, numero: true, tipo: true, nombre: true, codigoInterno: true, estado: true, activa: true, esPeligroso: true, frecuenciaDias: true, cantidadFrecuencia: true,
+          estadoFisico: true, inflamable: true, fichaSeguridadUrl: true, codigoY: { select: { codigo: true } }, codigoA: { select: { codigo: true } },
           lineaServicio: { select: { nombre: true } }, sucursales: { where: { activa: true }, select: { sucursal: { select: { id: true, codigo: true, nombre: true } } } },
           disposiciones: { select: { principal: true, disposicion: { select: { nombre: true } } } },
           tarifas: { where: { vigenteDesde: { lte: hoy }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { precioUnitario: true, metrica: { select: { abreviacion: true } } } },
         } }),
       ]);
-      return { total, pagina, porPagina, filas: filas.map(({ tarifas, ...d }) => ({ ...d, precio: tarifas[0] ?? null })) };
+      // La clave interna del archivo no sale del servidor: solo si la ficha de seguridad está en el expediente
+      return { total, pagina, porPagina, filas: filas.map(({ tarifas, fichaSeguridadUrl, ...d }) => ({ ...d, precio: tarifas[0] ?? null, tieneFichaSeguridad: !!fichaSeguridadUrl })) };
     });
   }
 
@@ -174,7 +209,8 @@ export class PortalService {
       const sedes = await this.sedes(tx, a);
       const d = await tx.declaracion.findFirst({ where: { id, clienteId: a.clienteId, estado: { not: 'ANULADA' }, ...(sedes.length ? { sucursales: { some: { sucursalId: { in: sedes } } } } : {}) }, select: {
         id: true, numero: true, tipo: true, nombre: true, codigoInterno: true, estado: true, activa: true, esPeligroso: true, composicion: true, descripcionProceso: true,
-        descripcionServicio: true, estadoFisico: true, frecuenciaDias: true, cantidadFrecuencia: true, fichaSeguridadUrl: true, observaciones: true, aprobadaEn: true,
+        descripcionServicio: true, estadoFisico: true, frecuenciaDias: true, cantidadFrecuencia: true, fichaSeguridadUrl: true, caracterizacionUrl: true, observaciones: true, aprobadaEn: true,
+        inflamable: true, contieneHidrocarburos: true, codigoUn: true, riesgos: { select: { riesgo: { select: { nombre: true } } } }, presentacion: true, material: { select: { nombre: true } },
         responsabilidadAceptada: true, aceptadaEn: true, categoria: { select: { nombre: true } }, tipoResiduo: { select: { nombre: true } }, lineaServicio: { select: { nombre: true } },
         codigoY: { select: { codigo: true, descripcion: true } }, codigoA: { select: { codigo: true, descripcion: true } }, tipoEmbalaje: { select: { nombre: true } },
         sucursales: { select: { activa: true, sucursal: { select: { codigo: true, nombre: true } } } }, disposiciones: { select: { principal: true, disposicion: { select: { nombre: true } } } },
@@ -182,25 +218,36 @@ export class PortalService {
       } });
       if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
       // La clave interna del archivo no sale del servidor: el cliente solo sabe si la ficha está en el expediente
-      const { fichaSeguridadUrl, ...resto } = d;
-      return { ...resto, tieneFichaSeguridad: !!fichaSeguridadUrl };
+      const { fichaSeguridadUrl, caracterizacionUrl, ...resto } = d;
+      return { ...resto, tieneFichaSeguridad: !!fichaSeguridadUrl, tieneCaracterizacion: !!caracterizacionUrl };
     });
   }
 
-  async solicitudes(a: Actor, f: z.infer<typeof Pagina>) {
+  async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
     const { take, skip, pagina, porPagina } = paginar(f);
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
       const enSede = sedes.length ? { sucursalId: { in: sedes } } : {};
-      const where: Prisma.SolicitudWhereInput = { clienteId: a.clienteId, ...(sedes.length ? { items: { some: enSede } } : {}) };
+      // «Por confirmar»: pedido que Terra Viva aún no aprueba; «No aprobada»: la aprobación se negó
+      const estado: Prisma.SolicitudWhereInput = f.estado === 'POR_CONFIRMAR' ? { aprobacion: 'PENDIENTE', estado: 'PENDIENTE' }
+        : f.estado === 'NO_APROBADA' ? { aprobacion: 'NO_APROBADA' }
+        : f.estado === 'PENDIENTE' ? { aprobacion: 'APROBADA', estado: 'PENDIENTE' } : f.estado ? { estado: f.estado } : {};
+      const where: Prisma.SolicitudWhereInput = {
+        clienteId: a.clienteId, operacion: f.operacion, fechaSolicitada: { gte: f.desde, lte: f.hasta }, ...estado,
+        ...(sedes.length ? { items: { some: enSede } } : {}),
+      };
       const [total, filas] = await Promise.all([
         tx.solicitud.count({ where }),
         tx.solicitud.findMany({ where, take, skip, orderBy: [{ fechaSolicitada: 'desc' }, { numero: 'desc' }], select: {
           id: true, numero: true, clase: true, operacion: true, fechaSolicitada: true, aprobacion: true, estado: true, ordenCompra: true, observaciones: true,
-          items: { where: enSede, select: { id: true, estado: true, cantidadEstimada: true, cantidadReal: true, declaracion: { select: { nombre: true, codigoInterno: true } }, sucursal: { select: { nombre: true } } } },
+          totalEstimado: true, telefonoContacto: true, adjuntoUrl: true, createdAt: true, destino: { select: { razonSocial: true } },
+          transporte: { select: { empresaTransportadora: true, tipoVehiculo: true, placa: true, conductorNombre: true } },
+          items: { where: enSede, select: { id: true, estado: true, cantidadEstimada: true, cantidadReal: true, jornada: true, declaracionId: true, sucursalId: true,
+            declaracion: { select: { nombre: true, codigoInterno: true } }, sucursal: { select: { nombre: true } },
+            especificaciones: { select: { especificacion: { select: { nombre: true } } } } } },
         } }),
       ]);
-      return { total, pagina, porPagina, filas };
+      return { total, pagina, porPagina, filas: filas.map(({ adjuntoUrl, totalEstimado, ...s }) => ({ ...s, totalEstimado: totalEstimado === null ? null : Number(totalEstimado), tieneAdjunto: !!adjuntoUrl })) };
     });
   }
 
@@ -321,69 +368,193 @@ export class PortalService {
   }
 
   // ---------------- Pedir servicios ----------------
-  /** Lo que el usuario puede pedir: sus sedes activas y, en cada una, las declaraciones autorizadas y activas. */
+  /**
+   * Lo que el usuario puede pedir: sus sedes activas y, en cada una, las declaraciones autorizadas y activas. Para una
+   * entrega en planta: las plantas propias de Terra Viva que reciben, y las ARL y EPS del conductor y el auxiliar.
+   */
   async opcionesPedido(a: Actor) {
-    return this.conCliente(a, async (tx) => {
-      const sedes = await this.sedes(tx, a);
-      const hoy = fechaColombia();
-      const filas = await tx.sucursal.findMany({
-        where: { clienteId: a.clienteId, activa: true, ...(sedes.length ? { id: { in: sedes } } : {}) }, orderBy: [{ esPrincipal: 'desc' }, { nombre: 'asc' }], take: 300,
-        select: { id: true, codigo: true, nombre: true, municipio: { select: { nombre: true } },
-          declaraciones: { where: { activa: true, declaracion: { estado: 'AUTORIZADA', activa: true } }, select: { declaracion: { select: {
-            id: true, numero: true, nombre: true, codigoInterno: true, tipo: true,
-            tarifas: { where: { vigenteDesde: { lte: hoy }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { metrica: { select: { abreviacion: true } } } },
-          } } } } },
-      });
-      return { hoy: hoy.toISOString().slice(0, 10), sedes: filas.map((x) => ({
-        id: x.id, codigo: x.codigo, nombre: x.nombre, municipio: x.municipio?.nombre ?? null,
-        declaraciones: x.declaraciones.map(({ declaracion: d }) => ({ id: d.id, numero: d.numero, nombre: d.nombre, codigoInterno: d.codigoInterno, tipo: d.tipo, unidad: d.tarifas[0]?.metrica?.abreviacion ?? null }))
-          .sort((p, q) => p.nombre.localeCompare(q.nombre, 'es')),
-      })) };
-    });
+    const [base, especificaciones, destinos, entidades] = await Promise.all([
+      this.conCliente(a, async (tx) => {
+        const sedes = await this.sedes(tx, a);
+        const hoy = fechaColombia();
+        const filas = await tx.sucursal.findMany({
+          where: { clienteId: a.clienteId, activa: true, ...(sedes.length ? { id: { in: sedes } } : {}) }, orderBy: [{ esPrincipal: 'desc' }, { nombre: 'asc' }], take: 300,
+          select: { id: true, codigo: true, nombre: true, municipio: { select: { nombre: true } },
+            declaraciones: { where: { activa: true, declaracion: { estado: 'AUTORIZADA', activa: true } }, select: { declaracion: { select: {
+              id: true, numero: true, nombre: true, codigoInterno: true, tipo: true,
+              tarifas: { where: { vigenteDesde: { lte: hoy }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { metrica: { select: { abreviacion: true } } } },
+            } } } } },
+        });
+        return { hoy: hoy.toISOString().slice(0, 10), sedes: filas.map((x) => ({
+          id: x.id, codigo: x.codigo, nombre: x.nombre, municipio: x.municipio?.nombre ?? null,
+          declaraciones: x.declaraciones.map(({ declaracion: d }) => ({ id: d.id, numero: d.numero, nombre: d.nombre, codigoInterno: d.codigoInterno, tipo: d.tipo, unidad: d.tarifas[0]?.metrica?.abreviacion ?? null }))
+            .sort((p, q) => p.nombre.localeCompare(q.nombre, 'es')),
+        })) };
+      }),
+      this.db.especificacionAdicional.findMany({ where: { empresaId: a.empresaId, activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, nombre: true, descripcion: true } }),
+      this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esDestino: true, esPropio: true, activo: true }, orderBy: { razonSocial: 'asc' }, select: { id: true, razonSocial: true } }),
+      this.db.entidadSeguridadSocial.findMany({ where: { activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, tipo: true, nombre: true } }),
+    ]);
+    return { ...base, especificaciones, destinos, arl: entidades.filter((e) => e.tipo === 'ARL').map(({ tipo: _t, ...e }) => e), eps: entidades.filter((e) => e.tipo === 'EPS').map(({ tipo: _t, ...e }) => e) };
   }
 
-  /**
-   * Pedido de servicio desde el portal: una sede, sus residuos o servicios autorizados y activos, la fecha deseada. Queda
-   * PENDIENTE de aprobación («Por confirmar» en la oficina) con la tarifa vigente a esa fecha, como un pedido de la oficina.
-   */
-  async pedirServicio(a: Actor, b: z.infer<typeof PedirServicio>) {
-    this.soloAdmin(a);
+  /** Revisa fecha, sedes, residuos, especificaciones, destino y adjunto de un pedido; devuelve sus líneas con precio. */
+  private async validarPedido(tx: Tx, a: Actor, b: z.infer<typeof PedirServicio>) {
     const fecha = new Date(`${b.fechaSolicitada}T00:00:00Z`);
     const hoy = fechaColombia();
     if (Number.isNaN(fecha.getTime())) throw new BadRequestException({ mensaje: 'Fecha no válida.' });
     if (fecha < hoy) throw new BadRequestException({ mensaje: 'La fecha no puede ser anterior a hoy.' });
     if (fecha.getTime() > hoy.getTime() + 366 * 86_400_000) throw new BadRequestException({ mensaje: 'Pida el servicio con máximo un año de anticipación.' });
-    const ids = b.items.map((i) => i.declaracionId);
-    if (new Set(ids).size !== ids.length) throw new BadRequestException({ mensaje: 'Cada residuo o servicio va una sola vez en la solicitud.' });
+    const lineas = b.items.map((i) => ({ ...i, sucursalId: i.sucursalId ?? b.sucursalId }));
+    if (lineas.some((l) => !l.sucursalId)) throw new BadRequestException({ mensaje: 'Indique la sede de cada residuo o servicio.' });
+    const claves = lineas.map((l) => `${l.declaracionId}|${l.sucursalId}`);
+    if (new Set(claves).size !== claves.length) throw new BadRequestException({ mensaje: 'Cada residuo o servicio va una sola vez por sede en la solicitud.' });
+    const mias = await this.sedes(tx, a);
+    const idsSede = [...new Set(lineas.map((l) => l.sucursalId!))];
+    const sedes = (!mias.length || idsSede.every((s) => mias.includes(s)))
+      ? await tx.sucursal.findMany({ where: { id: { in: idsSede }, clienteId: a.clienteId, activa: true }, select: { id: true, nombre: true } }) : [];
+    if (sedes.length !== idsSede.length) throw new NotFoundException({ mensaje: 'Alguna sede no existe, está inactiva o usted no la ve.' });
+    const decls = await tx.declaracion.findMany({
+      where: { id: { in: [...new Set(lineas.map((l) => l.declaracionId))] }, clienteId: a.clienteId, estado: 'AUTORIZADA', activa: true },
+      select: { id: true, nombre: true, sucursales: { where: { activa: true }, select: { sucursalId: true } },
+        tarifas: { where: { vigenteDesde: { lte: fecha }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fecha } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { precioUnitario: true } } },
+    });
+    for (const l of lineas) {
+      const d = decls.find((x) => x.id === l.declaracionId);
+      const sede = sedes.find((s) => s.id === l.sucursalId)!;
+      if (!d || !d.sucursales.some((s) => s.sucursalId === l.sucursalId))
+        throw new BadRequestException({ mensaje: `Algún residuo o servicio no está autorizado y activo para la sede «${sede.nombre}».` });
+    }
+    const esp = [...new Set(lineas.flatMap((l) => l.especificacionIds))];
+    if (esp.length && (await this.db.especificacionAdicional.count({ where: { id: { in: esp }, empresaId: a.empresaId, activo: true } })) !== esp.length)
+      throw new BadRequestException({ mensaje: 'Alguna especificación adicional no es válida.' });
+    if (b.operacion === 'DESCARGA') {
+      const destino = await this.db.proveedor.findFirst({ where: { id: b.destinoId, empresaId: a.empresaId, esDestino: true, esPropio: true, activo: true }, select: { id: true } });
+      if (!destino) throw new BadRequestException({ mensaje: 'Elija una planta de Terra Viva para la entrega.' });
+      const t = b.transporte!;
+      const ids = [...new Set([t.conductorArlId, t.conductorEpsId, t.auxiliarArlId, t.auxiliarEpsId].filter((x): x is string => !!x))];
+      if ((await this.db.entidadSeguridadSocial.count({ where: { id: { in: ids } } })) !== ids.length) throw new BadRequestException({ mensaje: 'Revise la ARL y la EPS.' });
+    }
+    const precio = (id: string) => decls.find((d) => d.id === id)?.tarifas[0]?.precioUnitario ?? null;
+    return { fecha, lineas, precio, sedes };
+  }
+
+  /** Vehículo de un tercero: se inserta sin leerlo de vuelta (la base aún no lo ve como del cliente) y se enlaza. */
+  private async registrarTransporte(tx: Tx, a: Actor, t: z.infer<typeof TransportePortal>) {
+    const id = randomUUID();
+    await tx.transporteTercero.createMany({ data: [{
+      id, empresaId: a.empresaId, empresaTransportadora: t.empresaTransportadora, tipoVehiculo: t.tipoVehiculo ?? null, placa: t.placa,
+      conductorNombre: t.conductorNombre, conductorDocumento: t.conductorDocumento, conductorArlId: t.conductorArlId, conductorEpsId: t.conductorEpsId,
+      auxiliarNombre: t.auxiliarNombre ?? null, auxiliarDocumento: t.auxiliarDocumento ?? null, auxiliarArlId: t.auxiliarArlId ?? null, auxiliarEpsId: t.auxiliarEpsId ?? null,
+    }] });
+    return id;
+  }
+
+  /** Crea las líneas del pedido (con sus especificaciones adicionales). La base vuelve a exigir que estén autorizadas. */
+  private async crearLineas(tx: Tx, solicitudId: string, v: Awaited<ReturnType<PortalService['validarPedido']>>) {
+    for (const i of v.lineas) await tx.solicitudItem.create({ data: {
+      solicitudId, declaracionId: i.declaracionId, sucursalId: i.sucursalId!, cantidadEstimada: i.cantidadEstimada, jornada: i.jornada ?? null, precioUnitario: v.precio(i.declaracionId),
+      ...(i.especificacionIds.length ? { especificaciones: { create: [...new Set(i.especificacionIds)].map((especificacionId) => ({ especificacionId })) } } : {}),
+    }, select: { id: true } });
+  }
+
+  /**
+   * Pedido de servicio desde el portal: recolección en sus sedes (CARGA) o entrega en planta con su propio vehículo
+   * (DESCARGA). Puede llevar residuos de varias sedes. Queda PENDIENTE de aprobación («Por confirmar» en la oficina) con
+   * la tarifa vigente a esa fecha, como un pedido de la oficina.
+   */
+  async pedirServicio(a: Actor, b: z.infer<typeof PedirServicio>) {
+    this.soloAdmin(a);
+    const adjunto = b.adjunto ? this.refs.leer(b.adjunto, a.clienteId!) : null;
     const r = await this.conCliente(a, async (tx) => {
       await this.exigirActivo(tx, a);
-      const sedes = await this.sedes(tx, a);
-      const sede = (!sedes.length || sedes.includes(b.sucursalId))
-        ? await tx.sucursal.findFirst({ where: { id: b.sucursalId, clienteId: a.clienteId, activa: true }, select: { id: true, nombre: true } }) : null;
-      if (!sede) throw new NotFoundException({ mensaje: 'Sede no encontrada.' });
-      const decls = await tx.declaracion.findMany({
-        where: { id: { in: ids }, clienteId: a.clienteId, estado: 'AUTORIZADA', activa: true, sucursales: { some: { sucursalId: sede.id, activa: true } } },
-        select: { id: true, tarifas: { where: { vigenteDesde: { lte: fecha }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fecha } }] }, take: 1, orderBy: { vigenteDesde: 'desc' }, select: { precioUnitario: true } } },
-      });
-      if (decls.length !== ids.length) throw new BadRequestException({ mensaje: `Algún residuo o servicio no está autorizado y activo para la sede «${sede.nombre}».` });
-      const precio = (id: string) => decls.find((d) => d.id === id)?.tarifas[0]?.precioUnitario ?? null;
+      const v = await this.validarPedido(tx, a, b);
+      const transporteId = b.operacion === 'DESCARGA' ? await this.registrarTransporte(tx, a, b.transporte!) : null;
       const s = await tx.solicitud.create({ data: {
-        empresaId: a.empresaId, clase: 'FORMAL', operacion: 'CARGA', clienteId: a.clienteId!, fechaSolicitada: fecha, aprobacion: 'PENDIENTE', creadoPorId: a.id,
-        ordenCompra: b.ordenCompra ?? null, observaciones: b.observaciones ?? null,
-        totalEstimado: b.items.reduce((acc, i) => acc + i.cantidadEstimada * Number(precio(i.declaracionId) ?? 0), 0),
-      } });
-      // La base vuelve a rechazar líneas con declaraciones no autorizadas, inactivas, de otro cliente o de otra sede
-      for (const i of b.items) await tx.solicitudItem.create({ data: {
-        solicitudId: s.id, declaracionId: i.declaracionId, sucursalId: sede.id, cantidadEstimada: i.cantidadEstimada, jornada: i.jornada ?? null, precioUnitario: precio(i.declaracionId),
-      } });
-      await this.audit.registrar(a, 'solicitud', s.id, 'CREAR_PORTAL', undefined, { numero: s.numero, sede: sede.nombre, lineas: b.items.length }, tx);
+        empresaId: a.empresaId, clase: 'FORMAL', operacion: b.operacion, clienteId: a.clienteId!, fechaSolicitada: v.fecha, aprobacion: 'PENDIENTE', creadoPorId: a.id,
+        ordenCompra: b.ordenCompra ?? null, observaciones: b.observaciones ?? null, adjuntoUrl: adjunto,
+        destinoId: b.operacion === 'DESCARGA' ? b.destinoId! : null, transporteId, telefonoContacto: b.telefonoContacto ?? null,
+        totalEstimado: v.lineas.reduce((acc, i) => acc + i.cantidadEstimada * Number(v.precio(i.declaracionId) ?? 0), 0),
+      }, select: { id: true, numero: true } });
+      await this.crearLineas(tx, s.id, v);
+      await this.audit.registrar(a, 'solicitud', s.id, 'CREAR_PORTAL', undefined, { numero: s.numero, operacion: b.operacion, sedes: v.sedes.map((x) => x.nombre), lineas: v.lineas.length }, tx);
       return { id: s.id, numero: s.numero };
     });
     // Aviso push a quienes aprueban: un pedido nuevo del portal espera su confirmación
     void this.db.cliente.findUnique({ where: { id: a.clienteId! }, select: { razonSocial: true } }).then((c) => this.notificaciones.aPermisos(a.empresaId, ['solicitudes.aprobar', 'solicitudes.crear'], {
-      titulo: 'Pedido nuevo desde el portal', cuerpo: `N.° ${r.numero} · ${c?.razonSocial ?? 'Cliente'} · para el ${b.fechaSolicitada}`, ruta: 'por-confirmar', etiqueta: `solicitud-${r.numero}`,
+      titulo: b.operacion === 'DESCARGA' ? 'Entrega en planta pedida desde el portal' : 'Pedido nuevo desde el portal',
+      cuerpo: `N.° ${r.numero} · ${c?.razonSocial ?? 'Cliente'} · para el ${b.fechaSolicitada}`, ruta: 'por-confirmar', etiqueta: `solicitud-${r.numero}`,
     })).catch(() => undefined);
     return r;
+  }
+
+  /** Pedido del cliente que el usuario puede ver: de sus sedes si está limitado. */
+  private async solicitudVisible(tx: Tx, a: Actor, id: string) {
+    const mias = await this.sedes(tx, a);
+    const s = await tx.solicitud.findFirst({ where: { id, clienteId: a.clienteId }, include: {
+      items: { include: { especificaciones: { select: { especificacionId: true } } } },
+      transporte: true,
+    } });
+    if (!s || (mias.length && !s.items.every((i) => mias.includes(i.sucursalId)))) throw new NotFoundException({ mensaje: 'Solicitud no encontrada.' });
+    return s;
+  }
+
+  /** Datos de un pedido para editarlo (mientras nadie lo confirma) o para pedirlo de nuevo. */
+  async formularioSolicitud(a: Actor, id: string) {
+    return this.conCliente(a, async (tx) => {
+      const s = await this.solicitudVisible(tx, a, id);
+      const t = s.transporte;
+      return {
+        id: s.id, numero: s.numero, operacion: s.operacion, fechaSolicitada: s.fechaSolicitada.toISOString().slice(0, 10), ordenCompra: s.ordenCompra, observaciones: s.observaciones,
+        editable: s.clase === 'FORMAL' && s.aprobacion === 'PENDIENTE' && s.estado === 'PENDIENTE', destinoId: s.destinoId, telefonoContacto: s.telefonoContacto, tieneAdjunto: !!s.adjuntoUrl,
+        transporte: t ? { empresaTransportadora: t.empresaTransportadora, tipoVehiculo: t.tipoVehiculo, placa: t.placa, conductorNombre: t.conductorNombre, conductorDocumento: t.conductorDocumento,
+          conductorArlId: t.conductorArlId, conductorEpsId: t.conductorEpsId, auxiliarNombre: t.auxiliarNombre, auxiliarDocumento: t.auxiliarDocumento, auxiliarArlId: t.auxiliarArlId, auxiliarEpsId: t.auxiliarEpsId } : null,
+        items: s.items.filter((i) => i.estado !== 'DESCARTADO').map((i) => ({ declaracionId: i.declaracionId, sucursalId: i.sucursalId, cantidadEstimada: Number(i.cantidadEstimada),
+          jornada: i.jornada, especificacionIds: i.especificaciones.map((e) => e.especificacionId) })),
+      };
+    });
+  }
+
+  /**
+   * Edita un pedido que Terra Viva aún no ha confirmado: fecha, líneas, orden de compra, observaciones, adjunto y (en una
+   * entrega en planta) el vehículo. No cambia el tipo (recolección o entrega).
+   */
+  async editarSolicitud(a: Actor, id: string, b: z.infer<typeof PedirServicio>) {
+    this.soloAdmin(a);
+    const adjunto = b.adjunto === undefined ? undefined : b.adjunto === null ? null : this.refs.leer(b.adjunto, a.clienteId!);
+    return this.conCliente(a, async (tx) => {
+      await this.exigirActivo(tx, a);
+      const s = await this.solicitudVisible(tx, a, id);
+      if (s.clase !== 'FORMAL' || s.aprobacion !== 'PENDIENTE' || s.estado !== 'PENDIENTE')
+        throw new BadRequestException({ mensaje: 'Terra Viva ya confirmó, programó o cerró esta solicitud: para cambiarla, comuníquese con su asesor.' });
+      if (b.operacion !== s.operacion) throw new BadRequestException({ mensaje: 'No se cambia el tipo de la solicitud (recolección o entrega en planta): cancélela y pida otra.' });
+      const v = await this.validarPedido(tx, a, b);
+      // Vehículo: si cambió, se registra uno nuevo (el anterior queda como constancia)
+      const t = b.transporte, ant = s.transporte as Record<string, unknown> | null;
+      const mismoTransporte = !!t && !!ant && (Object.keys(t) as (keyof typeof t)[]).every((k) => (t[k] ?? null) === (ant[k] ?? null));
+      const transporteId = s.operacion === 'DESCARGA' ? (mismoTransporte ? s.transporteId : await this.registrarTransporte(tx, a, t!)) : null;
+      // Líneas: primero las nuevas y luego se quitan las anteriores (la solicitud nunca queda sin líneas)
+      const anteriores = s.items.map((i) => i.id);
+      await this.crearLineas(tx, id, v);
+      if (anteriores.length) await tx.solicitudItem.deleteMany({ where: { id: { in: anteriores }, solicitudId: id } });
+      await tx.solicitud.update({ where: { id }, data: {
+        fechaSolicitada: v.fecha, ordenCompra: b.ordenCompra ?? null, observaciones: b.observaciones ?? null, ...(adjunto !== undefined ? { adjuntoUrl: adjunto } : {}),
+        destinoId: s.operacion === 'DESCARGA' ? b.destinoId! : null, transporteId, telefonoContacto: b.telefonoContacto ?? null,
+        totalEstimado: v.lineas.reduce((acc, i) => acc + i.cantidadEstimada * Number(v.precio(i.declaracionId) ?? 0), 0),
+      } });
+      await this.audit.registrar(a, 'solicitud', id, 'EDITAR_PORTAL',
+        { fecha: s.fechaSolicitada.toISOString().slice(0, 10), lineas: anteriores.length, ordenCompra: s.ordenCompra },
+        { fecha: b.fechaSolicitada, lineas: v.lineas.length, ordenCompra: b.ordenCompra ?? null, ...(transporteId !== s.transporteId ? { vehiculo: 'nuevo' } : {}) }, tx);
+      return { id, numero: s.numero };
+    });
+  }
+
+  /** Enlace (5 minutos) al PDF que el cliente adjuntó a su pedido. */
+  async adjuntoSolicitud(a: Actor, id: string) {
+    const s = await this.conCliente(a, (tx) => this.solicitudVisible(tx, a, id));
+    if (!s.adjuntoUrl || !esClaveAlmacen(s.adjuntoUrl)) throw new NotFoundException({ mensaje: 'La solicitud no tiene adjunto.' });
+    const ext = s.adjuntoUrl.slice(s.adjuntoUrl.lastIndexOf('.') + 1);
+    return this.archivos.enlace(s.adjuntoUrl, a.empresaId, { nombre: `solicitud-${s.numero}-adjunto.${ext}` });
   }
 
   /** El cliente cancela un pedido que Terra Viva aún no ha confirmado ni programado. Sus líneas quedan descartadas (regla de la base). */
@@ -596,7 +767,7 @@ class PortalController {
   @Get('resumen') resumen(@ActorActual() a: Actor) { return this.s.resumen(a); }
   @Get('declaraciones') declaraciones(@ActorActual() a: Actor, @Query(new Zod(FiltroDecl)) f: z.infer<typeof FiltroDecl>) { return this.s.declaraciones(a, f); }
   @Get('declaraciones/:id') declaracion(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.declaracion(a, id); }
-  @Get('solicitudes') solicitudes(@ActorActual() a: Actor, @Query(new Zod(Pagina)) f: z.infer<typeof Pagina>) { return this.s.solicitudes(a, f); }
+  @Get('solicitudes') solicitudes(@ActorActual() a: Actor, @Query(new Zod(FiltroSol)) f: z.infer<typeof FiltroSol>) { return this.s.solicitudes(a, f); }
   @Get('manifiestos') manifiestos(@ActorActual() a: Actor, @Query(new Zod(FiltroFechas)) f: z.infer<typeof FiltroFechas>) { return this.s.listaManifiestos(a, f); }
   @Post('manifiestos/:id/enlace') enlaceManifiesto(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.enlace(a, 'manifiesto', id); }
   @Get('certificados') certificados(@ActorActual() a: Actor, @Query(new Zod(FiltroAnio)) f: z.infer<typeof FiltroAnio>) { return this.s.certificados(a, f); }
@@ -614,6 +785,9 @@ class PortalController {
   }
   @Get('solicitudes/opciones') opciones(@ActorActual() a: Actor) { return this.s.opcionesPedido(a); }
   @Post('solicitudes') pedir(@ActorActual() a: Actor, @Body(new Zod(PedirServicio)) b: z.infer<typeof PedirServicio>) { return this.s.pedirServicio(a, b); }
+  @Get('solicitudes/:id/formulario') formularioSolicitud(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.formularioSolicitud(a, id); }
+  @Put('solicitudes/:id') editarSolicitud(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(PedirServicio)) b: z.infer<typeof PedirServicio>) { return this.s.editarSolicitud(a, id, b); }
+  @Post('solicitudes/:id/adjunto/enlace') @HttpCode(200) adjunto(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.adjuntoSolicitud(a, id); }
   @Post('solicitudes/:id/cancelar') cancelar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Cancelar)) b: z.infer<typeof Cancelar>) { return this.s.cancelarSolicitud(a, id, b.motivo); }
   @Get('usuarios') usuarios(@ActorActual() a: Actor) { return this.s.usuarios(a, a.clienteId!); }
   @Post('usuarios') crearUsuario(@ActorActual() a: Actor, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, a.clienteId!, b); }
@@ -643,5 +817,5 @@ class DescargasController {
   @Publico() @Get(':token') descargar(@Param('token') token: string, @Res() res: Response) { return this.s.descargar(token, res); }
 }
 
-@Module({ imports: [AuthModule, ManifiestosModule, ImportacionModule, CertificadoComercialModule, JwtModule.register({})], controllers: [PortalController, UsuariosPortalOficinaController, DescargasController], providers: [PortalService] })
+@Module({ imports: [AuthModule, ManifiestosModule, ImportacionModule, CertificadoComercialModule, JwtModule.register({})], controllers: [PortalController, UsuariosPortalOficinaController, DescargasController], providers: [PortalService], exports: [PortalService] })
 export class PortalModule {}

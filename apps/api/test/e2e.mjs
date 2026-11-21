@@ -1409,6 +1409,232 @@ const pedido2 = r.json;
 await llamar('PATCH', `/solicitudes/${pedido2.id}/aprobacion`, { token: T8, cuerpo: { aprobacion: 'APROBADA' } });
 r = await llamar('POST', `/portal/solicitudes/${pedido2.id}/cancelar`, { token: tPA, cuerpo: { motivo: 'Cambio de planes' } });
 prueba('…pero si Terra Viva ya lo confirmó, no lo cancela desde el portal', r.status === 400 && /confirm/.test(r.json.mensaje), JSON.stringify(r.json));
+console.log('\n9b. Portal de clientes: autogestión (lo que el rol «Todos los clientes» de Grinclic deja hacer al cliente)');
+const pdfMin = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+const subir = async (token, nombre = 'ficha.pdf', buf = pdfMin) => (await llamar('POST', '/portal/archivos', { token, form: formDe(buf, nombre) })).json;
+const intentoRls = async (clienteId, fn) => { try { await conCliente(clienteId, fn); return 'ok'; } catch (e) { return String(e?.message ?? e).replace(/\s+/g, ' ').slice(-160); } };
+const sedeC001p = await db.sucursal.findFirst({ where: { clienteId: clienteA.id, codigo: 'C001' } });
+const principalA = await db.sucursal.findFirst({ where: { clienteId: clienteA.id, esPrincipal: true } });
+
+// --- Sedes: crear, corregir e inactivar (con ubicación GPS); la principal y la zona de ruta son de Terra Viva
+r = await llamar('GET', '/portal/sedes', { token: tPA });
+prueba('portal: el administrador ve sus sedes con dirección, contactos, horarios y ubicación', r.status === 200 && r.json.some((s) => s.codigo === 'C001')
+  && r.json.every((s) => 'latitud' in s && 'atencionLvDesde' in s && typeof s.declaracionesActivas === 'number'), JSON.stringify(r.json?.[0] ?? r.json).slice(0, 200));
+r = await llamar('GET', '/portal/municipios?q=giron', { token: tPA });
+prueba('…busca el municipio sin tildes (DIVIPOLA)', r.status === 200 && r.json.some((m) => m.codigoDane === '68307'), JSON.stringify(r.json).slice(0, 150));
+const todasA = await db.declaracion.count({ where: { clienteId: clienteA.id, alcanceSedes: 'TODAS', estado: { not: 'ANULADA' } } });
+// El cliente A es gestor desde la sección de clientes: cada sede suya indica el NIT del generador que representa
+r = await llamar('POST', '/portal/sedes', { token: tPA, cuerpo: { nombre: 'Bodega Norte', codigo: 'c010', municipioDane: '68307', direccion: 'Km 2 vía a Girón', latitud: 7.0712, longitud: -73.1689,
+  generadorNit: '900123456', generadorNombre: 'Generador de la bodega norte',
+  contacto: 'Jefe de bodega', celular: '3001234567', emails: 'bodega@cliente-a.test', atencionLvDesde: '07:00', atencionLvHasta: '17:00' } });
+const sedeNueva = r.json;
+const sedeNuevaDb = sedeNueva.id ? await db.sucursal.findUnique({ where: { id: sedeNueva.id }, include: { declaraciones: true } }) : null;
+prueba('…crea una sede con su ubicación GPS: activa, sin zona (la asigna Terra Viva) y con las declaraciones de «todas las sedes»', r.status === 201 && sedeNuevaDb?.codigo === 'C010'
+  && sedeNuevaDb.activa && !sedeNuevaDb.esPrincipal && sedeNuevaDb.zonaId === null && Math.abs(Number(sedeNuevaDb.latitud) - 7.0712) < 1e-6 && sedeNuevaDb.declaraciones.length === todasA && todasA > 0
+  && sedeNuevaDb.atencionLvDesde?.toISOString().slice(11, 16) === '07:00', JSON.stringify([r.status, r.json, sedeNuevaDb?.declaraciones.length, todasA]).slice(0, 300));
+const [sd1, sd2, sd3, sd4] = await Promise.all([
+  llamar('POST', '/portal/sedes', { token: tPA, cuerpo: { nombre: 'Repetida', codigo: 'C010' } }),
+  llamar('POST', '/portal/sedes', { token: tAdminSede, cuerpo: { nombre: 'Sede de un administrador limitado' } }),
+  llamar('POST', '/portal/sedes', { token: tPB, cuerpo: { nombre: 'Sede de consulta' } }),
+  llamar('POST', '/portal/sedes', { token: tPA, cuerpo: { nombre: 'Sin longitud', latitud: 7.1, generadorNit: '900123457' } }),
+]);
+const sd5 = await llamar('POST', '/portal/sedes', { token: tPA, cuerpo: { nombre: 'Sede sin generador' } });
+prueba('…no repite códigos; un administrador limitado a una sede o un usuario de consulta no crean sedes; latitud sin longitud no; un gestor indica el generador', sd1.status === 400 && sd2.status === 403 && sd3.status === 403 && sd4.status === 400
+  && sd5.status === 400 && /generador/.test(sd5.json.mensaje),
+  JSON.stringify([sd1.status, sd2.status, sd3.status, sd4.status, sd5.status]));
+r = await llamar('PATCH', `/portal/sedes/${sedeNueva.id}`, { token: tPA, cuerpo: { contacto: 'Coordinadora ambiental', telefono: '6076543210', latitud: 7.08, longitud: -73.17 } });
+prueba('…corrige su sede (contacto y ubicación) y queda en la auditoría', r.status === 200 && r.json.cambios === 4
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'sucursal', entidadId: sedeNueva.id, accion: 'EDITAR_PORTAL' } })), JSON.stringify(r.json));
+r = await llamar('PATCH', `/portal/sedes/${principalA.id}`, { token: tPA, cuerpo: { activa: false } });
+const sedeAjena = await llamar('PATCH', `/portal/sedes/${sedeNueva.id}`, { token: tAdminB, cuerpo: { nombre: 'Intento del cliente B' } });
+prueba('…la sede principal no se inactiva; el cliente B no toca las sedes del cliente A', r.status === 400 && sedeAjena.status === 404, `${r.status} ${sedeAjena.status}`);
+const zonaCualquiera = await db.zona.findFirst();
+const rlsSedes = [
+  await intentoRls(clienteA.id, (tx) => tx.sucursal.update({ where: { id: principalA.id }, data: { esPrincipal: false } })),
+  await intentoRls(clienteA.id, (tx) => tx.sucursal.update({ where: { id: sedeNueva.id }, data: { zonaId: zonaCualquiera?.id ?? null } })),
+  await intentoRls(clienteA.id, (tx) => tx.sucursal.delete({ where: { id: sedeNueva.id } })),
+  await intentoRls(clienteB.id, (tx) => tx.sucursal.update({ where: { id: sedeNueva.id }, data: { nombre: 'De otro cliente' } })),
+];
+prueba('RLS: con la sesión del portal la base no deja cambiar la principal ni la zona, borrar una sede ni tocar la de otro cliente', rlsSedes.every((x) => x !== 'ok') && !!zonaCualquiera, JSON.stringify(rlsSedes));
+
+// --- Declaraciones una por una: crear (con su ficha de seguridad en PDF), corregir, retirar e inactivar
+const catP = (await llamar('GET', '/portal/catalogos-declaracion', { token: tPA })).json;
+prueba('portal: catálogos del formulario de declaración, sin causales ni precios', !!catP.categorias?.length && !!catP.lineas?.length && !!catP.disposiciones?.length
+  && !('causales' in catP) && !('metricasPrecio' in catP), Object.keys(catP ?? {}).join(','));
+const fichaA = await subir(tPA);
+const fichaB = await subir(tAdminB);
+const otroArchivo = await llamar('POST', '/portal/archivos', { token: tPA, form: formDe(Buffer.from('MZ ejecutable'), 'virus.exe') });
+prueba('…sube su ficha de seguridad en PDF (referencia firmada); otro tipo de archivo no', !!fichaA.ref && fichaA.tipo === 'pdf' && otroArchivo.status === 400, JSON.stringify([fichaA, otroArchivo.status]).slice(0, 200));
+const declCliente = {
+  tipo: 'RESIDUO', alcanceSedes: 'SELECCION', sucursalIds: [sedeC001p.id], nombre: 'Trapos contaminados con hidrocarburo', codigoInterno: 'PORTAL-F1',
+  categoriaId: idDe(catP.categorias, 'RESPEL'), tipoResiduoId: idDe(catP.tiposResiduo, 'IND'), lineaServicioId: idDe(catP.lineas, '01'), esPeligroso: true,
+  codigoYId: idDe(catP.corrientesY, 'Y8'), riesgoIds: [idDe(catP.riesgos, 'I')], descripcionProceso: 'Mantenimiento de maquinaria', composicion: 'Algodón con aceite mineral',
+  tipoEmbalajeId: idDe(catP.tiposEmbalaje, 'CANECA'), materialEmbalajeId: idDe(catP.materiales, 'MET'), estadoFisico: 'SOLIDO', inflamable: true, controladaEstupefacientes: false,
+  disposiciones: [{ disposicionId: idDe(catP.disposiciones, 'DF') }], responsabilidadAceptada: true, fichaSeguridad: fichaA.ref,
+  // Lo que es de Terra Viva no se toma del cliente aunque lo mande
+  mostrarPrecioApp: true, solicitudAutomatica: true, precio: { precioUnitario: 1 },
+};
+const [dc1, dc2, dc3] = await Promise.all([
+  llamar('POST', '/portal/declaraciones', { token: tPA, cuerpo: { ...declCliente, codigoInterno: 'PORTAL-X1', responsabilidadAceptada: false } }),
+  llamar('POST', '/portal/declaraciones', { token: tPA, cuerpo: { ...declCliente, codigoInterno: 'PORTAL-X2', fichaSeguridad: `${fichaA.ref.slice(0, -4)}AAAA` } }),
+  llamar('POST', '/portal/declaraciones', { token: tPA, cuerpo: { ...declCliente, codigoInterno: 'PORTAL-X3', fichaSeguridad: fichaB.ref } }),
+]);
+prueba('…no declara sin aceptar la responsabilidad del generador, ni con un archivo alterado o subido por otro cliente', dc1.status === 400 && dc2.status === 400 && dc3.status === 400,
+  JSON.stringify([dc1.json, dc2.json?.mensaje, dc3.json?.mensaje]).slice(0, 300));
+r = await llamar('POST', '/portal/declaraciones', { token: tPA, cuerpo: declCliente });
+const declP1 = r.json;
+const declP1Db = declP1.id ? await db.declaracion.findUnique({ where: { id: declP1.id }, include: { tarifas: true, sucursales: true } }) : null;
+prueba('…declara un residuo con el formulario: queda en revisión, sin precio ni programación automática, con su ficha guardada y a nombre de su empresa', r.status === 201
+  && declP1Db?.estado === 'PENDIENTE' && !declP1Db.activa && declP1Db.tarifas.length === 0 && !declP1Db.mostrarPrecioApp && !declP1Db.solicitudAutomatica
+  && /^local:/.test(declP1Db.fichaSeguridadUrl ?? '') && declP1Db.clienteId === clienteA.id && declP1Db.creadoPorId === portalA.id && declP1Db.sucursales.length === 1,
+  JSON.stringify([r.status, r.json]).slice(0, 300));
+r = await llamar('POST', `/portal/declaraciones/${declP1.id}/ficha/enlace`, { token: tPA });
+const fichaBajada = r.json.url ? await fetch(API + r.json.url) : null;
+prueba('…descarga la ficha que subió (enlace de 5 minutos)', r.status === 200 && fichaBajada?.status === 200 && Buffer.from(await fichaBajada.arrayBuffer()).subarray(0, 4).toString() === '%PDF',
+  JSON.stringify(r.json).slice(0, 150));
+r = await llamar('GET', `/declaraciones?clienteId=${clienteA.id}&estado=PENDIENTE&porPagina=200`, { token: T8 });
+prueba('…y la oficina la ve por revisar', r.status === 200 && r.json.filas.some((d) => d.id === declP1.id), String(r.json.total));
+r = await llamar('PUT', `/portal/declaraciones/${declP1.id}`, { token: tPA, cuerpo: { ...declCliente, fichaSeguridad: undefined, nombre: 'Trapos y estopas contaminados con hidrocarburo' } });
+const declP1Editada = await db.declaracion.findUnique({ where: { id: declP1.id } });
+prueba('…la corrige mientras está en revisión: sigue en revisión y conserva la ficha', r.status === 200 && declP1Editada.estado === 'PENDIENTE' && declP1Editada.nombre.startsWith('Trapos y estopas')
+  && declP1Editada.fichaSeguridadUrl === declP1Db.fichaSeguridadUrl, JSON.stringify(r.json).slice(0, 200));
+const [dl1, dl2, dl3] = await Promise.all([
+  llamar('POST', '/portal/declaraciones', { token: tAdminSede, cuerpo: { ...declCliente, codigoInterno: 'PORTAL-S1', alcanceSedes: 'TODAS', fichaSeguridad: undefined } }),
+  llamar('POST', '/portal/declaraciones', { token: tAdminSede, cuerpo: { ...declCliente, codigoInterno: 'PORTAL-S2', sucursalIds: [sedeC001p.id], fichaSeguridad: undefined } }),
+  llamar('PUT', `/portal/declaraciones/${declP1.id}`, { token: tAdminB, cuerpo: { ...declCliente, fichaSeguridad: undefined } }),
+]);
+r = await llamar('POST', '/portal/declaraciones', { token: tAdminSede, cuerpo: { ...declCliente, codigoInterno: 'PORTAL-S3', sucursalIds: [sedeC002.id], fichaSeguridad: undefined } });
+const declS3 = r.json;
+prueba('…un administrador limitado a una sede solo declara para su sede; el cliente B no corrige las del cliente A', dl1.status === 403 && dl2.status === 403 && dl3.status === 404 && r.status === 201,
+  JSON.stringify([dl1.status, dl2.status, dl3.status, r.status]));
+r = await llamar('POST', `/portal/declaraciones/${declS3.id}/retirar`, { token: tAdminSede, cuerpo: { motivo: 'La declaramos por error' } });
+const declS3Db = await db.declaracion.findUnique({ where: { id: declS3.id } });
+const listaTrasRetirar = await llamar('GET', '/portal/declaraciones?q=PORTAL-S3', { token: tPA });
+prueba('…retira una declaración que Terra Viva aún no autoriza: queda anulada (constancia), deja de verse y libera su código', r.status === 200 && declS3Db.estado === 'ANULADA'
+  && /declaramos por error/.test(declS3Db.observaciones ?? '') && listaTrasRetirar.json.total === 0, JSON.stringify(r.json));
+// Una autorizada (con precio, etiquetado y densidad que puso Terra Viva): corregirla la devuelve a revisión sin perder lo de Terra Viva
+r = await llamar('POST', '/declaraciones', { token: T8, cuerpo: { ...formulario, clienteId: clienteA.id, alcanceSedes: 'SELECCION', sucursalIds: [sedeC001p.id], codigoInterno: 'PORTAL-AUT',
+  nombre: 'Aceite usado autorizado (portal)', fichaSeguridadUrl: 'https://docs.terravivasas.com/fds/aceite.pdf', mostrarPrecioApp: true } });
+const declAut = r.json;
+r = await llamar('PATCH', `/declaraciones/${declAut.id}/estado`, { token: T8, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('(la oficina autoriza una declaración del cliente A para las pruebas)', r.status === 200 && r.json.estado === 'AUTORIZADA' && r.json.activa, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/portal/declaraciones/${declAut.id}/retirar`, { token: tPA, cuerpo: { motivo: 'Intento sobre una autorizada' } });
+prueba('…una autorizada no se retira (se inactiva)', r.status === 400 && /inactív/.test(r.json.mensaje), JSON.stringify(r.json));
+const fAut = (await llamar('GET', `/portal/declaraciones/${declAut.id}/formulario`, { token: tPA })).json;
+const { fichaSeguridad: _fs, caracterizacion: _ca, id: _id, numero: _nu, estado: _es, activa: _ac, ...cuerpoAut } = fAut;
+r = await llamar('PUT', `/portal/declaraciones/${declAut.id}`, { token: tPA, cuerpo: { ...cuerpoAut, composicion: 'Aceite mineral usado con trazas metálicas y agua' } });
+const declAutDb = await db.declaracion.findUnique({ where: { id: declAut.id }, include: { tarifas: true, etiquetados: true } });
+prueba('…corregir una autorizada la devuelve a revisión (inactiva) y conserva precio, etiquetado, densidad, ficha y «mostrar precio»', r.status === 200 && r.json.estabaAutorizada
+  && declAutDb.estado === 'PENDIENTE' && !declAutDb.activa && declAutDb.revisionPedidaPorId === portalA.id && declAutDb.tarifas.length === 1 && declAutDb.etiquetados.length === 1
+  && Number(declAutDb.densidad) === 0.88 && declAutDb.fichaSeguridadUrl === 'https://docs.terravivasas.com/fds/aceite.pdf' && declAutDb.mostrarPrecioApp,
+  JSON.stringify([r.status, r.json, declAutDb.estado, declAutDb.tarifas.length, declAutDb.etiquetados.length, declAutDb.densidad]).slice(0, 300));
+r = await llamar('PATCH', `/declaraciones/${declAut.id}/estado`, { token: T8, cuerpo: { estado: 'AUTORIZADA' } });
+prueba('…y Terra Viva la autoriza de nuevo', r.status === 200 && r.json.estado === 'AUTORIZADA', JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { sucursalId: sedeC001p.id, fechaSolicitada: fechaEn(8), items: [{ declaracionId: declAut.id, cantidadEstimada: 10 }] } });
+const pedidoAut = r.json;
+r = await llamar('POST', `/portal/declaraciones/${declAut.id}/inactivar`, { token: tPA, cuerpo: { motivo: 'Cambiamos de proceso' } });
+prueba('…con un pedido abierto de ese residuo no se inactiva', r.status === 400 && /pedido abierto/.test(r.json.mensaje), JSON.stringify(r.json));
+await llamar('POST', `/portal/solicitudes/${pedidoAut.id}/cancelar`, { token: tPA, cuerpo: { motivo: 'Ya no aplica el pedido' } });
+r = await llamar('POST', `/portal/declaraciones/${declAut.id}/inactivar`, { token: tPA, cuerpo: { motivo: 'Cambiamos de proceso' } });
+const declInactiva = await db.declaracion.findUnique({ where: { id: declAut.id }, include: { causal: true } });
+prueba('…sin pedidos abiertos, el cliente inactiva la autorizada que ya no genera (con causal y motivo)', r.status === 200 && declInactiva.estado === 'AUTORIZADA' && !declInactiva.activa
+  && declInactiva.causal?.codigo === 'CAU-PORTAL-DECL' && /Cambiamos de proceso/.test(declInactiva.observaciones ?? ''), JSON.stringify(r.json));
+const rlsDecl = [
+  await intentoRls(clienteA.id, (tx) => tx.declaracion.update({ where: { id: declAut.id }, data: { activa: true } })),
+  await intentoRls(clienteA.id, (tx) => tx.declaracion.update({ where: { id: declAut.id }, data: { nombre: 'Cambio sin revisión' } })),
+  await intentoRls(clienteA.id, (tx) => tx.declaracion.update({ where: { id: declP1.id }, data: { estado: 'AUTORIZADA' } })),
+  await intentoRls(clienteA.id, (tx) => tx.declaracion.update({ where: { id: declP1.id }, data: { mostrarPrecioApp: true } })),
+  await intentoRls(clienteA.id, (tx) => tx.tarifa.create({ data: { declaracionId: declP1.id, precioUnitario: 1, vigenteDesde: new Date() } })),
+];
+prueba('RLS: el portal no reactiva ni cambia una autorizada, no se autoriza a sí mismo, no cambia «mostrar precio» ni pone precios', rlsDecl.every((x) => x !== 'ok'), JSON.stringify(rlsDecl));
+
+// --- Pedidos: varias sedes, especificaciones adicionales y orden de compra en PDF; editar mientras nadie confirma
+r = await llamar('GET', '/portal/solicitudes/opciones', { token: tPA });
+const op = r.json;
+prueba('portal: para pedir también ve las especificaciones adicionales, las plantas de Terra Viva para entregar y las ARL y EPS', r.status === 200 && Array.isArray(op.especificaciones)
+  && op.destinos?.length >= 1 && op.arl?.length >= 1 && op.eps?.length >= 1, JSON.stringify({ e: op.especificaciones?.length, d: op.destinos, a: op.arl?.length, s: op.eps?.length }).slice(0, 300));
+const sedeOtra = op.sedes.find((s) => s.codigo !== 'C001' && s.declaraciones.length);
+const esp = op.especificaciones[0];
+const ocPdf = await subir(tPA, 'orden-de-compra.pdf');
+r = await llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { fechaSolicitada: fechaEn(6), ordenCompra: 'OC-MULTI-1', adjunto: ocPdf.ref, items: [
+  { declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 50, jornada: 'PM', especificacionIds: esp ? [esp.id] : [] },
+  { declaracionId: sedeOtra.declaraciones[0].id, sucursalId: sedeOtra.id, cantidadEstimada: 30 },
+] } });
+const multi = r.json;
+const solMulti = multi.id ? await db.solicitud.findUnique({ where: { id: multi.id }, include: { items: { include: { especificaciones: true } } } }) : null;
+prueba('…pide en un solo pedido residuos de dos sedes, con especificaciones adicionales y la orden de compra en PDF', r.status === 201 && solMulti?.items.length === 2
+  && new Set(solMulti.items.map((i) => i.sucursalId)).size === 2 && (!esp || solMulti.items.some((i) => i.especificaciones.length === 1)) && /^local:/.test(solMulti.adjuntoUrl ?? ''),
+  JSON.stringify([r.status, r.json, sedeOtra?.codigo, esp?.nombre]).slice(0, 300));
+r = await llamar('GET', `/portal/solicitudes/${multi.id}/formulario`, { token: tPA });
+prueba('…lo abre para corregirlo mientras nadie lo confirma', r.status === 200 && r.json.editable && r.json.items.length === 2 && r.json.tieneAdjunto, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PUT', `/portal/solicitudes/${multi.id}`, { token: tPA, cuerpo: { fechaSolicitada: fechaEn(7), ordenCompra: 'OC-MULTI-2', items: [
+  { declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 75 }] } });
+const solEditada = await db.solicitud.findUnique({ where: { id: multi.id }, include: { items: true } });
+prueba('…y lo corrige: otra fecha, otra orden de compra y una línea menos, sin perder el PDF', r.status === 200 && solEditada.items.length === 1 && Number(solEditada.items[0].cantidadEstimada) === 75
+  && solEditada.ordenCompra === 'OC-MULTI-2' && solEditada.estado === 'PENDIENTE' && solEditada.fechaSolicitada.toISOString().slice(0, 10) === fechaEn(7) && /^local:/.test(solEditada.adjuntoUrl ?? ''),
+  JSON.stringify([r.status, r.json]).slice(0, 200));
+r = await llamar('POST', `/portal/solicitudes/${multi.id}/adjunto/enlace`, { token: tPA });
+const ocBajada = r.json.url ? await fetch(API + r.json.url) : null;
+prueba('…descarga el PDF que adjuntó', r.status === 200 && ocBajada?.status === 200 && Buffer.from(await ocBajada.arrayBuffer()).subarray(0, 4).toString() === '%PDF', JSON.stringify(r.json).slice(0, 150));
+const [ed1, ed2] = await Promise.all([
+  llamar('PUT', `/portal/solicitudes/${multi.id}`, { token: tAdminB, cuerpo: { fechaSolicitada: fechaEn(7), items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 1 }] } }),
+  llamar('PUT', `/portal/solicitudes/${multi.id}`, { token: tPB, cuerpo: { fechaSolicitada: fechaEn(7), items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 1 }] } }),
+]);
+await llamar('PATCH', `/solicitudes/${multi.id}/aprobacion`, { token: T8, cuerpo: { aprobacion: 'APROBADA' } });
+r = await llamar('PUT', `/portal/solicitudes/${multi.id}`, { token: tPA, cuerpo: { fechaSolicitada: fechaEn(9), items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 5 }] } });
+prueba('…el cliente B y un usuario de consulta no lo corrigen; confirmado por Terra Viva, ya no se corrige desde el portal', ed1.status === 404 && ed2.status === 403
+  && r.status === 400 && /confirm/.test(r.json.mensaje), JSON.stringify([ed1.status, ed2.status, r.status, r.json.mensaje]));
+
+// --- Entrega en planta (el cliente lleva el residuo en su propio vehículo)
+const transporte = { empresaTransportadora: 'Transportes Cliente A S.A.S.', tipoVehiculo: 'Camión', placa: 'tvx123', conductorNombre: 'Conductor de Prueba', conductorDocumento: '1098765432',
+  conductorArlId: op.arl[0].id, conductorEpsId: op.eps[0].id };
+const ajeno = await db.proveedor.findFirst({ where: { esDestino: true, esPropio: false, activo: true } });
+const [en1, en2] = await Promise.all([
+  llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { operacion: 'DESCARGA', fechaSolicitada: fechaEn(3), destinoId: op.destinos[0].id, telefonoContacto: '3001112233',
+    items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 200 }] } }),
+  llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { operacion: 'DESCARGA', fechaSolicitada: fechaEn(3), destinoId: ajeno?.id, telefonoContacto: '3001112233', transporte,
+    items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 200 }] } }),
+]);
+prueba('…una entrega en planta sin vehículo, o a un gestor aliado en lugar de una planta de Terra Viva, no se pide', en1.status === 400 && en2.status === 400 && !!ajeno,
+  JSON.stringify([en1.json, en2.json?.mensaje]).slice(0, 300));
+r = await llamar('POST', '/portal/solicitudes', { token: tPA, cuerpo: { operacion: 'DESCARGA', fechaSolicitada: fechaEn(3), destinoId: op.destinos[0].id, telefonoContacto: '3001112233', transporte,
+  items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 200 }] } });
+const entrega = r.json;
+const solEntrega = entrega.id ? await db.solicitud.findUnique({ where: { id: entrega.id }, include: { transporte: true } }) : null;
+prueba('portal: pide una entrega en planta con su vehículo, conductor, ARL y EPS (por confirmar)', r.status === 201 && solEntrega?.operacion === 'DESCARGA'
+  && solEntrega.transporte?.placa === 'TVX123' && solEntrega.destinoId === op.destinos[0].id && solEntrega.aprobacion === 'PENDIENTE', JSON.stringify([r.status, r.json]).slice(0, 200));
+const [listaEntregas, listaB] = await Promise.all([
+  llamar('GET', '/portal/solicitudes?operacion=DESCARGA&estado=POR_CONFIRMAR', { token: tPA }), llamar('GET', '/portal/solicitudes?operacion=DESCARGA', { token: tAdminB }),
+]);
+const vehiculoVisto = [await conCliente(clienteA.id, (tx) => tx.transporteTercero.count({ where: { id: solEntrega.transporteId } })),
+  await conCliente(clienteB.id, (tx) => tx.transporteTercero.count({ where: { id: solEntrega.transporteId } }))];
+prueba('…la ve en su lista (filtrada) con la placa; el cliente B no la ve, y la base no le muestra a B el vehículo ni sus datos', listaEntregas.status === 200
+  && listaEntregas.json.filas.some((s) => s.id === entrega.id && s.transporte?.placa === 'TVX123') && listaEntregas.json.filas.every((s) => s.operacion === 'DESCARGA' && s.aprobacion === 'PENDIENTE')
+  && listaB.json.total === 0 && vehiculoVisto[0] === 1 && vehiculoVisto[1] === 0, JSON.stringify([listaEntregas.json.total, listaB.json.total, vehiculoVisto]));
+r = await llamar('PUT', `/portal/solicitudes/${entrega.id}`, { token: tPA, cuerpo: { operacion: 'DESCARGA', fechaSolicitada: fechaEn(4), destinoId: op.destinos[0].id, telefonoContacto: '3001112233',
+  transporte: { ...transporte, placa: 'TVX124' }, items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 180 }] } });
+const entregaEditada = await db.solicitud.findUnique({ where: { id: entrega.id }, include: { transporte: true } });
+prueba('…si cambia de vehículo, se registra el nuevo y el anterior queda como constancia', r.status === 200 && entregaEditada.transporte?.placa === 'TVX124'
+  && entregaEditada.transporteId !== solEntrega.transporteId && (await db.transporteTercero.count({ where: { id: solEntrega.transporteId } })) === 1, JSON.stringify(r.json));
+r = await llamar('PUT', `/portal/solicitudes/${entrega.id}`, { token: tPA, cuerpo: { operacion: 'CARGA', fechaSolicitada: fechaEn(4), items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 180 }] } });
+prueba('…no cambia una entrega en planta por una recolección (se cancela y se pide otra)', r.status === 400, JSON.stringify(r.json));
+
+// --- Informe general: lo cargado, lo pesado y conciliado en planta, el precio y el certificado
+const desdeG = `${anioA}-01-01`, hastaG = `${anioA}-12-31`;
+const lineasA = await db.manifiestoItem.count({ where: { manifiesto: { clienteId: clienteA.id, estado: 'REALIZADO', fechaServicio: { gte: new Date(`${desdeG}T00:00:00Z`), lte: new Date(`${hastaG}T00:00:00Z`) } } } });
+r = await llamar('GET', `/portal/informe-general?desde=${desdeG}&hasta=${hastaG}`, { token: tPA });
+const conciliadas = r.json.lineas?.filter((l) => l.conciliada) ?? [];
+prueba('portal: informe general del periodo — cada servicio con lo cargado y, si está conciliado, lo pesado en planta, el precio y el valor', r.status === 200
+  && r.json.lineas.length === lineasA && lineasA > 0 && conciliadas.length > 0 && conciliadas.every((l) => l.pesado !== null)
+  && r.json.lineas.filter((l) => !l.conciliada).every((l) => l.precio === null && l.valor === null), JSON.stringify([r.status, r.json.lineas?.length, lineasA, conciliadas.length, conciliadas[0]]).slice(0, 400));
+const [ig1, ig2, ig3] = await Promise.all([
+  llamar('GET', `/portal/informe-general?desde=${desdeG}&hasta=${hastaG}`, { token: tAdminSede }),
+  llamar('GET', `/portal/informe-general?desde=${desdeG}&hasta=${hastaG}`, { token: tAdminB }),
+  llamar('GET', `/portal/informe-general?desde=${anioA - 2}-01-01&hasta=${hastaG}`, { token: tPA }),
+]);
+prueba('…un usuario limitado a una sede ve solo su sede; el cliente B no ve nada del cliente A; máximo un año por consulta', ig1.status === 200 && ig1.json.lineas.every((l) => l.sedeCodigo === 'C002')
+  && ig2.status === 200 && ig2.json.lineas.length === 0 && ig3.status === 400, JSON.stringify([ig1.json.lineas?.length, ig2.json.lineas?.length, ig3.status]));
+
 // Cliente inactivo (gerencia, 19-11-2026): aviso amable; sigue consultando, pero no pide servicios ni carga declaraciones
 r = await llamar('PATCH', `/clientes/${clienteB.id}`, { token: T8, cuerpo: { activo: false, motivoInactivacion: 'PAGOS_PENDIENTES', notaInactivacion: 'Nota interna de cartera' } });
 const [yoB, pideB, cargaB, consultaB] = await Promise.all([

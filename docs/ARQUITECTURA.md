@@ -16,7 +16,7 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 87 tablas, 30 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 87 tablas, 32 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel y CSV) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
 | Usuarios | `GET/POST usuarios`, `PATCH usuarios/:id`, `POST usuarios/:id/invitacion`, `GET roles` (solo administración) | Nadie escribe contraseñas: el usuario nuevo recibe una invitación de 72 horas para crear la suya; nada se borra: inactivar cierra sus sesiones al instante; nadie se inactiva ni se cambia el rol a sí mismo; desbloquear tras intentos fallidos; matriz de permisos por rol |
@@ -96,6 +96,29 @@ Consulta, descarga y escribe solo lo suyo, con doble barrera:
   aproximada y la jornada. Queda «por confirmar», con la tarifa vigente a esa fecha; la oficina lo ve marcado como
   pedido del portal.
 - **Cancelar** un pedido que nadie ha confirmado ni programado, con el motivo: la base descarta sus líneas.
+
+**Autogestión (20-11-2026, revisión contra el rol «Todos los clientes» de Grinclic).** Migración
+`20261210000000_portal_autogestion` y `apps/api/src/portal/autogestion.ts`:
+- **Sus sedes:** crearlas (solo el administrador que ve toda la empresa), corregir dirección, municipio de la DIVIPOLA,
+  ubicación GPS («usar mi ubicación actual»), contactos, horarios y registros, e inactivarlas (no se borran). La sede
+  principal y la zona de ruta son de Terra Viva (un trigger lo exige). Una sede nueva hereda las declaraciones de
+  «todas las sedes», también las autorizadas; Terra Viva recibe un aviso para asignarle la zona.
+- **Sus declaraciones una por una** (además de la plantilla): crear con el formulario (mismo esquema y validaciones de
+  la oficina), corregir (vuelve a revisión, inactiva, y la autoriza otra persona: cuatro ojos), retirar la que nunca se
+  autorizó y no tiene uso (queda ANULADA como constancia) e inactivar la autorizada que ya no genera (sin pedidos
+  abiertos). Adjunta la ficha de datos de seguridad y la caracterización en PDF o foto: el archivo se sube aparte y el
+  navegador recibe una referencia firmada (HMAC, 24 horas) que el servidor solo acepta del mismo cliente. Lo que es de
+  Terra Viva (precio, «mostrar precio», programación automática, etiquetado, densidad, serial) se conserva al corregir.
+- **Sus pedidos:** con residuos de varias sedes, especificaciones adicionales y PDF adjunto (orden de compra); corregirlos
+  mientras nadie los confirma (se crean las líneas nuevas y se quitan las anteriores) y pedirlos de nuevo. **Entrega en
+  planta** (DESCARGA): a una planta propia de Terra Viva, con el vehículo, el conductor y el auxiliar con ARL y EPS. La
+  tabla `transportes_terceros` (cédulas, ARL, EPS) quedó con RLS: el portal solo ve los vehículos de sus pedidos y
+  manifiestos.
+- **Informe general:** cada línea de manifiesto del periodo (hasta un año) con lo cargado y, con la conciliación aprobada,
+  lo pesado en planta, el precio conciliado, el valor, la factura y el certificado; en Excel.
+- En la base, después de cualquier cambio del portal una declaración queda inactiva (en revisión, autorizada e inactiva
+  o anulada); un trigger impide que el portal cambie una autorizada salvo para inactivarla, y que toque el cliente, el
+  tipo, el precio o la programación automática.
 
 Las descargas usan un **enlace firmado de 5 minutos** (`/descargas/<token>`, clave propia distinta de la de las
 sesiones), que el API entrega solo después de verificar que el documento es del cliente y de sus sedes; al servirlo

@@ -6,7 +6,7 @@ import { ArrowLeft, CircleAlert, CircleCheck, Save, Send, ShieldAlert, ShieldChe
 import { FORMAS_PAGO, NEGOCIACIONES, RESPONSABILIDAD_GENERADOR, TIPOS_RCD, faltantesParaAutorizar, type TipoRcdCodigo } from '@terraviva/shared';
 import { Badge, Button, Card, EstadoBadge, Input, PageHeader, Select, useToast } from '../../components/ui';
 import { BuscarCliente } from '../../components/BuscarCliente';
-import { api, sesionActual, tienePermiso } from '../../lib/api';
+import { API_URL, api, sesionActual, tienePermiso } from '../../lib/api';
 import { cx, fmtCOP, fmtFecha } from '../../lib/format';
 import { cant, msg, useApi } from '../../lib/servidor';
 import { SECCIONES, aPayload, desdeDetalle, formVacio, revisar, seccionDe, type Alcance, type DetalleDecl, type FormDecl, type SiNo, type Tipo } from './formulario';
@@ -104,6 +104,27 @@ function Seccion({ n, titulo, errores, children, noAplica }: { n: number; titulo
 }
 
 const ir = (n: number) => document.getElementById(`decl-sec-${n}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+/** Archivo que el cliente subió desde su portal (clave del almacenamiento, no un enlace). */
+const esArchivoCliente = (v: string) => /^(local|s3):/.test(v.trim());
+function ArchivoCliente({ clave, nombre, quitar }: { clave: string; nombre: string; quitar: () => void }) {
+  const toast = useToast();
+  const ver = async () => {
+    const w = window.open('', '_blank');
+    try {
+      const r = await api<{ url: string }>(`/archivos/enlace?clave=${encodeURIComponent(clave)}&nombre=${encodeURIComponent(nombre + clave.slice(clave.lastIndexOf('.')))}`);
+      const destino = /^https?:/i.test(r.url) ? r.url : `${API_URL}${r.url}`;
+      if (w) { w.opener = null; w.location.href = destino; } else window.location.assign(destino);
+    } catch (e) { w?.close(); toast(msg(e, 'No se pudo abrir el archivo.'), 'warn'); }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px]">
+      <Badge tone="info">Lo cargó el cliente desde su portal</Badge>
+      <Button type="button" size="sm" onClick={ver}>Ver el archivo</Button>
+      <Button type="button" size="sm" variant="ghost" onClick={quitar}>Cambiar por un enlace</Button>
+    </div>
+  );
+}
 
 // ---------- Formulario ----------
 export function FormularioDeclaracion({ id, volver, onGuardada }: {
@@ -438,12 +459,14 @@ export function FormularioDeclaracion({ id, volver, onGuardada }: {
 
           <Seccion n={6} titulo="Información adicional" errores={err(6)}>
             <Campo label="Ficha de datos de seguridad (FDS)" id="dc-fds" error={e.fichaSeguridadUrl} hint={residuo && f.esPeligroso ? 'Obligatoria para autorizar un residuo peligroso. Pegue el enlace al PDF (Drive, página del fabricante…).' : 'Opcional. Enlace al PDF.'}>
-              <Input id="dc-fds" type="url" maxLength={500} placeholder="https://…" value={f.fichaSeguridadUrl} onChange={(x) => set({ fichaSeguridadUrl: x.target.value })} />
+              {esArchivoCliente(f.fichaSeguridadUrl) ? <ArchivoCliente clave={f.fichaSeguridadUrl} nombre="ficha-de-seguridad" quitar={() => set({ fichaSeguridadUrl: '' })} />
+                : <Input id="dc-fds" type="url" maxLength={500} placeholder="https://…" value={f.fichaSeguridadUrl} onChange={(x) => set({ fichaSeguridadUrl: x.target.value })} />}
             </Campo>
             {residuo && (
               <Campo label="Caracterización de peligrosidad (CRETIB) del laboratorio" id="dc-car" error={e.caracterizacionUrl}
                 hint={f.contieneHidrocarburos === 'si' ? 'Obligatoria para biorremediación de residuos con hidrocarburos: debe demostrar que no son peligrosos. Enlace al PDF.' : 'Opcional. Enlace al PDF del laboratorio.'}>
-                <Input id="dc-car" type="url" maxLength={500} placeholder="https://…" value={f.caracterizacionUrl} onChange={(x) => set({ caracterizacionUrl: x.target.value })} />
+                {esArchivoCliente(f.caracterizacionUrl) ? <ArchivoCliente clave={f.caracterizacionUrl} nombre="caracterizacion" quitar={() => set({ caracterizacionUrl: '' })} />
+                  : <Input id="dc-car" type="url" maxLength={500} placeholder="https://…" value={f.caracterizacionUrl} onChange={(x) => set({ caracterizacionUrl: x.target.value })} />}
               </Campo>
             )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

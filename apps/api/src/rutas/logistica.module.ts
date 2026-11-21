@@ -91,7 +91,11 @@ class LogisticaService {
       this.db.solicitud.findMany({ where, take, skip, orderBy: { numero: 'desc' }, include: {
         cliente: { select: { razonSocial: true } },
         creadoPor: { select: { nombre: true, clienteId: true } }, // con clienteId: la pidió el cliente desde su portal
+        // Entrega en planta: la planta y el vehículo del cliente (con la tripulación que la planta deja entrar)
+        destino: { select: { razonSocial: true } },
+        transporte: { select: { empresaTransportadora: true, tipoVehiculo: true, placa: true, conductorNombre: true, conductorDocumento: true, auxiliarNombre: true, auxiliarDocumento: true } },
         items: { include: {
+          especificaciones: { select: { especificacion: { select: { nombre: true } } } },
           sucursal: { select: { codigo: true, nombre: true, municipioDane: true } },
           declaracion: { select: { numero: true, nombre: true, codigoInterno: true, disposiciones: { where: { principal: true }, select: { disposicion: { select: { nombre: true } } } } } },
         } },
