@@ -68,9 +68,9 @@ Todo módulo, de los actuales o de los que vengan, cumple estos siete estándare
    |---|---|---|
    | Cuenta de la persona y su entrada | Portal | Todos |
    | Colaboradores, cargos, licencias de conducción, certificaciones y exámenes | HSEQ y Talento Humano | Residuos (conductores), Mtto (PESV) |
-   | Vehículos y equipos: hoja de vida, SOAT, RTM, pólizas, capacidad y GPS | Mtto | Residuos (flota de las rutas) |
+   | Vehículos y equipos: hoja de vida, SOAT, RTM, pólizas, capacidad y GPS | Mtto | Residuos (flota de las rutas: copia de solo lectura que se refresca cada 30 min; los vehículos de transportadores contratados sí son de Residuos) |
    | Preoperacionales y fallas | Mtto | Residuos (Portal Logístico) |
-   | Clientes, contactos y oportunidades | Por acordar con el CRM | Residuos, CRM |
+   | Prospectos, clientes, contactos y oportunidades | CRM (decisión de la gerencia, 21-11-2026) | Residuos (aviso «trato ganado») |
    | Servicios, rutas, manifiestos y certificados | Residuos | CRM (historial del cliente), Planta |
 
 6. **Los ajustes se editan sin tocar código.**
@@ -118,18 +118,6 @@ Si el correo no existe en el módulo, responde 403: «Su cuenta Terry-App no tie
 - La pública también se publica en `GET https://app.terravivasas.net/api/v1/clave-publica` (JWKS), por comodidad.
 - Cambiar la clave obliga a actualizar `PORTAL_CLAVE_PUBLICA` en cada módulo.
 - Las pruebas usan un par de claves propio que no sirve en producción.
-
-## Una sola fuente de verdad
-
-Cada dato transversal tiene un solo dueño; los demás módulos lo consultan o reciben su copia de solo lectura, nunca lo
-vuelven a capturar.
-
-| Dato | Dueño | Quién lo usa y cómo |
-|---|---|---|
-| Vehículos propios: marca, tipo, capacidad, SOAT, RTM, póliza RC, estado y baja | Mantenimiento (hoja de vida) | Residuos guarda una copia de solo lectura (`mto_sincronizado_en`, `mto_estado`, `mto_apto`) y no deja editar esos campos ni crear vehículos propios. El color, el volumen y el GPS sí son de Residuos. |
-| Vehículos de transportadores contratados | Residuos | Mantenimiento no los gestiona. |
-| Preoperacional y fallas del vehículo | Mantenimiento | Residuos consulta el del día antes de abrir la ruta. |
-| Prospectos, tratos y clientes ganados | CRM | Residuos recibe el aviso «trato ganado» y crea o amplía el cliente. |
 
 ## Selector de módulos (App Shell)
 
