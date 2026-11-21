@@ -10,10 +10,10 @@
   "placement": { "mode": "smart" },
   "vars": {
     "PORTAL_URL": "https://app.terravivasas.net",
-    "MODULOS_SSO": "residuos,mantenimiento",
+    "MODULOS_SSO": "residuos,mantenimiento,crm",
     "MODULO_RESIDUOS_URL": "https://residuos.terravivasas.net",
     "MODULO_MANTENIMIENTO_URL": "https://mantenimiento.terravivasas.net",
-    "MODULO_CRM_URL": "",
+    "MODULO_CRM_URL": "https://crm.terravivasas.net",
     "MODULO_PLANTA_URL": ""
   }
 }

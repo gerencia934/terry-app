@@ -9,7 +9,7 @@ aplicación: sus pantallas, su servidor y su base de datos. Si un módulo falla,
 | Residuos | `residuos.terravivasas.net` | `apps/api` + `apps/web` (este repositorio) | Neon, proyecto `terra-residuos` |
 | Mantenimiento | `mantenimiento.terravivasas.net` (acepta el pase desde el 20-11-2026) | repositorio `terra-mantenimiento` | la suya |
 | HSEQ y Talento Humano | (por publicar; módulo `hseq` del pase) | repositorio `terra-hseq-rrhh` (iniciado el 21-11-2026) | la suya |
-| CRM comercial | (próximamente) | — | la suya |
+| CRM comercial | `crm.terravivasas.net` (acepta el pase desde el 21-11-2026) | repositorio `terra-mantenimiento`, carpeta `crm/` | Neon, base `terra_crm` |
 | Planta | (próximamente) | — | la suya |
 
 ## Reglas
@@ -65,6 +65,12 @@ Si el correo no existe en el módulo, responde 403: «Su cuenta Terry-App no tie
 - La pública también se publica en `GET https://app.terravivasas.net/api/v1/clave-publica` (JWKS), por comodidad.
 - Cambiar la clave obliga a actualizar `PORTAL_CLAVE_PUBLICA` en cada módulo.
 - Las pruebas usan un par de claves propio que no sirve en producción.
+
+## Selector de módulos (App Shell)
+
+Cada módulo muestra en su cabecera el selector de módulos (ícono de cuadrícula). Para pasar a otro módulo lleva el
+navegador a `https://app.terravivasas.net/#abrir=<módulo>`: el portal (con su sesión abierta, o tras el ingreso) firma el
+pase y abre ese módulo. Si la cuenta no tiene acceso, se queda en el menú.
 
 ## Avisos entre módulos (contratos)
 
