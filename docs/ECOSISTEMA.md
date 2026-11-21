@@ -66,6 +66,18 @@ Si el correo no existe en el módulo, responde 403: «Su cuenta Terry-App no tie
 - Cambiar la clave obliga a actualizar `PORTAL_CLAVE_PUBLICA` en cada módulo.
 - Las pruebas usan un par de claves propio que no sirve en producción.
 
+## Una sola fuente de verdad
+
+Cada dato transversal tiene un solo dueño; los demás módulos lo consultan o reciben su copia de solo lectura, nunca lo
+vuelven a capturar.
+
+| Dato | Dueño | Quién lo usa y cómo |
+|---|---|---|
+| Vehículos propios: marca, tipo, capacidad, SOAT, RTM, póliza RC, estado y baja | Mantenimiento (hoja de vida) | Residuos guarda una copia de solo lectura (`mto_sincronizado_en`, `mto_estado`, `mto_apto`) y no deja editar esos campos ni crear vehículos propios. El color, el volumen y el GPS sí son de Residuos. |
+| Vehículos de transportadores contratados | Residuos | Mantenimiento no los gestiona. |
+| Preoperacional y fallas del vehículo | Mantenimiento | Residuos consulta el del día antes de abrir la ruta. |
+| Prospectos, tratos y clientes ganados | CRM | Residuos recibe el aviso «trato ganado» y crea o amplía el cliente. |
+
 ## Selector de módulos (App Shell)
 
 Cada módulo muestra en su cabecera el selector de módulos (ícono de cuadrícula). Para pasar a otro módulo lleva el
@@ -82,6 +94,7 @@ pase y abre ese módulo. Si la cuenta no tiene acceso, se queda en el menú.
 | Ítems NO OK del preoperacional | Residuos → Mantenimiento | Retirado el 21-11-2026: el preoperacional ya se hace en Mantenimiento |
 | Kilómetros de una ruta o tanqueo | Residuos → Mantenimiento | `POST /api/v1/mto/integraciones/terrygo/lecturas` |
 | Coordenadas de la sede (check-in comercial) | CRM → Residuos | (se define con el CRM) |
+| Flota única (hoja de vida de los vehículos propios) | Mantenimiento → Residuos | Residuos lee `GET /api/v1/mto/integraciones/terrygo/flota` cada 30 min y con «Sincronizar ahora» |
 | Vehículo que llega a planta (F-09) | Residuos → Planta | (se define con Planta) |
 
 Los contratos con Mantenimiento ya existen de su lado (ver su `docs/DESPLIEGUE.md`). Cada integración se autentica con

@@ -348,6 +348,9 @@ export class ImportacionService {
         const placa = d.placa.replace(/[\s-]/g, '').toUpperCase();
         const datos = { marca: d.marca, tipo: d.tipo, capacidad: num(d.capacidad)!, unidadCap: unidad(d.unidadCap) ?? 'KG', soatVence: fecha(d.soat), rtmVence: fecha(d.rtm), polizaRcVence: fecha(d.poliza) };
         const ex = await tx.vehiculo.findUnique({ where: { placa } });
+        // Flota única: con Mantenimiento conectado, los vehículos propios vienen de su hoja de vida (no se cargan aquí)
+        if (ex?.mtoSincronizadoEn || (!ex && process.env.MANTENIMIENTO_URL && process.env.MANTENIMIENTO_TOKEN))
+          throw new BadRequestException({ mensaje: `${placa}: los vehículos propios se registran en Mantenimiento y llegan solos a Residuos.` });
         if (ex) { if (ex.empresaId !== emp) throw new BadRequestException({ mensaje: `La placa ${placa} pertenece a otra empresa.` }); await tx.vehiculo.update({ where: { placa }, data: datos }); return 'actualizadas'; }
         await tx.vehiculo.create({ data: { ...datos, empresaId: emp, placa } }); return 'creadas';
       }

@@ -7,9 +7,9 @@
 // - le envía a Mantenimiento el kilometraje que toma el conductor, para no capturarlo dos veces.
 // Regla de Terra Viva: sin preoperacional apto no hay ruta ni manifiesto. Si Mantenimiento no responde, la ruta sigue con lo
 // último confirmado; si nunca se confirmó, queda bloqueada y solo la oficina puede autorizar la salida, con su motivo.
-import { BadRequestException, Body, ConflictException, Controller, Injectable, Logger, Module, NotFoundException, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, Injectable, Logger, Module, NotFoundException, OnModuleDestroy, OnModuleInit, Param, ParseUUIDPipe, Post, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, UnidadMedida } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,6 +40,13 @@ export interface PreopMantenimiento {
   ultimo: { id: string; terminadoEn: string; aprobado: boolean; fallas: number; criticas: number; usuario: { email: string; nombre: string } } | null;
   disponibilidad: { apto: boolean; estadoOperativo: string; motivos: string[] } | null;
 }
+/** Respuesta de Mantenimiento: GET /mto/integraciones/terrygo/flota */
+export interface VehiculoMantenimiento {
+  placa: string; nombre: string; activo: boolean; estadoOperativo: string; fechaBaja: string | null; marca: string | null; linea: string | null; modelo: number | null;
+  clase: string | null; carroceria: string | null; tipo: string | null; capacidad: number | null; unidadCapacidad: string | null; apto: boolean; hallazgosCriticos: number;
+  documentos: Record<string, { vence: string | null; estado: string }>; actualizado: string;
+}
+export interface FlotaMantenimiento { generado: string; vehiculos: VehiculoMantenimiento[] }
 type Consulta = { tipo: 'ok'; datos: PreopMantenimiento } | { tipo: 'no-registrado' } | { tipo: 'sin-respuesta'; motivo: string };
 
 @Injectable()
@@ -75,6 +82,14 @@ export class MantenimientoCliente {
       this.log.warn(`Mantenimiento no respondió: ${(e as Error).message}`);
       return { tipo: 'sin-respuesta', motivo: 'Mantenimiento no respondió a tiempo' };
     }
+  }
+
+  /** Flota única: la lista de vehículos propios con su hoja de vida (GET /mto/integraciones/terrygo/flota). */
+  async flota(): Promise<FlotaMantenimiento | null> {
+    if (!this.conectado) return null;
+    const r = await fetch(`${this.url}/api/v1/mto/integraciones/terrygo/flota`, { signal: AbortSignal.timeout(15_000), headers: { 'x-integracion-token': this.token } });
+    if (!r.ok) throw new Error(r.status === 503 ? 'Mantenimiento se está encendiendo' : `Mantenimiento respondió ${r.status}`);
+    return (await r.json()) as FlotaMantenimiento;
   }
 
   /** Kilometraje de la ruta → lectura del medidor en Mantenimiento (allá es idempotente por la hora). No bloquea nada. */
@@ -209,6 +224,78 @@ export class PreopRutas {
 
 const Excepcion = z.object({ motivo: z.string().trim().min(10, 'Explique el motivo (mínimo 10 caracteres).').max(300) });
 
+/** Campos que en un vehículo propio sincronizado vienen de Mantenimiento: aquí son de solo lectura. */
+export const CAMPOS_DE_MANTENIMIENTO = ['marca', 'tipo', 'capacidad', 'unidadCap', 'soatVence', 'rtmVence', 'polizaRcVence', 'activo'] as const;
+const UNIDADES = new Set(Object.values(UnidadMedida));
+const fechaDia = (f: string | null | undefined) => (f ? new Date(`${f}T00:00:00Z`) : null);
+
+/**
+ * Flota única (gerencia, 21-11-2026): la hoja de vida de los vehículos propios vive en Mantenimiento. Residuos guarda
+ * una copia de solo lectura (para programar rutas aunque Mantenimiento no responda) y la refresca cada 30 minutos.
+ * Los vehículos de transportadores contratados no están en Mantenimiento: siguen siendo de Residuos.
+ */
+@Injectable()
+export class FlotaUnica implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger('FlotaUnica');
+  private reloj: NodeJS.Timeout | null = null;
+  private ultima: { en: Date; resultado: unknown } | null = null;
+  constructor(private readonly db: PrismaService, private readonly mto: MantenimientoCliente, private readonly audit: Auditoria) {}
+  onModuleInit() {
+    if (!this.mto.conectado || process.env.NODE_ENV === 'test') return;
+    setTimeout(() => void this.sincronizar().catch(() => undefined), 30_000).unref();
+    this.reloj = setInterval(() => void this.sincronizar().catch(() => undefined), 30 * 60_000); this.reloj.unref();
+  }
+  onModuleDestroy() { if (this.reloj) clearInterval(this.reloj); }
+  get estado() { return { conectado: this.mto.conectado, web: this.mto.web, ultima: this.ultima }; }
+
+  async sincronizar(actor?: Actor) {
+    let flota: FlotaMantenimiento | null;
+    try { flota = await this.mto.flota(); } catch (e) {
+      this.log.warn(`No se pudo leer la flota de Mantenimiento: ${(e as Error).message}`);
+      throw new ServiceUnavailableException({ mensaje: `No se pudo leer la flota de Mantenimiento: ${(e as Error).message}. La copia de Residuos sigue igual.` });
+    }
+    if (!flota) throw new BadRequestException({ mensaje: 'Residuos todavía no está conectado con Mantenimiento (MANTENIMIENTO_URL y MANTENIMIENTO_TOKEN).' });
+    const empresaId = actor?.empresaId ?? (await this.db.vehiculo.findFirst({ where: { proveedorId: null }, select: { empresaId: true } }))?.empresaId
+      ?? (await this.db.empresa.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } }))?.id;
+    if (!empresaId) throw new BadRequestException({ mensaje: 'No hay empresa registrada.' });
+    const r = { creados: 0, actualizados: 0, sinCambios: 0, deTransportador: [] as string[], soloEnResiduos: [] as string[] };
+    const ahora = new Date(); const vistos = new Set<string>();
+    for (const m of flota.vehiculos) {
+      const placa = placaLimpia(m.placa); if (!/^[A-Z0-9]{5,7}$/.test(placa)) continue;
+      vistos.add(placa);
+      const ex = await this.db.vehiculo.findUnique({ where: { placa } });
+      if (ex?.proveedorId) { r.deTransportador.push(placa); continue; } // está registrado como contratado: no se toca, se avisa
+      const datos = {
+        marca: (m.marca ?? m.nombre)?.slice(0, 40) ?? null, tipo: (m.tipo || m.carroceria || m.clase || 'Vehículo').slice(0, 40),
+        ...(m.capacidad && m.capacidad > 0 ? { capacidad: new Prisma.Decimal(m.capacidad), unidadCap: (UNIDADES.has(m.unidadCapacidad as UnidadMedida) ? m.unidadCapacidad : 'KG') as UnidadMedida } : {}),
+        soatVence: fechaDia(m.documentos.SOAT?.vence), rtmVence: fechaDia(m.documentos.RTM?.vence), polizaRcVence: fechaDia(m.documentos.POLIZA_RCE?.vence),
+        activo: m.activo, mtoEstado: m.estadoOperativo.slice(0, 20), mtoApto: m.apto,
+      };
+      if (!ex) {
+        await this.db.vehiculo.create({ data: { ...datos, capacidad: datos.capacidad ?? new Prisma.Decimal(0), empresaId, placa, mtoSincronizadoEn: ahora } });
+        r.creados++;
+        continue;
+      }
+      const cambio = (Object.keys(datos) as (keyof typeof datos)[]).some((k) => String((ex as Record<string, unknown>)[k] instanceof Date ? ((ex as Record<string, unknown>)[k] as Date).toISOString().slice(0, 10) : (ex as Record<string, unknown>)[k] ?? '') !== String(datos[k] instanceof Date ? (datos[k] as Date).toISOString().slice(0, 10) : datos[k] ?? ''));
+      await this.db.vehiculo.update({ where: { id: ex.id }, data: { ...datos, mtoSincronizadoEn: ahora } });
+      if (cambio) r.actualizados++; else r.sinCambios++;
+    }
+    // Propios de Residuos que Mantenimiento no tiene: no se tocan (se informan para crearlos allá o marcarlos como contratados)
+    r.soloEnResiduos = (await this.db.vehiculo.findMany({ where: { empresaId, proveedorId: null, activo: true }, select: { placa: true } })).map((v) => v.placa).filter((p) => !vistos.has(placaLimpia(p)));
+    this.ultima = { en: ahora, resultado: r };
+    if (actor) await this.audit.registrar(actor, 'vehiculo', 'flota', 'SINCRONIZAR', undefined, { origen: 'Mantenimiento', ...r });
+    this.log.log(`Flota sincronizada con Mantenimiento: ${JSON.stringify(r)}`);
+    return r;
+  }
+}
+
+@Controller('vehiculos')
+class FlotaUnicaController {
+  constructor(private readonly s: FlotaUnica) {}
+  @Get('mantenimiento') estado() { return this.s.estado; }
+  @Permiso('rutas.programar') @Post('sincronizar-mantenimiento') @HttpCode(200) sincronizar(@ActorActual() a: Actor) { return this.s.sincronizar(a); }
+}
+
 @Controller('rutas')
 class PreopRutasController {
   constructor(private readonly s: PreopRutas, private readonly db: PrismaService) {}
@@ -225,5 +312,5 @@ class PreopRutasController {
   excepcion(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Excepcion)) b: z.infer<typeof Excepcion>) { return this.s.excepcion(a, id, b.motivo); }
 }
 
-@Module({ controllers: [PreopRutasController], providers: [MantenimientoCliente, PreopRutas], exports: [MantenimientoCliente, PreopRutas] })
+@Module({ controllers: [PreopRutasController, FlotaUnicaController], providers: [MantenimientoCliente, PreopRutas, FlotaUnica], exports: [MantenimientoCliente, PreopRutas, FlotaUnica] })
 export class MantenimientoModule {}
