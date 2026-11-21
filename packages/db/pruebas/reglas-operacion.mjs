@@ -123,9 +123,10 @@ prueba('el PDF escaneado sí puede llegar después de grabar', (await db.manifie
 console.log('\n4. Conciliación');
 const [c1, c2] = conc.items;
 await rechaza('aprobar sin cantidades conciliadas → rechazado', () => db.conciliacion.update({ where: { id: conc.id }, data: { estado: 'APROBADA' } }), /sin cantidad conciliada/);
-await rechaza('diferencia de más de ±2 % sin justificación → rechazada', () => db.conciliacionItem.update({ where: { id: c1.id }, data: { cantidadConciliada: 90 } }), /chk_justificacion_diferencia/);
+await rechaza('diferencia sin justificación → rechazada', () => db.conciliacionItem.update({ where: { id: c1.id }, data: { cantidadConciliada: 90 } }), /chk_justificacion_diferencia/);
 await db.conciliacionItem.update({ where: { id: c1.id }, data: { cantidadConciliada: 90, justificacion: 'Báscula de planta' } });
-await db.conciliacionItem.update({ where: { id: c2.id }, data: { cantidadConciliada: 101 } });
+await rechaza('toda diferencia se justifica, también una mínima (+1 %) → rechazada', () => db.conciliacionItem.update({ where: { id: c2.id }, data: { cantidadConciliada: 101 } }), /chk_justificacion_diferencia/);
+await db.conciliacionItem.update({ where: { id: c2.id }, data: { cantidadConciliada: 101, justificacion: 'Redondeo de la báscula' } });
 await db.conciliacion.update({ where: { id: conc.id }, data: { estado: 'APROBADA', aprobadaPorId: admin.id } });
 prueba('con cantidades y justificación se aprueba', (await db.conciliacion.findUniqueOrThrow({ where: { id: conc.id } })).estado === 'APROBADA');
 await rechaza('cambiar cantidades después de aprobar → rechazado', () => db.conciliacionItem.update({ where: { id: c2.id }, data: { cantidadConciliada: 100 } }), /solo se pueden cambiar los datos de factura/);

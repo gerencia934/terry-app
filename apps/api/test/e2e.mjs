@@ -1021,10 +1021,20 @@ prueba('«igualar cantidades» copia lo cargado', r.status === 201 && Number(r.j
 const lineaB = r.json.items[0].id;
 r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 450 }] } });
 prueba('bajar a 450 (−10 %) sin justificar → 409', r.status === 409 && /justificación/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 499.5 }] } });
+prueba('toda diferencia se justifica, también una mínima (499,5 de 500) → 409', r.status === 409 && /justificación/.test(r.json.mensaje), JSON.stringify(r.json));
 r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 450, justificacion: 'Báscula de planta' }] } });
 prueba('con justificación: totales recalculados (450 kg × 780 = 351.000)', r.status === 200 && r.json.totales.cobro === 351000 && r.json.totales.contado + r.json.totales.credito === 351000 && r.json.items[0].diferenciaPct === -10, JSON.stringify(r.json.totales));
+prueba('conciliación de tres columnas: lo que pidió el cliente, lo cargado y lo recibido', Number(r.json.items[0].cantidadSolicitada) === 500
+  && Number(r.json.items[0].cantidadCargada) === 500 && Number(r.json.items[0].cantidadConciliada) === 450 && r.json.items[0].noSolicitado === false && r.json.items[0].solicitud === solB.numero,
+  JSON.stringify(r.json.items?.[0]).slice(0, 300));
 r = await llamar('POST', `/conciliaciones/${concB.id}/aprobar`, { token: T8 });
-prueba('aprobar la conciliación', r.status === 201 && r.json.estado === 'APROBADA');
+prueba('con diferencia, quien concilió no la aprueba (cuatro ojos) → 403', r.status === 403 && r.json.codigo === 'CUATRO_OJOS', JSON.stringify(r.json));
+const facturacionE2e = await db.usuario.create({ data: { empresaId: (await db.empresa.findFirst({ where: { nit: '901089780-8' } })).id, rolId: rolDe('FACTURACION').id,
+  nombre: 'Facturación E2E', documento: '8803', email: 'facturacion.e2e@terravivasas.com', passwordHash: await hashE2e('Factura2026!!') } });
+const tFac = await entrarOficina(facturacionE2e.email, 'Factura2026!!');
+r = await llamar('POST', `/conciliaciones/${concB.id}/aprobar`, { token: tFac });
+prueba('aprobar la conciliación: la aprueba otra persona (Facturación)', r.status === 201 && r.json.estado === 'APROBADA', JSON.stringify(r.json).slice(0, 200));
 r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, cantidadConciliada: 460 }] } });
 prueba('aprobada: ya no cambian las cantidades → 409', r.status === 409);
 r = await llamar('PATCH', `/conciliaciones/${concB.id}/items`, { token: T8, cuerpo: { items: [{ id: lineaB, facturaNumero: 'FE-2026-88', facturaEmision: '2026-11-30', facturaVencimiento: '2026-12-30', estadoPago: 'PENDIENTE' }] } });

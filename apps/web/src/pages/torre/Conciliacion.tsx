@@ -2,7 +2,7 @@
 // con precios, negociación, factura y pago. Los totales se calculan con las mismas reglas que el API (@terraviva/shared).
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCheck, Download, Equal, RefreshCw, RotateCcw, Save, Scale, FileText, AlertTriangle } from 'lucide-react';
-import { totalesConciliacion, diferenciaPct, valorLinea, TOLERANCIA_CONCILIACION_PCT, type LineaTotal, type Totales } from '@terraviva/shared';
+import { totalesConciliacion, diferenciaPct, requiereJustificacion, valorLinea, type LineaTotal, type Totales } from '@terraviva/shared';
 import { FilterBar, ResponsiveTable, type Column } from '../../components/data';
 import { BuscarCliente } from '../../components/BuscarCliente';
 import { Badge, Button, Card, EstadoBadge, Field, Input, Kpi, PageHeader, Select, useToast } from '../../components/ui';
@@ -20,10 +20,13 @@ interface LineaConc {
   ordenCompra: string | null; facturaNumero: string | null; facturaEmision: string | null; facturaVencimiento: string | null; estadoPago: 'PENDIENTE' | 'ABONADA' | 'PAGADA' | 'ANULADA';
   justificacion: string | null; metrica: { abreviacion: string } | null; disposicion: { nombre: string } | null; acta: { numero: string; estado: string } | null;
   manifiestoItem: { metrica: { abreviacion: string } | null; declaracion: { nombre: string; codigoInterno: string | null }; sucursal: { codigo: string | null; nombre: string } };
+  /** Lo que pidió el cliente en la solicitud (null si la línea no venía en una solicitud: «no solicitado»). */
+  cantidadSolicitada: string | null; noSolicitado: boolean; solicitud: number | null;
 }
 interface ConcDetalle {
   id: string; estado: 'BORRADOR' | 'APROBADA'; aprobadaEn: string | null; aprobadaPor: { nombre: string } | null;
   manifiesto: { id: string; numero: string; tipo: string; fechaServicio: string; tipoConciliacion: string; ordenCompra: string | null; pesoEntrada: string | null; pesoSalida: string | null; pesoNeto: string | null;
+    observaciones: string | null;
     cliente: { razonSocial: string; nit: string; asesor: { nombre: string } | null } };
   items: LineaConc[]; totales: Totales;
 }
@@ -73,7 +76,7 @@ function Bandeja({ abrir }: { abrir: (id: string) => void }) {
   const t = cons.datos?.totales;
   return (
     <>
-      <PageHeader eyebrow="Planta Los Pinos" title="Conciliación" subtitle={`Lo cargado en la sede contra lo recibido en planta, con precios y factura. Las diferencias de más de ±${TOLERANCIA_CONCILIACION_PCT} % se justifican; al aprobar se habilita el certificado.`}
+      <PageHeader eyebrow="Planta Los Pinos" title="Conciliación" subtitle="Lo que pidió el cliente, lo cargado en la sede y lo recibido en planta, con precios y factura. Toda diferencia se justifica y la aprueba otra persona; al aprobar se habilita el certificado."
         actions={<Button onClick={() => { lista.recargar(); cons.recargar(); }}><RefreshCw size={16} /> Actualizar</Button>} />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Conciliaciones" value={cons.datos ? String(cons.datos.conciliaciones) : '…'} icon={<Scale size={16} />} hint="Con estos filtros" />
@@ -128,7 +131,7 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
   const valores = useMemo(() => new Map((c?.items ?? []).map((l) => [l.id, { ...editable(l), ...cambios[l.id] }])), [c, cambios]);
   const sucias = (c?.items ?? []).filter((l) => { const o = editable(l); const v = valores.get(l.id)!; return (Object.keys(o) as (keyof Editable)[]).some((k) => o[k] !== v[k]); });
   const dif = (l: LineaConc) => diferenciaPct(l.cantidadCargada, valores.get(l.id)!.cantidadConciliada || null);
-  const sinJustificar = (l: LineaConc) => { const p = dif(l); return p !== null && Math.abs(p) > TOLERANCIA_CONCILIACION_PCT && !valores.get(l.id)!.justificacion.trim(); };
+  const sinJustificar = (l: LineaConc) => requiereJustificacion(l.cantidadCargada, valores.get(l.id)!.cantidadConciliada || null) && !valores.get(l.id)!.justificacion.trim();
   const aTotal = (l: LineaConc): LineaTotal => {
     const v = valores.get(l.id)!;
     return { cantidadCargada: l.cantidadCargada, cantidadConciliada: v.cantidadConciliada || null, precioUnitario: v.precioUnitario || null, unidad: unidadDe(l),
@@ -144,7 +147,7 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
     try { d.setDatos(await fn()); setCambios({}); toast(ok); } catch (e) { toast(msg(e), 'warn'); } finally { setOcupado(false); }
   };
   const guardar = () => {
-    if (faltan) { toast(`Justifique las diferencias de más de ±${TOLERANCIA_CONCILIACION_PCT} % (${faltan} ${faltan === 1 ? 'línea' : 'líneas'}).`, 'warn'); return; }
+    if (faltan) { toast(`Justifique las diferencias entre lo cargado y lo recibido (${faltan} ${faltan === 1 ? 'línea' : 'líneas'}).`, 'warn'); return; }
     const items = sucias.map((l) => {
       const o = editable(l); const v = valores.get(l.id)!; const x: Record<string, unknown> = { id: l.id };
       for (const k of Object.keys(o) as (keyof Editable)[]) if (o[k] !== v[k]) {
@@ -172,8 +175,10 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
       type={num ? 'number' : fecha ? 'date' : 'text'} min={num ? 0 : undefined} step={num ? '0.01' : undefined} maxLength={k === 'justificacion' ? 500 : k === 'ordenCompra' ? 40 : k === 'facturaNumero' ? 30 : undefined}
       placeholder={k === 'justificacion' && sinJustificar(l) ? 'Obligatoria' : undefined} />;
   };
-  const Dif = ({ l }: { l: LineaConc }) => { const p = dif(l); return <span className={cx('num', p !== null && Math.abs(p) > TOLERANCIA_CONCILIACION_PCT ? 'font-semibold text-bad' : 'text-muted')}>{p === null ? '—' : `${p > 0 ? '+' : ''}${cant(p)} %`}</span>; };
+  const Dif = ({ l }: { l: LineaConc }) => { const p = dif(l); return <span className={cx('num', requiereJustificacion(l.cantidadCargada, valores.get(l.id)!.cantidadConciliada || null) ? 'font-semibold text-bad' : 'text-muted')}>{p === null ? '—' : `${p > 0 ? '+' : ''}${cant(p)} %`}</span>; };
   const valor = (l: LineaConc) => fmtCOP(valorLinea(aTotal(l)));
+  const pedido = (l: LineaConc) => (l.noSolicitado ? <Badge tone="warn">No solicitado</Badge>
+    : l.cantidadSolicitada === null ? '—' : <span className="num">{cant(l.cantidadSolicitada)} <span className="text-muted">{unidadDe(l) ?? ''}</span></span>);
   const nombre = (l: LineaConc) => (
     <div className="min-w-0"><p className="truncate font-medium">{l.manifiestoItem.declaracion.nombre}</p>
       <p className="truncate text-[12px] text-muted">{l.manifiestoItem.sucursal.codigo ? `${l.manifiestoItem.sucursal.codigo} · ` : ''}{l.manifiestoItem.sucursal.nombre}{l.disposicion ? ` · ${l.disposicion.nombre}` : ''}</p></div>
@@ -200,9 +205,11 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
         <EstadoBadge estado={c.estado} />
         {aprobada && <span className="text-muted">Aprobada {fechaHoraCo(c.aprobadaEn)}{c.aprobadaPor ? ` por ${c.aprobadaPor.nombre}` : ''}. Solo se pueden cambiar la factura y el pago.</span>}
         {!aprobada && totales.sinConciliar > 0 && <span className="text-warn">{totales.sinConciliar} {totales.sinConciliar === 1 ? 'línea sin' : 'líneas sin'} cantidad conciliada o precio.</span>}
-        {faltan > 0 && <span className="flex items-center gap-1 text-bad"><AlertTriangle size={14} />{faltan} {faltan === 1 ? 'diferencia' : 'diferencias'} de más de ±{TOLERANCIA_CONCILIACION_PCT} % sin justificar.</span>}
+        {faltan > 0 && <span className="flex items-center gap-1 text-bad"><AlertTriangle size={14} />{faltan} {faltan === 1 ? 'diferencia' : 'diferencias'} sin justificar.</span>}
+        {!aprobada && c.items.some((l) => requiereJustificacion(l.cantidadCargada, l.cantidadConciliada)) && <span className="text-muted">Con diferencias, la aprueba otra persona (no quien concilió).</span>}
         {!gestiona && <Badge>Su rol solo consulta</Badge>}
       </div>
+      {c.manifiesto.observaciones && <p className="mb-3 whitespace-pre-wrap rounded-lg bg-surface-2 p-3 text-[13px]"><b>Novedades del manifiesto:</b> {c.manifiesto.observaciones}</p>}
 
       {/* Escritorio: grilla */}
       <div className="hidden rounded-xl border border-line bg-surface md:block">
@@ -210,15 +217,16 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
           <table className="w-full min-w-[1650px] border-collapse text-[13px]">
             <thead className="bg-surface-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted">
               <tr>
-                {['Generador y residuo', 'Cargado', 'Conciliado', 'Dif.', 'Precio unitario', 'Valor', 'Negociación', 'Forma de pago', 'Justificación', 'Orden de compra', 'Factura', 'Emisión', 'Vencimiento', 'Pago', 'Acta']
+                {['Generador y residuo', 'Pedido', 'Cargado', 'Recibido (conciliado)', 'Dif.', 'Precio unitario', 'Valor', 'Negociación', 'Forma de pago', 'Justificación', 'Orden de compra', 'Factura', 'Emisión', 'Vencimiento', 'Pago', 'Acta']
                   .filter((h) => veFactura || !['Factura', 'Emisión', 'Vencimiento', 'Pago'].includes(h))
-                  .map((h, i) => <th key={h} className={cx('whitespace-nowrap px-2 py-2.5 text-left', [1, 2, 3, 4, 5].includes(i) && 'text-right')}>{h}</th>)}
+                  .map((h, i) => <th key={h} className={cx('whitespace-nowrap px-2 py-2.5 text-left', [1, 2, 3, 4, 5, 6].includes(i) && 'text-right')}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
               {c.items.map((l) => (
                 <tr key={l.id} className={cx('border-t border-line align-middle', sucias.includes(l) && 'bg-brand-soft/30')}>
                   <td className="w-[240px] max-w-[240px] px-2 py-2">{nombre(l)}</td>
+                  <td className="whitespace-nowrap px-2 text-right">{pedido(l)}</td>
                   <td className="num whitespace-nowrap px-2 text-right">{cant(l.cantidadCargada)} <span className="text-muted">{unidadDe(l) ?? ''}</span></td>
                   <td className="w-[110px] px-2">{campo(l, 'cantidadConciliada', 'Cantidad conciliada')}</td>
                   <td className="whitespace-nowrap px-2 text-right"><Dif l={l} /></td>
@@ -247,7 +255,8 @@ function Grilla({ id, volver }: { id: string; volver: () => void }) {
         {c.items.map((l) => (
           <article key={l.id} className={cx('flex flex-col gap-3 rounded-xl border bg-surface p-3.5', sucias.includes(l) ? 'border-brand' : 'border-line')}>
             {nombre(l)}
-            <div className="flex justify-between text-[13px]"><span>Cargado <b className="num">{cant(l.cantidadCargada)} {unidadDe(l) ?? ''}</b></span><Dif l={l} /><span className="num font-medium">{valor(l)}</span></div>
+            <div className="flex flex-wrap items-center gap-x-3 text-[13px]"><span>Pedido {pedido(l)}</span><span>Cargado <b className="num">{cant(l.cantidadCargada)} {unidadDe(l) ?? ''}</b></span></div>
+            <div className="flex justify-between text-[13px]"><Dif l={l} /><span className="num font-medium">{valor(l)}</span></div>
             <div className="grid grid-cols-2 gap-2.5">
               {([['cantidadConciliada', 'Conciliado'], ['precioUnitario', 'Precio unitario'], ['tipoNegociacion', 'Negociación'], ['formaPago', 'Forma de pago'],
                 ['facturaNumero', 'Factura'], ['estadoPago', 'Pago'], ['facturaEmision', 'Emisión'], ['facturaVencimiento', 'Vencimiento']] as [keyof Editable, string][])

@@ -30,7 +30,8 @@ const lineas = {
   orderBy: { id: 'asc' as const },
   include: {
     metrica: { select: { id: true, abreviacion: true } }, disposicion: { select: { id: true, codigo: true, nombre: true } }, acta: { select: { id: true, numero: true, estado: true } },
-    manifiestoItem: { select: { id: true, cantidad: true, metrica: { select: { abreviacion: true } },
+    manifiestoItem: { select: { id: true, cantidad: true, metrica: { select: { abreviacion: true } }, solicitudItemId: true,
+      solicitudItem: { select: { cantidadEstimada: true, solicitud: { select: { numero: true } } } },
       declaracion: { select: { id: true, nombre: true, codigoInterno: true, tipo: true } }, sucursal: { select: { id: true, codigo: true, nombre: true, direccion: true } } } },
   },
 } satisfies Prisma.Conciliacion$itemsArgs;
@@ -89,7 +90,7 @@ class ConciliacionesService {
     const c = await this.db.conciliacion.findFirst({ where: { id, empresaId: a.empresaId }, include: {
       aprobadaPor: { select: { nombre: true } },
       manifiesto: { select: { id: true, numero: true, tipo: true, fechaServicio: true, tipoConciliacion: true, ordenCompra: true, pesoEntrada: true, pesoSalida: true, pesoNeto: true,
-        cliente: { select: { id: true, razonSocial: true, nit: true, asesor: { select: { nombre: true } } } } } },
+        observaciones: true, cliente: { select: { id: true, razonSocial: true, nit: true, asesor: { select: { nombre: true } } } } } },
       items: lineas,
     } });
     if (!c) throw new NotFoundException({ mensaje: 'Conciliación no encontrada.' });
@@ -97,12 +98,18 @@ class ConciliacionesService {
     return {
       ...c,
       // Factura y pago: solo para Comercial, Facturación y Gerencia
-      items: c.items.map((l) => { const x = { ...l, valor: valorLinea(aTotal(l)), diferenciaPct: diferenciaPct(l.cantidadCargada.toString(), l.cantidadConciliada?.toString() ?? null) }; return ve ? x : { ...x, facturaNumero: undefined, facturaEmision: undefined, facturaVencimiento: undefined, estadoPago: undefined }; }),
+      // Tres columnas: lo que pidió el cliente (la solicitud), lo cargado y lo recibido; una línea sin solicitud es «no solicitada»
+      items: c.items.map((l) => {
+        const x = { ...l, valor: valorLinea(aTotal(l)), diferenciaPct: diferenciaPct(l.cantidadCargada.toString(), l.cantidadConciliada?.toString() ?? null),
+          cantidadSolicitada: l.manifiestoItem.solicitudItem?.cantidadEstimada?.toString() ?? null, noSolicitado: !l.manifiestoItem.solicitudItemId,
+          solicitud: l.manifiestoItem.solicitudItem?.solicitud.numero ?? null };
+        return ve ? x : { ...x, facturaNumero: undefined, facturaEmision: undefined, facturaVencimiento: undefined, estadoPago: undefined };
+      }),
       totales: totalesConciliacion(c.items.map(aTotal), [bascula(c.manifiesto)]),
     };
   }
 
-  /** Edita varias líneas a la vez (grilla). La base bloquea cantidades y precios si ya está aprobada y exige justificar diferencias de más de ±2 %. */
+  /** Edita varias líneas a la vez (grilla). La base bloquea cantidades y precios si ya está aprobada y exige justificar toda diferencia. */
   async editarItems(a: Actor, id: string, b: z.infer<typeof EditarItems>) {
     const conc = await this.propia(a, id);
     const tocaFactura = b.items.some((l) => l.facturaNumero !== undefined || l.facturaEmision !== undefined || l.facturaVencimiento !== undefined || l.estadoPago !== undefined);
@@ -131,6 +138,13 @@ class ConciliacionesService {
     const c = await this.propia(a, id);
     if (c.estado === 'ANULADA') throw new BadRequestException({ mensaje: 'La conciliación está anulada: se anuló su manifiesto.' });
     if (c.estado === estado) throw new BadRequestException({ mensaje: estado === 'APROBADA' ? 'La conciliación ya está aprobada.' : 'La conciliación ya está en borrador.' });
+    // Cuatro ojos (gerencia, 20-11-2026): si lo recibido no coincide con lo cargado, aprueba otra persona, no quien concilió
+    if (estado === 'APROBADA') {
+      const [{ n }] = await this.db.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM conciliacion_items
+        WHERE conciliacion_id = ${id}::uuid AND cantidad_destino IS NOT NULL AND cantidad_destino <> cantidad_origen`;
+      const concilio = n > 0 ? await this.db.auditoria.findFirst({ where: { entidad: 'conciliacion', entidadId: id, accion: { in: ['EDITAR', 'IGUALAR'] }, usuarioId: a.id }, select: { id: true } }) : null;
+      if (concilio) throw new ForbiddenException({ mensaje: `Hay ${n === 1 ? 'una diferencia' : `${n} diferencias`} entre lo cargado y lo recibido: la aprobación la hace otra persona, no quien concilió.`, codigo: 'CUATRO_OJOS' });
+    }
     await this.db.conciliacion.update({ where: { id }, data: { estado, aprobadaPorId: estado === 'APROBADA' ? a.id : null } });
     await this.audit.registrar(a, 'conciliacion', id, estado === 'APROBADA' ? 'APROBAR' : 'REABRIR', { estado: c.estado }, { estado });
     return this.obtener(a, id);

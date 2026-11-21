@@ -63,10 +63,14 @@ export function totalesConciliacion(lineas: LineaTotal[], basculas: Bascula[] = 
   };
 }
 
-/** Diferencia porcentual entre lo cargado y lo conciliado (la base exige justificación si supera ±2 %). */
+/** Diferencia porcentual entre lo cargado y lo conciliado (informativa: toda diferencia se justifica). */
 export function diferenciaPct(cargada: number | string, conciliada: number | string | null): number | null {
   const c = n(cargada);
   if (conciliada === null || conciliada === '' || c === 0) return null;
   return redondear(((n(conciliada) - c) * 100) / c);
 }
-export const TOLERANCIA_CONCILIACION_PCT = 2;
+/** Gerencia, 20-11-2026: toda diferencia entre lo cargado y lo conciliado se justifica (antes, desde ±2 %). */
+export const TOLERANCIA_CONCILIACION_PCT = 0;
+/** ¿La línea necesita justificación? Cualquier diferencia, por pequeña que sea (la misma regla que la base). */
+export const requiereJustificacion = (cargada: number | string, conciliada: number | string | null) =>
+  conciliada !== null && conciliada !== '' && Math.abs(n(conciliada) - n(cargada)) > 1e-9;

@@ -157,7 +157,7 @@ const CHECKS: Record<string, string> = {
   chk_conc_cantidad: 'La cantidad conciliada no puede ser negativa.',
   chk_conc_precio: 'El precio no puede ser negativo.',
   chk_conc_factura_fechas: 'El vencimiento de la factura no puede ser anterior a su emisión.',
-  chk_justificacion_diferencia: 'La diferencia entre lo cargado y lo conciliado supera ±2 %: escriba la justificación.',
+  chk_justificacion_diferencia: 'Lo conciliado no coincide con lo cargado: escriba la justificación (toda diferencia se explica).',
   chk_acta_periodo: 'El periodo del acta está invertido.',
   chk_acta_anulada: 'Indique el motivo de la anulación del acta.',
   chk_acta_cargada: 'Adjunte el archivo del acta del gestor.',
