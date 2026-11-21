@@ -14,9 +14,10 @@ aplicación: sus pantallas, su servidor y su base de datos. Si un módulo falla,
 
 ## Reglas
 
-1. **Nadie comparte tablas.** Un módulo no lee la base de otro. Lo que necesita de otro módulo lo recibe por un aviso
-   y guarda su propia copia. Por ejemplo, Residuos guarda las coordenadas de la sede que capturó el CRM, para que el
-   conductor llegue aunque el CRM esté caído.
+1. **Nadie comparte tablas.** Un módulo no lee la base de otro: consulta la API del dueño del dato (estándar 5) o
+   recibe su aviso. Si necesita trabajar aunque el otro esté caído, guarda una copia de solo lectura que el dueño
+   mantiene al día. Por ejemplo, Residuos guarda las coordenadas de la sede que capturó el CRM, para que el conductor
+   llegue aunque el CRM esté caído.
 2. **Los avisos se reintentan.** Quien envía guarda el aviso en su cola (en Residuos, la tabla `trabajos`) y lo
    reintenta hasta que el otro responde. Quien recibe acepta el mismo aviso repetido sin duplicar nada (idempotencia
    por un identificador del aviso).
@@ -26,6 +27,58 @@ aplicación: sus pantallas, su servidor y su base de datos. Si un módulo falla,
    ruta espera, y en una emergencia la oficina autoriza la salida con un motivo.
 4. **El portal no es indispensable.** Cada módulo conserva su propia entrada como respaldo. Quien ya está adentro
    sigue trabajando aunque el portal se caiga.
+
+## Estándares del ERP Terry-App
+
+Fijados por la gerencia el 21-11-2026. Terry-App es el ERP de Terra Viva: cada módulo es una pieza del mismo sistema.
+Todo módulo, de los actuales o de los que vengan, cumple estos siete estándares.
+
+1. **La sesión no se cae.**
+   - Queda abierta en el equipo hasta que la persona salga, el administrador la desactive, se cambie la contraseña o
+     pase el tiempo sin uso que fije Ajustes (por defecto un año, como en Mantenimiento).
+   - Si el servidor no responde o se está encendiendo, la app avisa «Reconectando…» y conserva la sesión. Solo la
+     cierra cuando el servidor la rechaza.
+   - Renueva una sola pestaña a la vez (Web Locks). El servidor acepta durante 60 segundos el token recién cambiado
+     (sesión sucesora): una respuesta que se pierde en el camino no cierra la sesión.
+   - Al volver la app al frente, renueva antes de que el token venza.
+   - Las notificaciones push no dependen de la sesión: llegan con la app cerrada o en segundo plano.
+2. **El ingreso es igual en todos.**
+   - Botón para mostrar la contraseña.
+   - Abajo, «Olvidé mi contraseña», con un flujo que funcione: si hay correo de salida, llega un enlace. Si no, el
+     administrador ve la solicitud y envía el enlace por WhatsApp.
+3. **Roles y funciones editables, como en Mantenimiento.**
+   - Roles con nombre y descripción, y funciones finas agrupadas por tema, editables en Ajustes › Roles.
+   - Cada menú, pantalla y botón obedece la función, también en el servidor.
+   - El Administrador conserva el acceso total.
+4. **Una sola identidad visual.**
+   - Nombres: **Terry-App Residuos**, **Terry-App Mtto**, **Terry-App CRM**, **Terry-App HSEQ**. El portal es
+     **Terry-App**.
+   - La primera página sigue el modelo de Residuos: logo de Terra Viva arriba a la izquierda, tarjeta centrada con el
+     sello Terry-App (Terry y el nombre del módulo), el saludo «Hola, soy Terry», el ingreso y el pie «© Terra Viva
+     S.A.S. E.S.P. · Soluciones ambientales inteligentes».
+   - Misma paleta, tipografía, componentes y palabras en todos los módulos.
+5. **Cada dato tiene un solo dueño.**
+   - Se crea y se edita solo en su módulo.
+   - Los demás lo consultan por la API del dueño, con su token; nunca leyendo su base de datos. Así un cambio interno
+     de un módulo no rompe a los demás.
+   - Si un módulo necesita seguir trabajando cuando el dueño está caído, guarda una copia de solo lectura que el dueño
+     mantiene al día. Esa copia no se edita.
+
+   | Dato | Dueño | Lo consultan |
+   |---|---|---|
+   | Cuenta de la persona y su entrada | Portal | Todos |
+   | Colaboradores, cargos, licencias de conducción, certificaciones y exámenes | HSEQ y Talento Humano | Residuos (conductores), Mtto (PESV) |
+   | Vehículos y equipos: hoja de vida, SOAT, RTM, pólizas, capacidad y GPS | Mtto | Residuos (flota de las rutas) |
+   | Preoperacionales y fallas | Mtto | Residuos (Portal Logístico) |
+   | Clientes, contactos y oportunidades | Por acordar con el CRM | Residuos, CRM |
+   | Servicios, rutas, manifiestos y certificados | Residuos | CRM (historial del cliente), Planta |
+
+6. **Los ajustes se editan sin tocar código.**
+   - Las listas desplegables y los parámetros de la operación (plazos, metas, horarios, tiempos de sesión…) se editan
+     en Ajustes, y cada cambio queda en la auditoría.
+   - En el código solo quedan los estados que mueven reglas (su nombre visible sí se edita) y las claves secretas.
+7. **El norte es un ERP.** Cada pieza se conecta con las demás por contratos (avisos y consultas con token) y cumple
+   estos estándares desde el primer día.
 
 ## Entrada única: el «pase»
 
