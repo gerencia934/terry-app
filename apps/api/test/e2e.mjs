@@ -744,6 +744,33 @@ r = await llamar('POST', `/campo/manifiestos/${mfCampo.id}/grabar`, { token: tc,
   horaLlegada: '2026-11-26T09:00:00-05:00', horaSalida: '2026-11-26T09:30:00-05:00' } });
 prueba('…y graba el manifiesto: la respuesta no trae precios ni totales', r.status === 201 && r.json.estado === 'REALIZADO' && !/precio|total/i.test(JSON.stringify(r.json)), JSON.stringify(r.json));
 prueba('…la oficina sí ve el precio del manifiesto', Number((await llamar('GET', `/manifiestos/${mfCampo.id}`, { token: T })).json.items?.[0]?.precioUnitario) > 0);
+// Novedades en sitio, sin castigo: «no había este residuo» y «no me atendieron»
+const rutaDeCampo = async (fecha, cantidad) => {
+  const sol = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: fecha, items: [{ declaracionId: lodo.id, cantidadEstimada: cantidad }] } })).json;
+  const ruta = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-N${Date.now() % 1000000}`, fechaProgramada: fecha, vehiculoId: veh2.id, conductorId: conductor.id, solicitudes: [sol.id] } })).json;
+  const mf = (await llamar('POST', `/campo/rutas/${ruta.id}/manifiestos`, { token: tc })).json[0];
+  const paq = (await llamar('GET', `/campo/paquete?fecha=${fecha}`, { token: tc })).json;
+  return { sol, mf, item: paq.manifiestos?.find((m) => m.id === mf.id)?.items[0], parada: paq.rutas?.[0]?.paradas[0], causal: paq.catalogos?.causales?.[0] };
+};
+const nov1 = await rutaDeCampo('2026-12-02', 40);
+r = await llamar('POST', `/campo/manifiestos/${nov1.mf.id}/items/${nov1.item.id}/no-recogido`, { token: tc, cuerpo: { nota: 'x' } });
+prueba('campo: una novedad necesita la causal o qué pasó → 400', r.status === 400, JSON.stringify(r.json));
+r = await llamar('POST', `/campo/manifiestos/${nov1.mf.id}/items/${nov1.item.id}/no-recogido`, { token: tc, cuerpo: { ...(nov1.causal ? { causalId: nov1.causal.id } : {}), nota: 'El cliente no tenía este residuo hoy' } });
+const [mfNov1, lineaNov1, paradaNov1] = [await db.manifiesto.findUnique({ where: { id: nov1.mf.id }, include: { items: true } }),
+  await db.solicitudItem.findFirst({ where: { solicitudId: nov1.sol.id } }), await db.rutaParada.findUnique({ where: { id: nov1.parada.id } })];
+prueba('campo: «no había este residuo» lo deja escrito en el manifiesto y la línea vuelve a «por programar»; sin nada por recoger, el manifiesto se anula y la parada queda no atendida',
+  r.status === 201 && r.json.quedan === 0 && r.json.anulado === true && mfNov1.items.length === 0 && /No se recogió .*no tenía este residuo/.test(mfNov1.observaciones ?? '')
+  && mfNov1.estado === 'ANULADO' && lineaNov1?.estado === 'PENDIENTE' && paradaNov1.estado === 'NO_ATENDIDA'
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'manifiesto', entidadId: nov1.mf.id, accion: 'NO_RECOGIDO' } })), JSON.stringify([r.status, r.json, mfNov1.estado, lineaNov1?.estado, paradaNov1.estado]));
+const nov2 = await rutaDeCampo('2026-12-03', 25);
+r = await llamar('POST', `/campo/paradas/${nov2.parada.id}/no-atendida`, { token: tc, cuerpo: { nota: 'Portería cerrada, nadie atendió' } });
+const [mfNov2, paradaNov2] = [await db.manifiesto.findUnique({ where: { id: nov2.mf.id } }), await db.rutaParada.findUnique({ where: { id: nov2.parada.id } })];
+prueba('campo: «no me atendieron» anula el manifiesto pendiente con su motivo y marca la parada', r.status === 201 && r.json.anulados?.includes(nov2.mf.numero)
+  && mfNov2.estado === 'ANULADO' && /Parada no atendida: Portería cerrada/.test(mfNov2.motivoAnulacion ?? '') && paradaNov2.estado === 'NO_ATENDIDA', JSON.stringify([r.status, r.json, mfNov2.estado, paradaNov2.estado]));
+prueba('…y queda en la auditoría de la parada, con el motivo', !!(await db.auditoria.findFirst({ where: { entidad: 'parada', entidadId: nov2.parada.id, accion: 'NO_ATENDIDA' } })));
+const otraParada = (await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc })).json.rutas?.[0]?.paradas[0];
+const conGrabado = await llamar('POST', `/campo/paradas/${otraParada.id}/no-atendida`, { token: tc, cuerpo: { nota: 'Intento sobre una parada ya atendida' } });
+prueba('…una parada con manifiesto grabado no se marca como no atendida → 400', conGrabado.status === 400 && /grabado/.test(conGrabado.json.mensaje), JSON.stringify(conGrabado.json));
 r = await llamar('GET', '/campo/mi-vehiculo?fecha=2026-11-26', { token: tc });
 prueba('campo: «mi vehículo» en solo lectura (vencimientos e inspecciones con sus fallas)', r.status === 200 && r.json.vehiculo?.placa === veh2.placa && r.json.inspecciones?.length >= 1
   && 'soatVence' in r.json.vehiculo && !/cliente|precio/i.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 300));

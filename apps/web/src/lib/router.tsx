@@ -11,7 +11,7 @@ export const ROUTES = [
   'permisos',
   'indicadores', 'informes',
   'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'roles', 'catalogos', 'etapas',
-  'campo', 'campo-preop', 'campo-parada', 'campo-envios',
+  'campo', 'campo-preop', 'campo-parada', 'campo-envios', 'campo-vehiculo',
   // Portal de clientes: solo lo usan los usuarios de un cliente (la oficina no entra y el cliente no sale de aquí)
   'portal', 'portal-sedes', 'portal-declaraciones', 'portal-solicitudes', 'portal-manifiestos', 'portal-certificados', 'portal-informes', 'portal-usuarios',
   'verificar', // pública: #verificar/<código del QR>

@@ -159,3 +159,11 @@ h1, h2, h3 { font-family: Poppins, ui-sans-serif, system-ui, sans-serif; text-wr
 @keyframes slide-in { from { transform: translateX(-12px); opacity: .6 } to { transform: none; opacity: 1 } }
 .anim-sheet { animation: sheet-up .18s ease-out; }
 .anim-slide { animation: slide-in .18s ease-out; }
+
+/* Manifiesto impreso en sitio (app del conductor): al imprimir solo sale el manifiesto, en tiquete de 80 mm o en carta */
+#impresion { display: none; }
+@media print {
+  body * { visibility: hidden !important; }
+  #impresion, #impresion * { visibility: visible !important; }
+  #impresion { display: block; position: absolute; left: 0; top: 0; width: 100%; background: #fff; color: #000; }
+}

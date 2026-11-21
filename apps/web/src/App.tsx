@@ -19,7 +19,7 @@ import { Certificados, Inspecciones, Inventario, Manifiestos, Recepcion } from '
 import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
-import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor } from './pages/CampoServidor';
+import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor, CampoVehiculoServidor } from './pages/CampoServidor';
 import { ProgramacionServidor, ProgramacionTablaServidor, SeguimientoServidor } from './pages/torre/Programacion';
 import { ManifiestosServidor } from './pages/torre/Manifiestos';
 import { ConciliacionServidor } from './pages/torre/Conciliacion';
@@ -78,6 +78,7 @@ function Screen() {
     case 'campo-preop': return MODO_REAL ? <CampoInspeccionServidor /> : <CampoPreop />;
     case 'campo-parada': return MODO_REAL ? <CampoManifiestoServidor /> : <CampoParada />;
     case 'campo-envios': return MODO_REAL ? <CampoEnviosServidor /> : <CampoHoy />;
+    case 'campo-vehiculo': return MODO_REAL ? <CampoVehiculoServidor /> : <CampoHoy />;
   }
   const page = (() => {
     switch (route) {
