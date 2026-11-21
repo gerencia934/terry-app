@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertOctagon, ArrowLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, CloudUpload, Eraser, Factory, Home, MapPin, Minus, Navigation, Phone, Plus,
-  Printer, RefreshCw, Route, Satellite, Scale, ShieldAlert, Truck, Wifi, WifiOff,
+  Printer, RefreshCw, Route, Satellite, Scale, ShieldAlert, Timer, Truck, Wifi, WifiOff,
 } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Sheet, useToast } from '../components/ui';
 import { Logo } from '../components/AppShell';
@@ -99,7 +99,7 @@ async function descargarPaquete(anterior: Paquete | null): Promise<Paquete> {
 }
 
 /** Paquete del día compartido por las pantallas de campo. */
-function usePaquete() {
+export function usePaquete() {
   const toast = useToast();
   const [p, setP] = useState<Paquete | null>(() => { const x = leerPaquete<Paquete>(); return x && x.usuarioId === sesionActual()?.usuario.id && x.emisor ? { ...x, grabados: x.grabados ?? {} } : null; });
   const [cargando, setCargando] = useState(false);
@@ -155,11 +155,12 @@ function datosImpresion(p: Paquete, m: Manifiesto, g: Grabado | undefined): Dato
 const NAV: [RouteName, ReactNode, string, RouteName[]][] = [
   ['campo', <Home size={22} />, 'Mi ruta', ['campo-parada']],
   ['campo-preop', <ClipboardCheck size={22} />, 'Inspección', []],
+  ['campo-bitacora', <Timer size={22} />, 'Tiempos', []],
   ['campo-vehiculo', <Truck size={22} />, 'Mi vehículo', []],
   ['campo-envios', <CloudUpload size={22} />, 'Envíos', []],
 ];
 
-function CampoLayout({ children, title, back, pie }: { children: ReactNode; title?: string; back?: boolean; pie?: ReactNode }) {
+export function CampoLayout({ children, title, back, pie }: { children: ReactNode; title?: string; back?: boolean; pie?: ReactNode }) {
   const { route, go } = useRouter();
   const { enLinea, pendientes, errores } = useCola();
   return (

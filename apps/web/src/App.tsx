@@ -20,6 +20,8 @@ import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
 import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor, CampoVehiculoServidor } from './pages/CampoServidor';
+import { CampoBitacoraServidor } from './pages/CampoBitacora';
+import { BitacoraServidor } from './pages/BitacoraServidor';
 import { ProgramacionServidor, ProgramacionTablaServidor, SeguimientoServidor } from './pages/torre/Programacion';
 import { ManifiestosServidor } from './pages/torre/Manifiestos';
 import { ConciliacionServidor } from './pages/torre/Conciliacion';
@@ -79,6 +81,7 @@ function Screen() {
     case 'campo-parada': return MODO_REAL ? <CampoManifiestoServidor /> : <CampoParada />;
     case 'campo-envios': return MODO_REAL ? <CampoEnviosServidor /> : <CampoHoy />;
     case 'campo-vehiculo': return MODO_REAL ? <CampoVehiculoServidor /> : <CampoHoy />;
+    case 'campo-bitacora': return MODO_REAL ? <CampoBitacoraServidor /> : <CampoHoy />;
   }
   const page = (() => {
     switch (route) {
@@ -91,6 +94,8 @@ function Screen() {
       case 'por-confirmar': return MODO_REAL ? <SolicitudesServidor key="por-confirmar" porConfirmar /> : <PorConfirmar />; // key: cada vista con sus filtros
       case 'programacion': return MODO_REAL ? <ProgramacionServidor /> : <Programacion />;
       case 'programacion-tabla': return MODO_REAL ? <ProgramacionTablaServidor /> : <ProgramacionTabla />;
+      case 'bitacora': return MODO_REAL && tienePermiso('bitacora.equipo') ? <BitacoraServidor />
+        : <p className="rounded-xl bg-surface-2 p-6 text-center text-muted">{MODO_REAL ? 'La bitácora del equipo es para los coordinadores (Líder y Jefe de Operaciones).' : 'La bitácora necesita el servidor: esta es la versión de demostración.'}</p>;
       case 'seguimiento': return MODO_REAL ? <SeguimientoServidor /> : <Seguimiento />;
       case 'inspecciones': return MODO_REAL ? <InspeccionesServidor /> : <Inspecciones />;
       case 'manifiestos': return MODO_REAL ? <ManifiestosServidor /> : <Manifiestos />;

@@ -323,7 +323,9 @@ model Empresa {
   actividadesComerciales  ActividadComercial[]
   cotizaciones            Cotizacion[]
 
-  suscripcionesPush        SuscripcionPush[]
+  suscripcionesPush SuscripcionPush[]
+  tiemposLogisticos TiempoLogistico[]
+
   @@map("empresas")
 }
 
@@ -461,8 +463,11 @@ model Usuario {
   manifiestosLiberados    ManifiestoFinanzas[]
   sincronizacionesSiigo   SincronizacionSiigo[]
 
+  tiempos            TiempoLogistico[] @relation("TiempoDe")
+  tiemposRegistrados TiempoLogistico[] @relation("TiempoRegistradoPor")
+  suscripcionesPush  SuscripcionPush[]
+
   @@index([empresaId])
-  suscripcionesPush        SuscripcionPush[]
   @@map("usuarios")
 }
 
@@ -704,6 +709,8 @@ model Vehiculo {
   rutasGps         RutaGps[]
   eventosGps       EventoGps[]
 
+  tiempos TiempoLogistico[]
+
   @@map("vehiculos")
 }
 
@@ -719,11 +726,12 @@ model CatalogoItem {
   activo    Boolean @default(true)
   meta      Json    @default("{}")
 
-  empresa             Empresa         @relation(fields: [empresaId], references: [id])
-  declaracionesCausal Declaracion[]   @relation("CausalDeclaracion")
-  solicitudesCausal   Solicitud[]     @relation("CausalCancelacion")
+  empresa             Empresa           @relation(fields: [empresaId], references: [id])
+  declaracionesCausal Declaracion[]     @relation("CausalDeclaracion")
+  solicitudesCausal   Solicitud[]       @relation("CausalCancelacion")
   itemsDescartados    SolicitudItem[]
-  manifiestosAnulados Manifiesto[]    @relation("CausalAnulacionMf")
+  manifiestosAnulados Manifiesto[]      @relation("CausalAnulacionMf")
+  tiempos             TiempoLogistico[] @relation("TiempoTipo")
 
   @@unique([empresaId, tipo, codigo])
   @@map("catalogo_items")
@@ -1183,6 +1191,8 @@ model Ruta {
   paradasGps       ParadaGps[]
   eventosGps       EventoGps[]
 
+  tiempos TiempoLogistico[]
+
   @@unique([empresaId, codigo])
   @@index([fechaProgramada, vehiculoId])
   @@map("rutas")
@@ -1204,6 +1214,8 @@ model RutaParada {
   sucursal Sucursal   @relation(fields: [sucursalId], references: [id])
   items    RutaItem[]
   gps      ParadaGps?
+
+  tiempos TiempoLogistico[]
 
   @@unique([rutaId, orden])
   @@map("ruta_paradas")
@@ -1229,6 +1241,42 @@ model RutaItem {
 
 /// Historial de etapas de cada ruta (lo llena la base al cambiar la etapa). Sirve para aceptar puntos
 /// GPS que llegan tarde (celular sin señal) y para los tiempos de los informes.
+/// Bitácora de tiempos y tareas logísticas (gerencia, 20-11-2026): tiempos muertos y actividades que no son una
+/// recolección. «minutos» lo calcula la base (columna generada, fuera de Prisma).
+model TiempoLogistico {
+  id              String   @id @default(uuid()) @db.Uuid
+  empresaId       String   @map("empresa_id") @db.Uuid
+  usuarioId       String   @map("usuario_id") @db.Uuid
+  registradoPorId String   @map("registrado_por") @db.Uuid
+  tipoId          String   @map("tipo_id") @db.Uuid
+  inicio          DateTime @db.Timestamptz
+  fin             DateTime @db.Timestamptz
+  nota            String?  @db.VarChar(500)
+  rutaId          String?  @map("ruta_id") @db.Uuid
+  paradaId        String?  @map("parada_id") @db.Uuid
+  vehiculoId      String?  @map("vehiculo_id") @db.Uuid
+  latInicio       Decimal? @map("lat_inicio") @db.Decimal(9, 6)
+  lngInicio       Decimal? @map("lng_inicio") @db.Decimal(9, 6)
+  latFin          Decimal? @map("lat_fin") @db.Decimal(9, 6)
+  lngFin          Decimal? @map("lng_fin") @db.Decimal(9, 6)
+  fotoUrl         String?  @map("foto_url")
+  costo           Decimal? @db.Decimal(14, 0)
+  creadoEn        DateTime @default(now()) @map("creado_en") @db.Timestamptz
+  actualizadoEn   DateTime @default(now()) @updatedAt @map("actualizado_en") @db.Timestamptz
+
+  empresa       Empresa      @relation(fields: [empresaId], references: [id])
+  usuario       Usuario      @relation("TiempoDe", fields: [usuarioId], references: [id])
+  registradoPor Usuario      @relation("TiempoRegistradoPor", fields: [registradoPorId], references: [id])
+  tipo          CatalogoItem @relation("TiempoTipo", fields: [tipoId], references: [id])
+  ruta          Ruta?        @relation(fields: [rutaId], references: [id], onDelete: SetNull)
+  parada        RutaParada?  @relation(fields: [paradaId], references: [id], onDelete: SetNull)
+  vehiculo      Vehiculo?    @relation(fields: [vehiculoId], references: [id], onDelete: SetNull)
+
+  @@index([usuarioId, inicio], map: "ix_tiempos_usuario")
+  @@index([empresaId, inicio], map: "ix_tiempos_empresa")
+  @@map("tiempos_logisticos")
+}
+
 model RutaEvento {
   id                BigInt   @id @default(autoincrement())
   rutaId            String   @map("ruta_id") @db.Uuid

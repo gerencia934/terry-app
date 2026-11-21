@@ -777,6 +777,45 @@ prueba('campo: «mi vehículo» en solo lectura (vencimientos e inspecciones con
 r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: T });
 prueba('campo: quien programa rutas (oficina) abre la app del conductor con las rutas del día', r.status === 200 && r.json.rutas.some((x) => x.id === rutaAjena.id), JSON.stringify(r.json).slice(0, 200));
 
+console.log('\n5d. Bitácora de tiempos y tareas logísticas');
+r = await llamar('GET', '/bitacora/tipos', { token: tc });
+const trancon = r.json.find?.((t) => t.codigo === 'TRANCON');
+prueba('bitácora: el conductor ve los tipos de tiempo (trancón, portería, insumos…)', r.status === 200 && !!trancon && r.json.some((t) => t.codigo === 'PORTERIA') && r.json.some((t) => t.codigo === 'INSUMOS'), JSON.stringify(r.json).slice(0, 200));
+const idTiempo = randomUUID();
+const haceRato = (min) => new Date(Date.now() - min * 60_000).toISOString();
+const tiempo = { id: idTiempo, tipoId: trancon.id, inicio: haceRato(180), fin: haceRato(150), rutaId: rutaCampo.id, vehiculoId: veh2.id, nota: 'Accidente en la vía', latInicio: 7.35, lngInicio: -73.9 };
+const [t1, t2] = [await llamar('POST', '/bitacora', { token: tc, cuerpo: tiempo }), await llamar('POST', '/bitacora', { token: tc, cuerpo: tiempo })];
+prueba('…registra un tiempo de su ruta con el cronómetro del celular (30 min), y si se reenvía sin señal no se duplica', t1.status === 201 && t1.json.minutos === 30 && t2.json.id === idTiempo
+  && (await db.tiempoLogistico.count({ where: { id: idTiempo } })) === 1, JSON.stringify([t1.status, t1.json, t2.status]).slice(0, 300));
+const [ajena, alReves, futuro] = await Promise.all([
+  llamar('POST', '/bitacora', { token: tc, cuerpo: { ...tiempo, id: randomUUID(), rutaId: rutaAjena.id } }),
+  llamar('POST', '/bitacora', { token: tc, cuerpo: { ...tiempo, id: randomUUID(), fin: haceRato(200) } }),
+  llamar('POST', '/bitacora', { token: tc, cuerpo: { ...tiempo, id: randomUUID(), inicio: new Date(Date.now() + 86_400_000).toISOString(), fin: new Date(Date.now() + 90_000_000).toISOString() } }),
+]);
+prueba('…no lo amarra a una ruta ajena (403), ni con el fin antes del inicio, ni en el futuro (400)', ajena.status === 403 && alReves.status === 400 && futuro.status === 400, [ajena.status, alReves.status, futuro.status].join(','));
+r = await llamar('GET', `/bitacora/mios?desde=${fechaEn(-1)}&hasta=${fechaEn(0)}`, { token: tc });
+prueba('…ve sus tiempos del día', r.status === 200 && r.json.some((x) => x.id === idTiempo && x.tipo.nombre === 'Trancón severo'), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('PATCH', `/bitacora/${idTiempo}`, { token: tc, cuerpo: { fin: haceRato(135), nota: 'Accidente: cierre total de la vía' } });
+prueba('…y corrige lo suyo (queda en 45 min)', r.status === 200 && r.json.minutos === 45, JSON.stringify(r.json).slice(0, 200));
+const tiempoViejo = await db.tiempoLogistico.create({ data: { empresaId: conductor.empresaId, usuarioId: conductor.id, registradoPorId: conductor.id, tipoId: trancon.id,
+  inicio: new Date(Date.now() - 10 * 86_400_000), fin: new Date(Date.now() - 10 * 86_400_000 + 600_000) } });
+const tiempoAjeno = await db.tiempoLogistico.create({ data: { empresaId: conductor.empresaId, usuarioId: yo.id, registradoPorId: yo.id, tipoId: trancon.id, inicio: new Date(Date.now() - 3_600_000), fin: new Date(Date.now() - 1_800_000) } });
+const [corrigeViejo, corrigeAjeno, verEquipo] = await Promise.all([
+  llamar('PATCH', `/bitacora/${tiempoViejo.id}`, { token: tc, cuerpo: { nota: 'tarde' } }), llamar('DELETE', `/bitacora/${tiempoAjeno.id}`, { token: tc }), llamar('GET', '/bitacora/equipo?desde=2026-11-01&hasta=2026-11-30', { token: tc })]);
+prueba('…pero no corrige después de 7 días, ni lo de otra persona (403), ni ve la bitácora del equipo (app de campo → 403)', corrigeViejo.status === 403 && corrigeAjeno.status === 403
+  && verEquipo.status === 403 && verEquipo.json.codigo === 'CAMPO', [corrigeViejo.status, corrigeAjeno.status, verEquipo.status].join(','));
+r = await llamar('POST', '/bitacora', { token: T, cuerpo: { usuarioId: conductor.id, tipoId: trancon.id, inicio: haceRato(120), fin: haceRato(100), rutaId: rutaCampo.id, nota: 'Lo reportó por radio' } });
+prueba('bitácora: el coordinador registra por otra persona (queda quién lo registró)', r.status === 201 && r.json.usuario.id === conductor.id && r.json.registradoPor.id === yo.id, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('GET', `/bitacora/equipo?desde=${fechaEn(-1)}&hasta=2026-11-30`, { token: T });
+const rutaB1 = r.json.porRuta?.find((x) => x.id === rutaCampo.id);
+prueba('…y ve al equipo: por tipo, persona, vehículo y ruta (tiempo muerto de la ruta)', r.status === 200 && r.json.porTipo.some((x) => x.tipo === 'Trancón severo' && x.minutos >= 65)
+  && r.json.porPersona.some((x) => x.persona === 'Conductor E2E' && x.minutos === 65) && rutaB1?.muerto === 65 && r.json.porVehiculo.some((x) => x.placa === veh2.placa), JSON.stringify([r.json.porTipo, rutaB1]).slice(0, 300));
+r = await llamar('POST', '/bitacora/tipos', { token: T, cuerpo: { nombre: 'Lavado del vehículo', color: '#1F4E5F' } });
+const lavado = r.json;
+const sinLavado = await (async () => { await llamar('PATCH', `/bitacora/tipos/${lavado.id}`, { token: T, cuerpo: { activo: false } }); return (await llamar('GET', '/bitacora/tipos', { token: tc })).json; })();
+prueba('bitácora: la lista de tipos se ajusta (agregar e inactivar) y el celular solo ve los activos', r.status === 201 && !!lavado.id && !sinLavado.some((t) => t.id === lavado.id), JSON.stringify(r.json));
+prueba('…la lista de tipos solo la cambia quien administra la configuración (conductor → 403)', (await llamar('POST', '/bitacora/tipos', { token: tc, cuerpo: { nombre: 'Intento' } })).status === 403);
+
 console.log('\n5b. Usuarios y roles (fase 1c)');
 r = await llamar('GET', '/usuarios', { token: thseq });
 prueba('usuarios: solo la administración los ve (HSEQ → 403)', r.status === 403, String(r.status));
@@ -847,7 +886,7 @@ const catRoles = r.json;
 const funcionesDe = (acceso) => (catRoles.modulos ?? []).flatMap((m) => m.permisos.filter((p) => p.accesos.includes(acceso)).map((p) => p.codigo));
 prueba('catálogo: cada función con su módulo y su explicación; la empresa, el campo y el portal de clientes tienen funciones distintas', r.status === 200
   && catRoles.modulos.every((m) => m.permisos.every((p) => p.nombre && p.descripcion.length > 20)) && funcionesDe('CLIENTE').length >= 10
-  && funcionesDe('CLIENTE').every((c) => c.startsWith('portal.')) && !funcionesDe('OFICINA').some((c) => c.startsWith('portal.')) && funcionesDe('CAMPO').length === 2,
+  && funcionesDe('CLIENTE').every((c) => c.startsWith('portal.')) && !funcionesDe('OFICINA').some((c) => c.startsWith('portal.')) && funcionesDe('CAMPO').length === 3,
   JSON.stringify(catRoles).slice(0, 200));
 const [rr1, rr2] = await Promise.all([llamar('GET', '/roles', { token: thseq }), llamar('POST', '/roles', { token: thseq, cuerpo: { nombre: 'Intento', acceso: 'OFICINA' } })]);
 prueba('…solo quien administra la configuración ve y cambia los roles (HSEQ → 403)', rr1.status === 403 && rr2.status === 403, `${rr1.status} ${rr2.status}`);
@@ -889,7 +928,7 @@ r = await llamar('PATCH', `/roles/${condId}`, { token: T, cuerpo: { permisos: ['
 const restaurado = await llamar('POST', `/roles/${condId}/restaurar`, { token: T });
 const condDb = await db.rol.findUnique({ where: { id: condId }, include: { permisos: { include: { permiso: true } } } });
 prueba('…un predeterminado se ajusta y se restaura a sus funciones de fábrica (queda en la auditoría)', r.status === 200 && r.json.quitados?.includes('manifiestos.operar')
-  && restaurado.status === 200 && condDb.permisos.map((p) => p.permiso.codigo).sort().join() === 'manifiestos.operar,rutas.operar'
+  && restaurado.status === 200 && condDb.permisos.map((p) => p.permiso.codigo).sort().join() === 'bitacora.registrar,manifiestos.operar,rutas.operar'
   && (await db.auditoria.count({ where: { entidad: 'rol', entidadId: condId, accion: { in: ['EDITAR', 'RESTAURAR'] } } })) === 2, JSON.stringify([r.json, restaurado.json]).slice(0, 300));
 r = await llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Rol de paso', acceso: 'CAMPO', permisos: ['rutas.operar'] } });
 const [rd1, rd2, rd3] = await Promise.all([

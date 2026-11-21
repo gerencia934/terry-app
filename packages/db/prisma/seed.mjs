@@ -9,7 +9,7 @@ import shared from '@terraviva/shared';
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
   PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS,
   ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR, TEXTOS_LEGALES, TEXTOS_LEGALES_RETIRADOS, GESTORES_ALIADOS,
-  MODULOS_PERMISOS, ROLES_PREDETERMINADOS } = shared;
+  MODULOS_PERMISOS, ROLES_PREDETERMINADOS, TIPOS_TIEMPO_INICIALES } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
@@ -46,6 +46,9 @@ async function main() {
 
   // Listas simples
   await catalogo(E, 'CAUSAL', ['Cliente no disponible en sitio', 'Vehículo no apto (preoperacional)', 'Residuo sin embalar o sin rotular', 'Clima o vía cerrada', 'Ficha de seguridad incompleta', 'Cliente cambió de operador']);
+  // Bitácora de tiempos: tipos iniciales (se crean una vez; después los ajusta la empresa desde la bitácora)
+  for (const t of TIPOS_TIEMPO_INICIALES) await db.catalogoItem.upsert({ where: { empresaId_tipo_codigo: { empresaId: E, tipo: 'TIEMPO_LOGISTICO', codigo: t.codigo } }, update: {},
+    create: { empresaId: E, tipo: 'TIEMPO_LOGISTICO', codigo: t.codigo, nombre: t.nombre, color: t.color } });
 
   // Catálogos normativos (globales)
   for (const x of RIESGOS) await db.riesgo.upsert({ where: { codigo: x.codigo }, update: { nombre: x.nombre }, create: x });

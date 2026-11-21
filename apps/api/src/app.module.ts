@@ -22,6 +22,7 @@ import { ArchivosModule } from './common/archivos';
 import { TrabajosModule } from './trabajos/trabajos.module';
 import { ManifiestosModule } from './manifiestos/manifiestos.module';
 import { CampoModule } from './campo/campo.module';
+import { BitacoraModule } from './bitacora/bitacora.module';
 import { ConciliacionesModule } from './conciliaciones/conciliaciones.module';
 import { ActasModule } from './actas/actas.module';
 import { InformesModule } from './informes/informes.module';
@@ -46,7 +47,7 @@ import { AutogestionModule } from './portal/autogestion';
     }),
     PrismaModule, ComunModule, ArchivosModule, TrabajosModule, AuthModule,
     MonitoreoModule, NotificacionesModule, GpsModule, ComercialModule, ClientesModule, CertificadoComercialModule, FinanzasModule, DeclaracionesModule, LogisticaModule, CumplimientoModule, ImportacionModule,
-    ManifiestosModule, CampoModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule, AutogestionModule,
+    ManifiestosModule, CampoModule, BitacoraModule, ConciliacionesModule, ActasModule, InformesModule, EmpresaModule, UsuariosModule, PortalModule, AutogestionModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: FiltroErrores },
