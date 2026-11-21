@@ -31,6 +31,7 @@ Pegue este archivo (o pida «lee docs/CONTEXTO_PROYECTO.md») al iniciar la nuev
 | 3-A | **Núcleo operativo: modelo y reglas, aprobado** (18-11-2026). Cadena Solicitud → Ruta → Manifiesto → Conciliación → Acta; migración abierta | rama `fase-3-operacion` (leer `docs/operacion/MODELO_OPERACION.md`) |
 | 3-B | **API del núcleo operativo, hecha** (18-11-2026): manifiestos con firma, fotos y báscula; conciliación con totales y cartera; actas con PDF, QR y verificación pública; GPS sin señal; informes. 43 pruebas de reglas y 95 e2e OK | rama `fase-3-operacion` |
 | 3-C | **App del conductor (PWA sin señal), hecha** (18-11-2026): ruta del día, inspección, etapas con kilometraje, manifiesto con cámara, báscula y firma, cola de envíos y GPS en lotes. 43 pruebas de reglas y 98 e2e OK | rama `fase-3-operacion` |
+| 3-E | **Residuos estandarizado con Mantenimiento, hecho** (20-11-2026): tres módulos que no se mezclan (oficina, app del conductor y portal), cadena del servicio con aprobación separada, manifiesto paso a paso impreso en sitio, conciliación de tres columnas, bitácora de tiempos, mesa de ayuda y peligrosos directo al gestor aliado desde la ruta. 122 pruebas de reglas y 587 e2e OK; **sin publicar** | rama `fase-3-operacion` |
 | DR | **Ajustes por documentos reales, hechos** (19-11-2026): recepción en planta con transportador externo, dos firmas, recibo térmico y manifiesto en PDF (TV####); certificado por generador, textos legales por disposición, firma, sellos y hash (PSAP); subcorrientes IDEAM, cargue por nombre, asignación masiva, solicitudes automáticas agrupadas y permisos reales. 46 pruebas de reglas y 132 e2e OK | rama `fase-3-operacion` (`docs/referencia/ANALISIS_DOCUMENTOS_REALES.md`, `docs/REVISION_REQUISITOS_PRODUCCION.md`) |
 | PR | **Ajustes por requisitos de producción, hechos** (19-11-2026): buscador de clientes y listados de 50 en 50 (probado con 2.000 clientes), consolidado en la base, auditoría con IP e inmutable, permiso y registro de exportaciones, aceptación de la política de datos (Ley 1581), cerrar sesión en todos los dispositivos, aviso de ingreso nuevo, límite de peticiones por usuario, librerías actualizadas, pruebas en GitHub, CodeQL, Dependabot y guion de carga k6. 46 pruebas de reglas y 145 e2e OK | rama `fase-3-operacion` (`docs/REVISION_REQUISITOS_PRODUCCION.md` §9, `apps/api/test/carga/LEAME.md`) |
 | 3-D | **Torre de control (oficina), hecha** (18-11-2026): calendario de rutas y programación por línea; seguimiento del día; manifiestos con fotos, firma y anulación; bandeja y grilla de conciliación con totales en vivo; actas con PDF, ZIP y cargue de aliados; página pública del QR. 43 pruebas de reglas y 109 e2e OK | rama `fase-3-operacion` (`apps/web/src/pages/torre/`) |
@@ -208,6 +209,28 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
   - la base en Neon (PostgreSQL, Virginia), porque D1 no sirve;
   - GitHub publica solo cuando las pruebas pasan en `main`.
   Pasos en docs/DESPLIEGUE.md. `mantenimiento.terravivasas.net` es de otra aplicación (TV Mantenimiento), no de TERRY-GO.
+- Residuos estandarizado con Mantenimiento (20-11-2026, pedido de la gerencia antes de cerrar el módulo). Está en la
+  rama `fase-3-operacion` y **no se ha publicado**: falta el «publica» de la gerencia. Detalle en docs/ARQUITECTURA.md
+  («Tres módulos» y «Cadena del servicio»):
+  - tres módulos: la oficina, la app del conductor (solo en el celular) y el portal de clientes. Decisión de la gerencia:
+    campo no consulta clientes ni precios; ve su ruta del día y, en solo lectura, el mantenimiento de su vehículo;
+  - roles de la cadena: Jefe de Operaciones, Líder de Operaciones (antes «Logística») y Jefe de Planta. Las recolecciones
+    las aprueba el Líder de Operaciones y las entregas en planta el Jefe de Planta. Comercial ya no aprueba y el Líder
+    ya no crea clientes. El acta sale solo con la factura para todos los clientes; las excepciones llevan motivo;
+  - app del conductor «antifatiga»: manifiesto en cinco pasos sin cantidades precargadas, impreso en sitio (tirilla de
+    80 mm o carta), novedades sin castigo (residuo no recogido, parada no atendida) y «Mi vehículo»;
+  - conciliación de tres columnas (pedido, cargado y recibido): toda diferencia se justifica y la aprueba otra persona;
+  - bitácora de tiempos y tareas logísticas: cronómetro en el celular y vista del equipo con el % de tiempo muerto;
+  - mesa de ayuda por rol: botón «?» en cada pantalla, guías, preguntas frecuentes y contacto;
+  - residuos peligrosos en la ruta: salen en su propio manifiesto, directo al gestor aliado que los recibe (Los Pinos no
+    los recibe); si hay varios gestores posibles, la oficina elige en el detalle de la ruta y el conductor sigue con lo demás;
+  - publicar es seguro: se simuló sobre una base igual a la de producción (migraciones y semilla de `main`) y las cuatro
+    migraciones nuevas entran limpias (roles nuevos, funciones, tipos de la bitácora, regla del acta);
+  - falta de la gerencia: qué impresora llevan los vehículos (se recomienda térmica Bluetooth de 80 mm), el contacto de
+    la mesa de ayuda (Ajustes › Empresa), asignar los roles nuevos a cada persona y publicar;
+  - el módulo Comercial (CRM) y la importación de Bigin se trabajan en otra cuenta de Claude desde el 20-11-2026: esta
+    rama no los tocó.
+  122 pruebas de reglas y 587 e2e OK.
 - Licencia propia de celda de seguridad, autoclave y biorremediación (lista antes de febrero de 2027; Exp. CAS
   210.40.00113.2026): ese día se registra en Permisos con su PDF y se ajusta la regla de la base que hoy impide recibir
   peligrosos en Los Pinos (`fn_item_peligroso_destino`), según lo que autorice.
