@@ -6,7 +6,7 @@
 // (se anota lo real), y se imprime en sitio. Reportar «no había residuo» o «no me atendieron» toma un toque y no castiga.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  AlertOctagon, ArrowLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, CloudUpload, Eraser, Factory, Home, MapPin, Minus, Navigation, Phone, Plus,
+  AlertOctagon, ArrowLeft, Camera, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, CloudUpload, Eraser, Factory, Home, LifeBuoy, MapPin, Minus, Navigation, Phone, Plus,
   Printer, RefreshCw, Route, Satellite, Scale, ShieldAlert, Timer, Truck, Wifi, WifiOff,
 } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Sheet, useToast } from '../components/ui';
@@ -18,6 +18,7 @@ import { borrarBorrador, descartar, encolar, guardarBorrador, guardarPaquete, le
 import { comprimirFoto, detenerGps, iniciarGps } from '../campo/medios';
 import { formatoGuardado, useImprimir, type DatosImpresion } from '../campo/ManifiestoImpreso';
 import { AvisoNotificaciones } from '../components/Notificaciones';
+import { BotonAyuda, CentroAyuda } from '../components/Ayuda';
 
 // ---------- Tipos del paquete de campo (/campo/paquete): sin precios ni datos de oficina ----------
 interface Etapa { id: string; nombre: string; color: string; orden: number; esFinal: boolean; cancela: boolean; rastreo: boolean }
@@ -158,6 +159,7 @@ const NAV: [RouteName, ReactNode, string, RouteName[]][] = [
   ['campo-bitacora', <Timer size={22} />, 'Tiempos', []],
   ['campo-vehiculo', <Truck size={22} />, 'Mi vehículo', []],
   ['campo-envios', <CloudUpload size={22} />, 'Envíos', []],
+  ['campo-ayuda', <LifeBuoy size={22} />, 'Ayuda', []],
 ];
 
 export function CampoLayout({ children, title, back, pie }: { children: ReactNode; title?: string; back?: boolean; pie?: ReactNode }) {
@@ -169,7 +171,8 @@ export function CampoLayout({ children, title, back, pie }: { children: ReactNod
         <div className="safe-x flex h-14 items-center gap-2">
           {back ? <button onClick={() => go('campo')} className="-ml-2 rounded-lg p-2" aria-label="Volver"><ArrowLeft size={22} /></button> : <Logo className="h-7" />}
           {title && <h1 className="truncate text-[16px] font-semibold">{title}</h1>}
-          <button onClick={() => go('campo-envios')} className={cx('ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-medium',
+          <BotonAyuda acceso="CAMPO" ruta={route} verTodo={() => go('campo-ayuda')} className="ml-auto" />
+          <button onClick={() => go('campo-envios')} className={cx('flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-medium',
             errores.length ? 'bg-bad/10 text-bad' : !enLinea || pendientes ? 'bg-warn/10 text-warn' : 'bg-ok/10 text-ok')} aria-label="Envíos pendientes">
             {enLinea ? <Wifi size={14} /> : <WifiOff size={14} />}
             {errores.length ? `${errores.length} con error` : pendientes ? `${pendientes} por enviar` : enLinea ? 'En línea' : 'Sin señal'}
@@ -181,7 +184,7 @@ export function CampoLayout({ children, title, back, pie }: { children: ReactNod
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface safe-bottom" aria-label="Navegación de campo">
         <div className="mx-auto grid max-w-[560px]" style={{ gridTemplateColumns: `repeat(${NAV.length}, minmax(0, 1fr))` }}>
           {NAV.map(([r, ic, l, tambien]) => (
-            <button key={r} onClick={() => go(r)} className={cx('flex h-16 flex-col items-center justify-center gap-1 text-[12px] font-medium', route === r || tambien.includes(route) ? 'text-brand' : 'text-muted')}>{ic}{l}</button>
+            <button key={r} onClick={() => go(r)} className={cx('flex h-16 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-medium leading-tight', route === r || tambien.includes(route) ? 'text-brand' : 'text-muted')}>{ic}{l}</button>
           ))}
         </div>
       </nav>
@@ -807,6 +810,11 @@ export function CampoVehiculoServidor() {
       )}
     </CampoLayout>
   );
+}
+
+// ======================= Ayuda (mesa de ayuda del conductor) =======================
+export function CampoAyudaServidor() {
+  return <CampoLayout title="Ayuda"><CentroAyuda acceso="CAMPO" /></CampoLayout>;
 }
 
 // ======================= Envíos pendientes =======================

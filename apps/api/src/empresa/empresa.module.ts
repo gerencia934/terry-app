@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Correo } from '../common/servicios';
-import { ActorActual, Permiso, Zod, fechaColombia, type Actor } from '../common/http';
+import { ActorActual, CuentaPropia, Permiso, Zod, fechaColombia, type Actor } from '../common/http';
 
 const fechaOVacia = z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD.')]);
 const Configuracion = z.object({
@@ -44,6 +44,11 @@ const Configuracion = z.object({
     etiqueta: z.string().trim().min(2, 'Escriba el nombre del acceso.').max(40),
     url: z.string().trim().max(300).regex(/^https:\/\/[^\s]+\.[^\s]+$/i, 'Use una dirección completa que empiece por https://'),
   })).max(8).optional(),
+  // Mesa de ayuda (gerencia, 20-11-2026): a quién llaman o escriben los conductores (su coordinador) y los clientes
+  ayuda: z.object({
+    campo: z.object({ nombre: z.string().trim().max(80), telefono: z.string().trim().max(30), whatsapp: z.string().trim().max(30) }).partial(),
+    clientes: z.object({ nombre: z.string().trim().max(80), telefono: z.string().trim().max(30), whatsapp: z.string().trim().max(30), correo: z.string().trim().max(150) }).partial(),
+  }).partial().optional(),
   // Calibración de la báscula: el recibo la cita y, si está vencida, sale con alerta para que HSEQ revise el pesaje
   bascula: z.object({
     identificacion: z.string().trim().max(80), certificado: z.string().trim().max(60), fecha: fechaOVacia,
@@ -185,5 +190,19 @@ class EmpresaController {
   @Permiso('configuracion.editar') @Patch('textos-legales/:codigo/retirar') retirar(@ActorActual() a: Actor, @Param('codigo') c: string) { return this.s.retirarTexto(a, c.toUpperCase()); }
 }
 
-@Module({ controllers: [EmpresaController], providers: [EmpresaService] })
+/** Mesa de ayuda: el contacto de cada módulo. Lo usan los tres (oficina, campo y portal de clientes). */
+@Controller('ayuda')
+class AyudaController {
+  constructor(private readonly db: PrismaService) {}
+  @CuentaPropia() @Get('contacto') async contacto(@ActorActual() a: Actor) {
+    const e = await this.db.empresa.findUniqueOrThrow({ where: { id: a.empresaId }, select: { configuracion: true } });
+    const c = (e.configuracion ?? {}) as { ayuda?: { campo?: Record<string, string>; clientes?: Record<string, string> }; contacto?: { telefono?: string; correo?: string } };
+    const x = a.acceso === 'CLIENTE' ? c.ayuda?.clientes : c.ayuda?.campo;
+    // Sin contacto propio, el cliente ve el teléfono y el correo de la empresa (los del certificado)
+    return { nombre: x?.nombre || null, telefono: x?.telefono || (a.acceso === 'CLIENTE' ? c.contacto?.telefono : null) || null, whatsapp: x?.whatsapp || null,
+      correo: (a.acceso === 'CLIENTE' ? x?.correo || c.contacto?.correo : null) || null };
+  }
+}
+
+@Module({ controllers: [EmpresaController, AyudaController], providers: [EmpresaService] })
 export class EmpresaModule {}

@@ -30,6 +30,8 @@ const horas = (min: number) => (min < 60 ? `${min} min` : `${Math.floor(min / 60
 const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
 const lunes = (iso: string) => { const d = new Date(`${iso}T00:00:00Z`); return sumarDias(iso, -((d.getUTCDay() + 6) % 7)); };
 const isoCo = (fecha: string, h: string) => `${fecha}T${h}:00-05:00`;
+/** Día del registro en hora de Colombia (AAAA-MM-DD): un tiempo de la noche no se pasa al día siguiente. */
+const diaCo = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 
 export function BitacoraServidor() {
   const toast = useToast();
@@ -61,7 +63,7 @@ export function BitacoraServidor() {
       enc.forEach((_, i) => { ws.getColumn(i + 1).width = i === 0 ? 24 : 18; });
     };
     hoja('Detalle', ['Fecha', 'Persona', 'Tipo', 'Inicio', 'Fin', 'Minutos', 'Ruta', 'Vehículo', 'Gasto', 'Nota', 'Registró'],
-      r.filas.map((x) => [x.inicio.slice(0, 10), x.usuario.nombre, x.tipo.nombre, hora(x.inicio), hora(x.fin), x.minutos, x.ruta?.codigo ?? '', x.vehiculo?.placa ?? '', x.costo, x.nota ?? '', x.registradoPor.nombre]));
+      r.filas.map((x) => [diaCo(x.inicio), x.usuario.nombre, x.tipo.nombre, hora(x.inicio), hora(x.fin), x.minutos, x.ruta?.codigo ?? '', x.vehiculo?.placa ?? '', x.costo, x.nota ?? '', x.registradoPor.nombre]));
     hoja('Por tipo', ['Tipo', 'Minutos', 'Veces'], r.porTipo.map((x) => [x.tipo, x.minutos, x.veces]));
     hoja('Por persona', ['Persona', 'Minutos', 'Veces'], r.porPersona.map((x) => [x.persona, x.minutos, x.veces]));
     hoja('Por ruta', ['Ruta', 'Fecha', 'Vehículo', 'Conductor', 'Duración (min)', 'Tiempo muerto (min)', 'Productivo (min)', '% muerto'],
@@ -117,9 +119,9 @@ export function BitacoraServidor() {
       </Card>
       <Card title="Detalle" pad={false}>
         <ResponsiveTable rows={r?.filas ?? []} rowKey={(x) => x.id} empty={d.cargando ? 'Cargando…' : 'Sin registros en el periodo.'}
-          cardTitle={(x) => `${x.tipo.nombre} · ${horas(x.minutos)}`} cardMeta={(x) => `${x.usuario.nombre} · ${fmtFecha(x.inicio)} ${hora(x.inicio)}–${hora(x.fin)}`}
+          cardTitle={(x) => `${x.tipo.nombre} · ${horas(x.minutos)}`} cardMeta={(x) => `${x.usuario.nombre} · ${fmtFecha(diaCo(x.inicio))} ${hora(x.inicio)}–${hora(x.fin)}`}
           columns={[
-            { key: 'f', header: 'Fecha', render: (x) => <span className="num whitespace-nowrap">{fmtFecha(x.inicio)} · {hora(x.inicio)}–{hora(x.fin)}</span>, priority: 3 },
+            { key: 'f', header: 'Fecha', render: (x) => <span className="num whitespace-nowrap">{fmtFecha(diaCo(x.inicio))} · {hora(x.inicio)}–{hora(x.fin)}</span>, priority: 3 },
             { key: 'p', header: 'Persona', render: (x) => x.usuario.nombre, priority: 3 },
             { key: 't', header: 'Tipo', render: (x) => <ColorBadge color={x.tipo.color ?? '#667085'}>{x.tipo.nombre}</ColorBadge>, priority: 3 },
             { key: 'm', header: 'Duración', align: 'right', render: (x) => <span className="num">{horas(x.minutos)}</span>, priority: 3 },
@@ -139,7 +141,7 @@ export function BitacoraServidor() {
 function FormTiempo({ actual, personas, tipos, alCerrar, alGuardar }: { actual: Registro | null; personas: Persona[]; tipos: Tipo[]; alCerrar: () => void; alGuardar: () => void }) {
   const toast = useToast();
   const [v, setV] = useState(() => ({
-    usuarioId: actual?.usuarioId ?? '', tipoId: actual?.tipo.id ?? '', fecha: actual ? actual.inicio.slice(0, 10) : hoyCo(),
+    usuarioId: actual?.usuarioId ?? '', tipoId: actual?.tipo.id ?? '', fecha: actual ? diaCo(actual.inicio) : hoyCo(),
     desde: actual ? hora(actual.inicio) : '', hasta: actual ? hora(actual.fin) : '', nota: actual?.nota ?? '', costo: actual?.costo ? String(actual.costo) : '',
   }));
   const [ocupado, setOcupado] = useState(false);

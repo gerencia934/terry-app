@@ -10,6 +10,7 @@ import { cx } from '../lib/format';
 import { useAlertas } from '../lib/alertas';
 import { MODO_REAL, PORTAL_URL, salir, salirDeTodos, sesionActual, tienePermiso } from '../lib/api';
 import { VentanaDobleFactor } from './DobleFactor';
+import { BotonAyuda } from './Ayuda';
 import { Descargas } from './Descargas';
 import { MODULO } from './Marca';
 import { AvisoNotificaciones, OpcionNotificaciones } from './Notificaciones';
@@ -49,7 +50,7 @@ export const GRUPOS: Grupo[] = [
     { route: 'catalogos', label: 'Catálogos', icon: ListTree }, { route: 'etapas', label: 'Etapas del recorrido', icon: Milestone }, { route: 'empresa', label: 'Datos de la empresa', icon: Building2 }] },
 ];
 /** Secciones que ya leen y escriben en el servidor (el resto se conecta en la fase 1b). */
-const CONECTADAS = new Set<RouteName>(['inicio', 'bitacora', 'comercial', 'facturacion', 'indicadores', 'inventario', 'catalogos', 'etapas', 'clientes', 'tarifas', 'permisos', 'inspecciones', 'vehiculos', 'usuarios', 'roles', 'declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
+const CONECTADAS = new Set<RouteName>(['inicio', 'bitacora', 'ayuda', 'comercial', 'facturacion', 'indicadores', 'inventario', 'catalogos', 'etapas', 'clientes', 'tarifas', 'permisos', 'inspecciones', 'vehiculos', 'usuarios', 'roles', 'declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
 const TODOS = GRUPOS.flatMap((g) => g.items.map((i) => ({ ...i, grupo: g.label })));
 /** El ítem se ve si no pide permiso o si el usuario lo tiene (Facturación: solo Comercial, Facturación y Gerencia). */
 const visible = (i: Item) => !i.permiso || !MODO_REAL || tienePermiso(i.permiso);
@@ -157,6 +158,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
             <div className="ml-auto flex items-center md:ml-2">
               <button onClick={() => setBuscar(true)} className="rounded-lg p-2 text-muted hover:bg-surface-2 md:hidden" aria-label="Buscar"><Search size={19} /></button>
+              <BotonAyuda acceso="OFICINA" ruta={route} verTodo={() => go('ayuda')} />
               <button onClick={toggle} className="rounded-lg p-2 text-muted hover:bg-surface-2" aria-label={dark ? 'Usar tema claro' : 'Usar tema oscuro'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
               <div className="relative">
                 {MODO_REAL && <Descargas />}

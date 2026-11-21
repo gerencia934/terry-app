@@ -2,7 +2,7 @@
 // lo suyo (declaraciones, solicitudes, manifiestos, certificados e informes). Doble barrera en el servidor: el API filtra
 // por el cliente del token y la base (RLS) lo vuelve a filtrar. Aquí nada depende de datos que mande el navegador.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Award, BarChart3, Building2, FileStack, FileText, Home, Info, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
+import { Award, BarChart3, Building2, FileStack, FileText, Home, Info, LifeBuoy, Loader2, MapPin, Menu, Moon, ShieldCheck, Sun, Truck, UserCog, X, type LucideIcon } from 'lucide-react';
 import { Logo, useTheme } from '../../components/AppShell';
 import { VentanaDobleFactor } from '../../components/DobleFactor';
 import { Proteccion } from '../../components/Proteccion';
@@ -15,6 +15,7 @@ import { PortalCertificados, PortalDeclaraciones, PortalInformes, PortalInicio, 
 import { PortalUsuarios } from './UsuariosPortal';
 import { PortalSedes } from './Sedes';
 import { EnlaceAccesoHost } from '../../components/EnlaceAcceso';
+import { BotonAyuda, CentroAyuda } from '../../components/Ayuda';
 
 export interface SedePortal { id: string; codigo: string | null; nombre: string; municipio?: { nombre: string } | null }
 export interface YoPortal {
@@ -52,6 +53,7 @@ const MENU: Item[] = [
   { route: 'portal-certificados', label: 'Certificados', icon: Award, funciones: ['portal.certificados.ver'] },
   { route: 'portal-informes', label: 'Informes', icon: BarChart3, funciones: ['portal.informes.ver'] },
   { route: 'portal-usuarios', label: 'Usuarios', icon: UserCog, funciones: ['portal.usuarios.gestionar'] },
+  { route: 'portal-ayuda', label: 'Ayuda', icon: LifeBuoy },
 ];
 const permitido = (yo: YoPortal | null, it: Item | undefined) => !!it && (!it.funciones || !yo || puede(yo, ...it.funciones));
 /** Cambia de sección sin dejar la anterior en el historial (el botón «atrás» no vuelve a una ruta de oficina). */
@@ -79,6 +81,7 @@ export function PortalApp() {
       case 'portal-certificados': return <PortalCertificados />;
       case 'portal-informes': return <PortalInformes />;
       case 'portal-usuarios': return <PortalUsuarios />;
+      case 'portal-ayuda': return <div className="mx-auto max-w-3xl"><h1 className="mb-1 text-[22px] font-bold">Ayuda</h1><p className="mb-4 text-[14px] text-muted">Cómo usar su portal, paso a paso. En cada pantalla, el botón «?» abre la guía de esa pantalla.</p><CentroAyuda acceso="CLIENTE" /></div>;
       default: return <PortalInicio />;
     }
   })();
@@ -135,6 +138,7 @@ function Marco({ children }: { children: ReactNode }) {
             <span className="lg:hidden"><Logo className="h-7" /></span>
             <p className="hidden min-w-0 truncate text-[13px] text-muted lg:block">Portal de clientes <span className="text-subtle">/</span> <span className="font-medium text-fg">{actual?.label}</span></p>
             <div className="ml-auto flex items-center">
+              <BotonAyuda acceso="CLIENTE" ruta={route} verTodo={() => go('portal-ayuda')} />
               <button onClick={toggle} className="rounded-lg p-2 text-muted hover:bg-surface-2" aria-label={dark ? 'Usar tema claro' : 'Usar tema oscuro'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
               <div className="relative">
                 <button onClick={() => setCuenta((v) => !v)} aria-expanded={cuenta} className="ml-1 flex h-9 items-center gap-2 rounded-full pl-1 pr-1 hover:bg-surface-2 sm:pr-3" title="Su cuenta">

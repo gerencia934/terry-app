@@ -6,7 +6,7 @@ import { Camera, CheckCircle2, MapPin, Play, Square, Timer, Trash2 } from 'lucid
 import { Button, Field, Input, Sheet, useToast } from '../components/ui';
 import { api } from '../lib/api';
 import { cx } from '../lib/format';
-import { encolar, procesar } from '../campo/cola';
+import { encolar, listar, procesar } from '../campo/cola';
 import { comprimirFoto } from '../campo/medios';
 import { CampoLayout, usePaquete } from './CampoServidor';
 
@@ -79,8 +79,11 @@ export function CampoBitacoraServidor() {
       const r: Registrado = { id: crono.id, tipo: crono.tipo, color: crono.color, inicio: crono.inicio, fin, minutos: Math.round((Date.parse(fin) - Date.parse(crono.inicio)) / 60_000), nota: nota.trim() || null, porEnviar: true };
       setLista((x) => { const filas = [r, ...x]; guardar(HOY, { fecha: hoy(), filas }); return filas; });
       setCrono(null); guardar(CRONO, null); setTerminando(false); setNota(''); setCosto(''); setFoto(null);
-      void procesar();
       toast(`${crono.tipo}: ${duracion(Date.parse(fin) - Date.parse(crono.inicio))} registrados.`);
+      // Si ya se envió (con señal), deja de figurar «por enviar»
+      await procesar();
+      if (!(await listar()).some((o) => o.grupo === `bitacora:${r.id}`))
+        setLista((x) => { const filas = x.map((y) => (y.id === r.id ? { ...y, porEnviar: false } : y)); guardar(HOY, { fecha: hoy(), filas }); return filas; });
     } catch { toast('No se pudo guardar el tiempo en el teléfono.', 'warn'); }
     finally { setOcupado(false); }
   };

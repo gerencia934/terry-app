@@ -10,3 +10,4 @@ export { construirPlantilla, leerArchivo, exportarErrores } from './importacion/
 export * from './importacion/csv';
 export * from './importacion/planilla';
 export * from './bitacora';
+export * from './ayuda';

@@ -19,9 +19,11 @@ import { Certificados, Inspecciones, Inventario, Manifiestos, Recepcion } from '
 import Indicadores, { Exportable, Informes } from './pages/Informes';
 import { Catalogos, Clientes, ConfigIndex, MisDatos, Permisos, Usuarios, Vehiculos } from './pages/Configuracion';
 import { CampoHoy, CampoParada, CampoPreop } from './pages/Campo';
-import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor, CampoVehiculoServidor } from './pages/CampoServidor';
+import { CampoEnviosServidor, CampoInspeccionServidor, CampoManifiestoServidor, CampoRutaServidor, CampoVehiculoServidor, CampoAyudaServidor } from './pages/CampoServidor';
 import { CampoBitacoraServidor } from './pages/CampoBitacora';
 import { BitacoraServidor } from './pages/BitacoraServidor';
+import { CentroAyuda } from './components/Ayuda';
+import { PageHeader } from './components/ui';
 import { ProgramacionServidor, ProgramacionTablaServidor, SeguimientoServidor } from './pages/torre/Programacion';
 import { ManifiestosServidor } from './pages/torre/Manifiestos';
 import { ConciliacionServidor } from './pages/torre/Conciliacion';
@@ -82,6 +84,7 @@ function Screen() {
     case 'campo-envios': return MODO_REAL ? <CampoEnviosServidor /> : <CampoHoy />;
     case 'campo-vehiculo': return MODO_REAL ? <CampoVehiculoServidor /> : <CampoHoy />;
     case 'campo-bitacora': return MODO_REAL ? <CampoBitacoraServidor /> : <CampoHoy />;
+    case 'campo-ayuda': return <CampoAyudaServidor />;
   }
   const page = (() => {
     switch (route) {
@@ -94,6 +97,7 @@ function Screen() {
       case 'por-confirmar': return MODO_REAL ? <SolicitudesServidor key="por-confirmar" porConfirmar /> : <PorConfirmar />; // key: cada vista con sus filtros
       case 'programacion': return MODO_REAL ? <ProgramacionServidor /> : <Programacion />;
       case 'programacion-tabla': return MODO_REAL ? <ProgramacionTablaServidor /> : <ProgramacionTabla />;
+      case 'ayuda': return <><PageHeader eyebrow="Ayuda" title="Mesa de ayuda" subtitle="Guías paso a paso y preguntas frecuentes de la oficina. En cada pantalla, el botón «?» abre la guía de esa pantalla." /><CentroAyuda acceso="OFICINA" /></>;
       case 'bitacora': return MODO_REAL && tienePermiso('bitacora.equipo') ? <BitacoraServidor />
         : <p className="rounded-xl bg-surface-2 p-6 text-center text-muted">{MODO_REAL ? 'La bitácora del equipo es para los coordinadores (Líder y Jefe de Operaciones).' : 'La bitácora necesita el servidor: esta es la versión de demostración.'}</p>;
       case 'seguimiento': return MODO_REAL ? <SeguimientoServidor /> : <Seguimiento />;

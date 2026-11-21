@@ -816,6 +816,13 @@ const sinLavado = await (async () => { await llamar('PATCH', `/bitacora/tipos/${
 prueba('bitácora: la lista de tipos se ajusta (agregar e inactivar) y el celular solo ve los activos', r.status === 201 && !!lavado.id && !sinLavado.some((t) => t.id === lavado.id), JSON.stringify(r.json));
 prueba('…la lista de tipos solo la cambia quien administra la configuración (conductor → 403)', (await llamar('POST', '/bitacora/tipos', { token: tc, cuerpo: { nombre: 'Intento' } })).status === 403);
 
+console.log('\n5e. Mesa de ayuda por rol');
+r = await llamar('PATCH', '/empresa/configuracion', { token: T, cuerpo: { ayuda: { campo: { nombre: 'Coordinación de rutas', telefono: '300 111 2233', whatsapp: '3001112233' },
+  clientes: { nombre: 'Servicio al cliente E2E', telefono: '6076000000', correo: 'clientes@terravivasas.com' } } } });
+const ayudaCampo = await llamar('GET', '/ayuda/contacto', { token: tc });
+prueba('ayuda: el conductor ve el contacto de su coordinador para llamar o escribir por WhatsApp', r.status === 200 && ayudaCampo.status === 200 && ayudaCampo.json.nombre === 'Coordinación de rutas'
+  && ayudaCampo.json.whatsapp === '3001112233' && ayudaCampo.json.correo === null, JSON.stringify(ayudaCampo.json));
+
 console.log('\n5b. Usuarios y roles (fase 1c)');
 r = await llamar('GET', '/usuarios', { token: thseq });
 prueba('usuarios: solo la administración los ve (HSEQ → 403)', r.status === 403, String(r.status));
@@ -1824,6 +1831,8 @@ prueba('…si cambia de vehículo, se registra el nuevo y el anterior queda como
   && entregaEditada.transporteId !== solEntrega.transporteId && (await db.transporteTercero.count({ where: { id: solEntrega.transporteId } })) === 1, JSON.stringify(r.json));
 r = await llamar('PUT', `/portal/solicitudes/${entrega.id}`, { token: tPA, cuerpo: { operacion: 'CARGA', fechaSolicitada: fechaEn(4), items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 180 }] } });
 prueba('…no cambia una entrega en planta por una recolección (se cancela y se pide otra)', r.status === 400, JSON.stringify(r.json));
+r = await llamar('GET', '/ayuda/contacto', { token: tPA });
+prueba('ayuda: el cliente ve el contacto de servicio al cliente (no el del coordinador de rutas)', r.status === 200 && r.json.nombre === 'Servicio al cliente E2E' && r.json.correo === 'clientes@terravivasas.com', JSON.stringify(r.json));
 {
   // Cadena del servicio: la entrega en planta la autoriza el Jefe de Planta; la recolección, el Líder de Operaciones
   const jefePlanta = await db.usuario.create({ data: { empresaId: cliente.empresaId, rolId: rolDe('JEFE_PLANTA').id, nombre: 'Jefe de Planta E2E', documento: '8802', email: 'jefe.planta.e2e@terravivasas.com',

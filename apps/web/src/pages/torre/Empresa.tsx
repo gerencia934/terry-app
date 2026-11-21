@@ -30,6 +30,8 @@ interface Config {
   /** Accesos rápidos del tablero de inicio (nombre y dirección https). */
   accesosRapidos?: AccesoRapido[];
   gps?: { plantaLatitud?: number | null; plantaLongitud?: number | null; radioPlantaM?: number; radioSedeM?: number; minutosParada?: number; kmDesvio?: number };
+  /** Mesa de ayuda: a quién llaman los conductores (su coordinador) y los clientes. */
+  ayuda?: { campo?: { nombre?: string; telefono?: string; whatsapp?: string }; clientes?: { nombre?: string; telefono?: string; whatsapp?: string; correo?: string } };
 }
 interface Consecutivo { documento: 'MANIFIESTO' | 'ACTA' | 'INSPECCION' | 'CERT_COMERCIAL' | 'COTIZACION'; prefijo: string; digitos: number; reinicioAnual: boolean; ultimo: number; siguiente: string }
 interface DatosEmpresa { razonSocial: string; nit: string; configuracion: Config; consecutivos: Consecutivo[] }
@@ -37,6 +39,29 @@ interface Texto { id: string; codigo: string; version: number; titulo: string; t
 interface GrupoTexto { codigo: string; vigente: Texto | null; historial: { id: string; version: number; vigenteDesde: string; activo: boolean; revisado: boolean; creadoPor: { nombre: string } | null }[] }
 const DOCUMENTO = { MANIFIESTO: 'Manifiestos (y recibos)', ACTA: 'Certificados', INSPECCION: 'Inspecciones vehiculares', CERT_COMERCIAL: 'Certificados comerciales', COTIZACION: 'Cotizaciones' };
 const area = 'min-h-[120px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+
+/** Mesa de ayuda (gerencia, 20-11-2026): el contacto que aparece en la ayuda de la app del conductor y del portal de clientes. */
+function AyudaCard({ c, setC, edita, guardar }: { c: Config; setC: (f: (s: Config) => Config) => void; edita: boolean; guardar: () => Promise<void> }) {
+  const campo = c.ayuda?.campo ?? {}, clientes = c.ayuda?.clientes ?? {};
+  const set = (quien: 'campo' | 'clientes', k: string, v: string) => setC((s) => ({ ...s, ayuda: { ...s.ayuda, [quien]: { ...s.ayuda?.[quien], [k]: v } } }));
+  const campos = (quien: 'campo' | 'clientes', x: Record<string, string | undefined>, conCorreo: boolean) => (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <Field label="Nombre" id={`em-ay-${quien}-n`}><Input id={`em-ay-${quien}-n`} disabled={!edita} value={x.nombre ?? ''} maxLength={80} onChange={(e) => set(quien, 'nombre', e.target.value)} placeholder={quien === 'campo' ? 'Coordinador de turno' : 'Servicio al cliente'} /></Field>
+      <Field label="Teléfono" id={`em-ay-${quien}-t`}><Input id={`em-ay-${quien}-t`} disabled={!edita} inputMode="tel" value={x.telefono ?? ''} maxLength={30} onChange={(e) => set(quien, 'telefono', e.target.value)} /></Field>
+      <Field label="WhatsApp" id={`em-ay-${quien}-w`}><Input id={`em-ay-${quien}-w`} disabled={!edita} inputMode="tel" value={x.whatsapp ?? ''} maxLength={30} onChange={(e) => set(quien, 'whatsapp', e.target.value)} /></Field>
+      {conCorreo && <Field label="Correo" id={`em-ay-${quien}-c`}><Input id={`em-ay-${quien}-c`} disabled={!edita} type="email" value={x.correo ?? ''} maxLength={150} onChange={(e) => set(quien, 'correo', e.target.value)} /></Field>}
+    </div>
+  );
+  return (
+    <Card title="Mesa de ayuda" action={edita && <Button size="sm" variant="primary" onClick={() => void guardar()}><Save size={14} /> Guardar</Button>}>
+      <p className="mb-3 text-[13px] text-muted">El contacto que aparece en la ayuda de cada módulo, con botones para llamar o escribir por WhatsApp.</p>
+      <p className="mb-2 text-[13px] font-semibold">App del conductor (el coordinador)</p>
+      {campos('campo', campo, false)}
+      <p className="mb-2 mt-4 text-[13px] font-semibold">Portal de clientes</p>
+      {campos('clientes', clientes, true)}
+    </Card>
+  );
+}
 
 /** Correo diario de alertas: a cada persona de la oficina, las de su rol (Cumplimiento a HSEQ, Flota a Logística, Facturación a Comercial y Facturación…). */
 function ResumenDiarioCard({ c, setC, edita, guardar }: { c: Config; setC: (f: (s: Config) => Config) => void; edita: boolean; guardar: () => Promise<void> }) {
@@ -232,6 +257,7 @@ export function EmpresaServidor() {
         </Card>
 
         <ResumenDiarioCard c={c} setC={setC} edita={edita} guardar={guardarConfig} />
+        <AyudaCard c={c} setC={setC} edita={edita} guardar={guardarConfig} />
 
         <GpsCard c={c} setC={setC} edita={edita} />
         <AccesosCard guardados={c.accesosRapidos} edita={edita} alGuardar={(accesosRapidos) => setC((s) => ({ ...s, accesosRapidos }))} />
