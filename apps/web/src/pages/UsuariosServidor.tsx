@@ -15,6 +15,8 @@ interface Usuario {
   licenciaCat: string | null; licenciaVence: string | null; cursoMpVence: string | null; ultimoLogin: string | null; createdAt: string; datosAceptadosEn: string | null;
   /** Desde cuándo tiene activa la verificación en dos pasos (null: sin configurar). */
   totpActivoDesde: string | null;
+  /** «Olvidé mi contraseña» sin correo de salida: pidió un enlace y espera que se lo envíen (estándar 2 del ERP). */
+  restablecerPedidoEn?: string | null;
   rol: { id: string; nombre: string };
 }
 /** Roles de Ajustes › Roles (los del portal de clientes no se dan aquí: son de los usuarios de cada cliente). */
@@ -58,6 +60,7 @@ export function UsuariosServidor() {
       <span className="flex flex-wrap gap-1">
         {u.bloqueado ? <Badge tone="bad"><Lock size={11} /> Bloqueado</Badge> : <Badge tone={u.activo ? 'ok' : 'neutral'}>{u.activo ? 'Activo' : 'Inactivo'}</Badge>}
         {u.totpActivoDesde && <span title="Tiene activa la verificación en dos pasos"><Badge tone="info"><ShieldCheck size={11} /> 2 pasos</Badge></span>}
+        {u.restablecerPedidoEn && <span title="Usó «Olvidé mi contraseña»: envíele el enlace desde su ficha"><Badge tone="warn"><KeyRound size={11} /> Pidió contraseña nueva</Badge></span>}
       </span>
     ), priority: 3 },
   ];
@@ -74,7 +77,7 @@ export function UsuariosServidor() {
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
         : !lista.filas ? <p className="p-6 text-center text-muted">Cargando…</p>
         : <ResponsiveTable rows={lista.filas} columns={cols} rowKey={(u) => u.id} onRowClick={(u) => setPanel({ usuario: u })} cardTitle={(u) => u.nombre}
-            cardBadge={(u) => <Badge>{u.rol.nombre}</Badge>} cardMeta={(u) => `${u.email}${u.bloqueado ? ' · bloqueado' : !u.activo ? ' · inactivo' : ''}${u.totpActivoDesde ? ' · verificación en dos pasos' : ''}`}
+            cardBadge={(u) => <Badge>{u.rol.nombre}</Badge>} cardMeta={(u) => `${u.email}${u.bloqueado ? ' · bloqueado' : !u.activo ? ' · inactivo' : ''}${u.totpActivoDesde ? ' · verificación en dos pasos' : ''}${u.restablecerPedidoEn ? ' · pidió contraseña nueva' : ''}`}
             footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} empty="No hay usuarios con estos filtros." />}
 
       {r && (
@@ -166,10 +169,15 @@ function FormUsuario({ u, roles, listo }: { u?: Usuario; roles: RolLista[]; list
           <span><span className="font-medium">Usuario activo</span><br /><span className="text-muted">{yo ? 'Nadie se inactiva a sí mismo.' : 'Inactivo no se borra: no puede ingresar y sus sesiones se cierran de inmediato.'}</span></span>
         </label>
       )}
+      {u?.restablecerPedidoEn && u.activo && (
+        <p className="rounded-lg bg-warn/10 px-3 py-2 text-[13px] text-warn" role="status">
+          Pidió restablecer su contraseña el {fechaHoraCo(u.restablecerPedidoEn)}. Envíele el enlace: con él crea una contraseña nueva.
+        </p>
+      )}
       {u && (u.bloqueado || u.activo || puede2fa) && (
         <div className="flex flex-wrap gap-2">
           {u.bloqueado && <Button type="button" size="sm" onClick={() => enviar({ desbloquear: true }, `${u.nombre} desbloqueado: ya puede intentar ingresar.`)}><Unlock size={14} /> Desbloquear</Button>}
-          {u.activo && <Button type="button" size="sm" variant="ghost" onClick={reenviar}><Mail size={14} /> Reenviar invitación</Button>}
+          {u.activo && <Button type="button" size="sm" variant={u.restablecerPedidoEn ? 'primary' : 'ghost'} onClick={reenviar}><Mail size={14} /> {u.restablecerPedidoEn ? 'Enviar enlace de contraseña nueva' : 'Reenviar invitación'}</Button>}
           {puede2fa && !restablecer2fa && <Button type="button" size="sm" variant="ghost" onClick={() => setRestablecer2fa(true)}><ShieldOff size={14} /> Restablecer verificación en dos pasos</Button>}
         </div>
       )}

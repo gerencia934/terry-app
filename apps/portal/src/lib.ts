@@ -35,6 +35,8 @@ export interface Yo {
 export interface CuentaAdmin {
   id: string; email: string; nombre: string; esAdmin: boolean; activa: boolean; conClave: boolean; conCodigo: boolean;
   ultimoIngreso: string | null; creadaEn: string; modulos: IdModulo[];
+  /** «Olvidé mi contraseña» sin atender: cuándo la pidió. */
+  restablecerPedidoEn?: string | null;
 }
 export const NOMBRES_MODULOS: Record<IdModulo, string> = { residuos: 'Residuos', mantenimiento: 'Mantenimiento', crm: 'CRM Comercial', planta: 'Planta' };
 

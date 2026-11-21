@@ -28,6 +28,8 @@ const Configuracion = z.object({
   rcd: z.object({ numeroGestor: z.string().trim().max(60) }).partial().optional(),
   // Exigir la verificación en dos pasos al personal (en producción se exige siempre)
   dobleFactorObligatorio: z.boolean().optional(),
+  // Estándar 1 del ERP: la sesión queda abierta en cada equipo hasta que la persona salga o pase este tiempo sin usarla
+  sesionDias: z.number().int().min(1).max(730).optional(),
   // Cartera: en el portal, retener la descarga de los certificados con facturas vencidas y sin pagar (sí, si falta)
   cartera: z.object({ retenerCertificados: z.boolean(), diasGracia: z.number().int().min(0).max(365) }).partial().optional(),
   // Correo diario de alertas por rol: si va (sí, si falta) y a qué hora de Colombia (7, si falta)

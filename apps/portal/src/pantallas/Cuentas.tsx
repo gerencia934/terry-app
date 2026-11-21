@@ -42,6 +42,7 @@ export function Cuentas() {
                     {!c.activa && <Badge tone="bad">Inactiva</Badge>}
                     {c.activa && !c.conClave && <Badge tone="warn">Sin contraseña todavía</Badge>}
                     {c.activa && c.conClave && !c.conCodigo && <Badge tone="warn">Falta la verificación en dos pasos</Badge>}
+                    {c.activa && c.restablecerPedidoEn && <Badge tone="warn">Pidió contraseña nueva: envíele un enlace</Badge>}
                   </p>
                   <p className="truncate text-[13px] text-muted">{c.email} · último ingreso: {fechaHora(c.ultimoIngreso)}</p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">

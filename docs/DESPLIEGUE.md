@@ -80,6 +80,7 @@ El portal (`apps/portal`) da una sola entrada a todos los módulos y les entrega
 | Pantallas y servidor | Cloudflare Pages, proyecto `terry-portal`: funciones en `functions/` y código en `servidor/` |
 | Base | Neon, proyecto `terry-portal` (Virginia, PostgreSQL 16), base `portal`, usuario `portal_app` (solo datos) |
 | Claves (solo en Cloudflare) | `DATABASE_URL`, `PORTAL_SECRETO` (pimienta y cifrado) y `PORTAL_CLAVE_PRIVADA` (firma de los pases) |
+| Sesión | Un año sin uso y se renueva con cada uso (estándar 1 del ERP); se cambia con la variable `SESION_DIAS` |
 | Clave pública | En `PORTAL_CLAVE_PUBLICA` de cada módulo (para Residuos, en `despliegue/cloudflare/api/wrangler.jsonc`) |
 | Publicación | Trabajo «Publicar el portal Terry-App» de `publicar.yml`, aparte del de Residuos |
 | Dirección | `app.terravivasas.net`: ya está agregada en Pages; falta el CNAME `app` → `terry-portal.pages.dev` en Hostinger |

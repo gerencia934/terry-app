@@ -20,6 +20,8 @@ export interface Entorno {
   /** Módulos que ya aceptan el pase, separados por coma (los demás se abren con su propia entrada). */
   MODULOS_SSO?: string;
   MODULO_RESIDUOS_URL?: string; MODULO_MANTENIMIENTO_URL?: string; MODULO_CRM_URL?: string; MODULO_PLANTA_URL?: string;
+  /** Días sin uso antes de pedir la contraseña otra vez (estándar 1 del ERP; si falta, un año). */
+  SESION_DIAS?: string;
 }
 
 interface Contexto { req: Request; env: Entorno; db: Db; k: Llaves; pase: ClavePase; url: URL; portal: string; ip: string; agente: string }
@@ -30,7 +32,11 @@ interface Cuenta {
 interface Sesion { id: string; cuenta: { id: string; email: string; nombre: string; es_admin: boolean; totp_desde: Date | string | null } }
 
 const COOKIE = '__Host-tv_portal';
-const SESION_HORAS = 12;
+// Estándar 1 del ERP Terry-App: la sesión no se cae. Queda abierta en el equipo mientras se use y vence tras SESION_DIAS
+// sin uso (cada uso corre el plazo, a lo sumo una escritura al día). La cookie dura lo máximo que aceptan los navegadores.
+const SESION_DIAS = 365;
+const COOKIE_DIAS = 400;
+const diasSesion = (c: Contexto) => Math.min(730, Math.max(1, Math.trunc(Number(c.env.SESION_DIAS) || SESION_DIAS)));
 const MAX_INTENTOS = 5;
 const BLOQUEO_MIN = 15;
 const ENLACE_HORAS = 72;
@@ -89,6 +95,7 @@ async function enrutar(c: Contexto, ruta: string): Promise<Response> {
     case 'POST codigo/iniciar': return codigoIniciar(c);
     case 'POST codigo/confirmar': return codigoConfirmar(c);
     case 'POST clave/crear': return claveCrear(c);
+    case 'POST olvide': return olvide(c);
     case 'POST salir': return salir(c);
     case 'GET yo': return yo(c);
     case 'POST pase': return pase(c);
@@ -154,6 +161,21 @@ async function intentoFallido(c: Contexto, x: Cuenta, tipo: string) {
 }
 
 // --- Ingreso
+/**
+ * «Olvidé mi contraseña» (estándar 2 del ERP): la solicitud le aparece a los administradores del portal en Cuentas, que
+ * envían el enlace por WhatsApp (el correo del portal todavía no está conectado). Responde igual exista o no el correo.
+ */
+async function olvide(c: Contexto) {
+  const b = await cuerpo(c);
+  const email = texto(b.email, 150).toLowerCase();
+  if (!correoValido(email)) throw fallo(400, 'Escriba un correo válido.');
+  await limite(c, `ip:${c.ip}`, 40, 15);
+  await limite(c, `olvide:${email}`, 3, 60);
+  const x = (await c.db.q<Cuenta>(`SELECT ${COLUMNAS} FROM cuentas WHERE email = $1`, [email]))[0];
+  if (x?.activa) await evento(c, 'PIDE_RESTABLECER', x.id);
+  return json({ mensaje: 'Si el correo está registrado, el administrador del portal recibió su solicitud y le enviará por WhatsApp un enlace para crear una contraseña nueva.' }, 202);
+}
+
 async function salud(c: Contexto) {
   let base = 'conectada';
   try { await c.db.q('SELECT 1'); } catch { base = 'sin-respuesta'; }
@@ -213,11 +235,11 @@ async function comprobarCodigo(c: Contexto, x: Cuenta, codigo: string): Promise<
 async function abrirSesion(c: Contexto, x: Cuenta, detalle: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   const id = crypto.randomUUID();
   const secreto = b64u(aleatorio(32));
-  await c.db.q(`INSERT INTO sesiones (id, cuenta_id, secreto_hash, expira_en, ip, agente) VALUES ($1, $2, $3, now() + make_interval(hours => $4::int), $5, $6)`,
-    [id, x.id, await sha256Hex(secreto), SESION_HORAS, c.ip || null, c.agente || null]);
+  await c.db.q(`INSERT INTO sesiones (id, cuenta_id, secreto_hash, expira_en, ip, agente) VALUES ($1, $2, $3, now() + make_interval(days => $4::int), $5, $6)`,
+    [id, x.id, await sha256Hex(secreto), diasSesion(c), c.ip || null, c.agente || null]);
   await c.db.q(`UPDATE cuentas SET intentos_fallidos = 0, bloqueada_hasta = NULL, ultimo_ingreso = now() WHERE id = $1`, [x.id]);
   await evento(c, 'INGRESO', x.id, { ...detalle, agente: c.agente.slice(0, 120) });
-  return json({ ok: true, ...extra }, 200, { 'set-cookie': cookie(`${id}.${secreto}`, SESION_HORAS * 3600) });
+  return json({ ok: true, ...extra }, 200, { 'set-cookie': cookie(`${id}.${secreto}`, COOKIE_DIAS * 86_400) });
 }
 
 async function ingresarConCodigo(c: Contexto) {
@@ -293,6 +315,9 @@ async function sesion(c: Contexto): Promise<Sesion> {
        FROM sesiones s JOIN cuentas c ON c.id = s.cuenta_id
       WHERE s.id = $1 AND s.revocada_en IS NULL AND s.expira_en > now() AND c.activa`, [id]);
   if (!s || !iguales(s.secreto_hash, await sha256Hex(secreto))) throw sinSesion;
+  // Cada uso corre el plazo de la sesión (a lo sumo una vez al día)
+  await c.db.q(`UPDATE sesiones SET expira_en = now() + make_interval(days => $2::int)
+                 WHERE id = $1 AND expira_en < now() + make_interval(days => $2::int) - interval '1 day'`, [s.id, diasSesion(c)]);
   return { id: s.id, cuenta: { id: s.cuenta_id, email: s.email, nombre: s.nombre, es_admin: s.es_admin, totp_desde: s.totp_desde } };
 }
 async function administrador(c: Contexto) {
@@ -393,11 +418,14 @@ async function cuentasListar(c: Contexto) {
   await administrador(c);
   const filas = await c.db.q<Record<string, unknown>>(`
     SELECT c.id, c.email, c.nombre, c.es_admin, c.activa, c.clave_hash IS NOT NULL AS con_clave, c.totp_secreto IS NOT NULL AS con_codigo,
-           c.ultimo_ingreso, c.creada_en, coalesce((SELECT array_agg(a.modulo ORDER BY a.modulo) FROM accesos a WHERE a.cuenta_id = c.id), '{}') AS modulos
+           c.ultimo_ingreso, c.creada_en, coalesce((SELECT array_agg(a.modulo ORDER BY a.modulo) FROM accesos a WHERE a.cuenta_id = c.id), '{}') AS modulos,
+           -- «Olvidé mi contraseña» que nadie ha atendido (después del último enlace)
+           (SELECT max(e.fecha) FROM eventos e WHERE e.cuenta_id = c.id AND e.tipo = 'PIDE_RESTABLECER'
+               AND e.fecha > coalesce((SELECT max(l.creado_en) FROM enlaces l WHERE l.cuenta_id = c.id), '-infinity'::timestamptz)) AS restablecer_pedido_en
       FROM cuentas c ORDER BY c.activa DESC, c.nombre`);
   return json(filas.map((f) => ({
     id: f.id, email: f.email, nombre: f.nombre, esAdmin: f.es_admin, activa: f.activa, conClave: f.con_clave, conCodigo: f.con_codigo,
-    ultimoIngreso: f.ultimo_ingreso, creadaEn: f.creada_en, modulos: f.modulos,
+    ultimoIngreso: f.ultimo_ingreso, creadaEn: f.creada_en, modulos: f.modulos, restablecerPedidoEn: f.restablecer_pedido_en ?? null,
   })));
 }
 

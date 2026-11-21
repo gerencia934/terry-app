@@ -20,6 +20,8 @@ interface Config {
   rcd?: { numeroGestor?: string };
   /** Exigir la verificación en dos pasos a todo el personal (en producción se exige siempre). */
   dobleFactorObligatorio?: boolean;
+  /** Estándar 1 del ERP: la sesión queda abierta en cada equipo hasta que la persona salga o pase este tiempo sin usarla. */
+  sesionDias?: number;
   /** Portal: los certificados con facturas vencidas y sin pagar se descargan al registrar el pago (sí, si falta). */
   cartera?: { retenerCertificados?: boolean; diasGracia?: number };
   /** Certificado comercial: cargo con que firma el representante legal (por omisión, Gerente General) y correo bajo la firma. */
@@ -175,6 +177,17 @@ export function EmpresaServidor() {
     } catch (e) { toast(msg(e), 'warn'); }
     setGuardando2fa(false);
   };
+  // Sesión: días sin uso antes de pedir la contraseña otra vez (solo esta clave, sin recargar el formulario de arriba)
+  const [sesionDias, setSesionDias] = useState('');
+  useEffect(() => { setSesionDias(String(d.datos?.configuracion?.sesionDias ?? 365)); }, [d.datos]);
+  const guardarSesionDias = async () => {
+    const n = Math.max(1, Math.min(730, Math.trunc(Number(sesionDias) || 365)));
+    try {
+      await api('/empresa/configuracion', { metodo: 'PATCH', cuerpo: { sesionDias: n } });
+      setC((s) => ({ ...s, sesionDias: n })); setSesionDias(String(n));
+      toast(`Listo: la sesión queda abierta hasta ${n} días sin usar la app. Aplica desde la próxima renovación de cada equipo.`, 'ok');
+    } catch (e) { toast(msg(e), 'warn'); }
+  };
   // Cartera: solo esta clave, sin recargar el formulario de arriba
   const [diasGracia, setDiasGracia] = useState('');
   useEffect(() => { setDiasGracia(String(d.datos?.configuracion?.cartera?.diasGracia ?? 0)); }, [d.datos]);
@@ -310,6 +323,14 @@ export function EmpresaServidor() {
               <span className="mt-1 block text-muted">Además de la contraseña, cada persona de Terra Viva escribe un código de su celular que cambia cada 30 segundos. Quien no la tenga, la configura en su próximo ingreso. En el sistema definitivo se exige siempre; aquí puede empezar a exigirla desde ya. A los usuarios del portal de clientes no se les exige: la activan si quieren.</span>
             </span>
           </label>
+          <div className="mt-3 rounded-xl border border-line p-3 text-[13px]">
+            <p className="font-medium">La sesión no se cierra sola</p>
+            <p className="mt-1 text-muted">Cada equipo queda con la sesión abierta mientras se use, aunque la app quede en segundo plano: así no se pierden los avisos. Se pide la contraseña otra vez solo si la persona sale, cambia su contraseña, el administrador la inactiva o pasa este tiempo sin usar la app.</p>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <Field label="Días sin uso" id="em-sd"><Input id="em-sd" type="number" min={1} max={730} className="w-28" disabled={!edita} value={sesionDias} onChange={(e) => setSesionDias(e.target.value)} /></Field>
+              {edita && Number(sesionDias) !== (c.sesionDias ?? 365) && <Button size="sm" onClick={() => void guardarSesionDias()}>Guardar</Button>}
+            </div>
+          </div>
         </Card>
       </div>
 

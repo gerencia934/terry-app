@@ -7,6 +7,7 @@ import { hash, verify } from '@node-rs/argon2';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Correo } from '../common/servicios';
+import { Notificaciones } from '../notificaciones/notificaciones.module';
 import type { Actor } from '../common/http';
 import type { Config } from '../config';
 import { verificarPase } from './portal';
@@ -14,6 +15,9 @@ import { cifrar, codigoRespaldo, descifrar, desdeBase32, normalRespaldo, pasoDel
 
 const MAX_INTENTOS = 5;
 const BLOQUEO_MIN = 15;
+// Si dos pestañas renuevan casi a la vez, la segunda llega con un token ya rotado: no es un robo, no se cierra nada
+const GRACIA_REUSO_SEG = 60;
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const iguales = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 // Parámetros argon2id recomendados por OWASP (19 MiB, 2 iteraciones).
@@ -28,7 +32,7 @@ export class AuthService {
   private readonly claveDesafio: string;
   private readonly pimienta: string;
   constructor(private readonly db: PrismaService, private readonly jwt: JwtService, private readonly cfg: ConfigService<Config, true>,
-    private readonly audit: Auditoria, private readonly correo: Correo) {
+    private readonly audit: Auditoria, private readonly correo: Correo, private readonly avisos: Notificaciones) {
     // Claves propias de la verificación en dos pasos, distintas de la de las sesiones
     const base = this.cfg.get('CLAVE_2FA', { infer: true }) || `${this.cfg.get('JWT_SECRET', { infer: true })}:2fa`;
     this.claveTotp = createHash('sha256').update(`${base}:totp`).digest();
@@ -243,7 +247,10 @@ export class AuthService {
   private async emitir(usuarioId: string, meta: { ip?: string; ua?: string }, viaPortal = false) {
     const u = await this.db.usuario.findUniqueOrThrow({ where: { id: usuarioId }, include: { rol: { include: { permisos: { include: { permiso: true } } } }, empresa: true, clientePortal: { select: { id: true, razonSocial: true, nit: true, activo: true } } } });
     const secreto = randomBytes(32).toString('base64url');
-    const sesion = await this.db.sesion.create({ data: { usuarioId, tokenHash: sha256(secreto), ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), viaPortal, expiraEn: new Date(Date.now() + this.cfg.get('REFRESH_DIAS', { infer: true }) * 86_400_000) } });
+    // Estándar 1 del ERP: la sesión queda abierta mientras se use. Cada renovación corre el plazo; vence tras estos días
+    // sin uso (Ajustes › Datos de la empresa › Seguridad del ingreso; si no se fijó, REFRESH_DIAS: un año)
+    const dias = (u.empresa.configuracion as { sesionDias?: number } | null)?.sesionDias ?? this.cfg.get('REFRESH_DIAS', { infer: true }) ?? 365;
+    const sesion = await this.db.sesion.create({ data: { usuarioId, tokenHash: sha256(secreto), ip: meta.ip?.slice(0, 64), userAgent: meta.ua?.slice(0, 300), viaPortal, expiraEn: new Date(Date.now() + dias * 86_400_000) } });
     // Un usuario del portal no lleva permisos de oficina, aunque su rol los tuviera
     const permisos = u.clienteId ? [] : u.rol.permisos.map((p) => p.permiso.codigo);
     // Ley 1581: sin la versión vigente de la política aceptada, el token solo sirve para aceptarla (ver el guard)
@@ -266,24 +273,57 @@ export class AuthService {
     };
   }
 
-  /** Rota el token de renovación. Si alguien reutiliza uno ya usado, se cierran todas las sesiones del usuario. */
+  /**
+   * Rota el token de renovación. La sesión no se cierra mientras se use (estándar 1 del ERP, igual que Mantenimiento):
+   * - Si la respuesta de una renovación se perdió (señal del celular, servidor reiniciando) y el equipo vuelve con el
+   *   token anterior, se le entrega uno nuevo a partir del reemplazo que nunca alcanzó a usar.
+   * - Si otra pestaña acaba de renovar (menos de 60 s), responde YA_RENOVADA: la app toma la sesión de esa pestaña.
+   * - Solo si el reemplazo ya se usó y vuelve el token viejo pasado ese margen (posible robo) se cierran todas las sesiones.
+   * - Si la sesión se cerró a propósito (salir, cambio de clave, entrada desde el portal en otra pestaña) pide ingresar.
+   */
   async renovar(token: string, meta: { ip?: string; ua?: string }) {
     const [id, secreto] = token.split('.');
     const s = id && secreto ? await this.db.sesion.findUnique({ where: { id } }).catch(() => null) : null;
     if (!s || !iguales(s.tokenHash, sha256(secreto))) throw new UnauthorizedException({ mensaje: 'Sesión inválida. Ingrese de nuevo.' });
-    if (s.revocadaEn) {
-      // Solo es sospechoso reusar un token que ya se cambió por otro al renovar: pudo ser robado. El de una sesión que
-      // simplemente se cerró (salida, entrada desde el portal en otra pestaña, cambio de clave…) solo ya no sirve.
-      if (s.cerradaPor !== 'ROTACION') throw new UnauthorizedException({ mensaje: 'La sesión fue cerrada. Ingrese de nuevo.' });
-      await this.db.sesion.updateMany({ where: { usuarioId: s.usuarioId, revocadaEn: null }, data: { revocadaEn: new Date(), cerradaPor: 'REUSO' } });
-      await this.audit.registrar({ id: s.usuarioId }, 'sesion', s.id, 'REUSO_TOKEN');
-      throw new UnauthorizedException({ mensaje: 'Por seguridad se cerraron todas sus sesiones. Ingrese de nuevo.' });
-    }
     if (s.expiraEn < new Date()) throw new UnauthorizedException({ mensaje: 'La sesión venció. Ingrese de nuevo.' });
-    const u = await this.db.usuario.findUnique({ where: { id: s.usuarioId } });
+    if (!s.revocadaEn && (await this.tomar(s.id))) return this.rotar(s.id, s.usuarioId, meta, s.viaPortal);
+
+    // El token ya se usó o la sesión se cerró: se mira qué pasó con su reemplazo
+    let actual = await this.db.sesion.findUniqueOrThrow({ where: { id: s.id } });
+    if (actual.cerradaPor !== 'ROTACION') throw new UnauthorizedException({ mensaje: 'La sesión fue cerrada. Ingrese de nuevo.' });
+    // Otra petición la acaba de tomar y está emitiendo el reemplazo: se espera un instante a que lo anote
+    for (let i = 0; i < 10 && !actual.reemplazadaPorId && actual.revocadaEn && Date.now() - actual.revocadaEn.getTime() < 5000; i++) {
+      await esperar(200);
+      actual = await this.db.sesion.findUniqueOrThrow({ where: { id: s.id } });
+    }
+    const sucesora = actual.reemplazadaPorId ? await this.db.sesion.findUnique({ where: { id: actual.reemplazadaPorId } }) : null;
+    if (sucesora && !sucesora.revocadaEn && sucesora.expiraEn > new Date() && (await this.tomar(sucesora.id))) {
+      const nueva = await this.rotar(sucesora.id, s.usuarioId, meta, sucesora.viaPortal);
+      await this.audit.registrar({ id: s.usuarioId }, 'sesion', sucesora.id, 'SESION_RECUPERADA', undefined, { ip: meta.ip }).catch(() => undefined);
+      return nueva;
+    }
+    // El reemplazo se cerró a propósito (salir, cambio de clave): la sesión ya no sirve, sin sospecha de robo
+    if (sucesora?.revocadaEn && sucesora.cerradaPor !== 'ROTACION') throw new UnauthorizedException({ mensaje: 'La sesión fue cerrada. Ingrese de nuevo.' });
+    if (actual.revocadaEn && Date.now() - actual.revocadaEn.getTime() < GRACIA_REUSO_SEG * 1000) {
+      throw new UnauthorizedException({ mensaje: 'La sesión ya se renovó en otra pestaña.', codigo: 'YA_RENOVADA' });
+    }
+    await this.db.sesion.updateMany({ where: { usuarioId: s.usuarioId, revocadaEn: null }, data: { revocadaEn: new Date(), cerradaPor: 'REUSO' } });
+    await this.audit.registrar({ id: s.usuarioId }, 'sesion', s.id, 'REUSO_TOKEN', undefined, { ip: meta.ip });
+    throw new UnauthorizedException({ mensaje: 'Por seguridad se cerraron todas sus sesiones. Ingrese de nuevo.' });
+  }
+
+  /** Marca la sesión como usada solo si nadie más la tomó en el mismo instante (dos pestañas a la vez). */
+  private async tomar(id: string) {
+    return (await this.db.sesion.updateMany({ where: { id, revocadaEn: null }, data: { revocadaEn: new Date(), cerradaPor: 'ROTACION' } })).count === 1;
+  }
+
+  /** Emite la sesión siguiente y la anota como reemplazo de la anterior. Cada renovación corre el plazo. */
+  private async rotar(anteriorId: string, usuarioId: string, meta: { ip?: string; ua?: string }, viaPortal: boolean) {
+    const u = await this.db.usuario.findUnique({ where: { id: usuarioId } });
     if (!u?.activo) throw new UnauthorizedException({ mensaje: 'Usuario inactivo.' });
-    await this.db.sesion.update({ where: { id: s.id }, data: { revocadaEn: new Date(), cerradaPor: 'ROTACION' } });
-    return this.emitir(s.usuarioId, meta, s.viaPortal);
+    const nueva = await this.emitir(usuarioId, meta, viaPortal); // conserva la marca del portal (2FA hecha allá)
+    await this.db.sesion.update({ where: { id: anteriorId }, data: { reemplazadaPorId: nueva.refreshToken.split('.')[0] } });
+    return nueva;
   }
 
   /** Acepta la política de datos vigente: queda registrada (versión, fecha, IP) y se entrega una sesión nueva. */
@@ -338,16 +378,30 @@ export class AuthService {
       : 'Terra Viva le creó un usuario en Terry-App · Gestión de Residuos.';
     const enviada = await this.correo.enviar(u.email, u.clientePortal ? 'Portal de clientes de Terra Viva · cree su contraseña' : 'Bienvenido a Terry-App · cree su contraseña',
       `Hola ${u.nombre}:\n\n${que} Para crear su contraseña abra este enlace (vence en 72 horas y sirve una sola vez):\n${url}\n\nSi no esperaba este correo, ignórelo.`);
+    // La solicitud de «Olvidé mi contraseña», si la había, quedó atendida con este enlace
+    if (u.restablecerPedidoEn) await this.db.usuario.update({ where: { id: u.id }, data: { restablecerPedidoEn: null } });
     return { enviada, enlace: enviada ? null : url };
   }
 
   /** Lo que la pantalla de ingreso necesita saber antes de entrar (sin datos de nadie). */
   opciones() { return { correo: this.correo.configurado, portal: this.cfg.get('PORTAL_URL', { infer: true }) || null }; }
 
-  /** Siempre responde igual para no revelar si el correo existe. */
+  /**
+   * «Olvidé mi contraseña». Siempre responde igual para no revelar si el correo existe. Con correo de salida llega el
+   * enlace; sin él (estándar 2 del ERP) la solicitud queda a la vista del administrador, que recibe un aviso y envía el
+   * enlace por WhatsApp desde Usuarios (al personal) o desde la ficha del cliente (al portal de clientes).
+   */
   async solicitarRecuperacion(email: string) {
     const u = await this.db.usuario.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!u || !u.activo) return;
+    if (!this.correo.configurado) {
+      await this.db.usuario.update({ where: { id: u.id }, data: { restablecerPedidoEn: new Date() } });
+      await this.audit.registrar({ id: u.id }, 'usuario', u.id, 'PIDE_RESTABLECER');
+      await this.avisos.aPermisos(u.empresaId, [u.clienteId ? 'clientes.editar' : 'configuracion.editar'], {
+        titulo: 'Solicitud de contraseña nueva', cuerpo: `${u.nombre} pidió restablecer su contraseña. Envíele el enlace por WhatsApp desde ${u.clienteId ? 'la ficha del cliente' : 'Usuarios'}.`,
+        ruta: u.clienteId ? 'clientes' : 'usuarios', etiqueta: 'restablecer' });
+      return;
+    }
     const token = randomBytes(32).toString('base64url');
     await this.db.passwordReset.create({ data: { usuarioId: u.id, tokenHash: sha256(token), expiraEn: new Date(Date.now() + 30 * 60_000) } });
     const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
@@ -359,7 +413,7 @@ export class AuthService {
     const r = await this.db.passwordReset.findFirst({ where: { tokenHash: sha256(token), usadoEn: null, expiraEn: { gt: new Date() } } });
     if (!r) throw new UnauthorizedException({ mensaje: 'El enlace no es válido o ya venció. Solicite uno nuevo.' });
     await this.db.$transaction([
-      this.db.usuario.update({ where: { id: r.usuarioId }, data: { passwordHash: await hashClave(nueva), intentosFallidos: 0, bloqueadoHasta: null } }),
+      this.db.usuario.update({ where: { id: r.usuarioId }, data: { passwordHash: await hashClave(nueva), intentosFallidos: 0, bloqueadoHasta: null, restablecerPedidoEn: null } }),
       this.db.passwordReset.update({ where: { id: r.id }, data: { usadoEn: new Date() } }),
       this.db.sesion.updateMany({ where: { usuarioId: r.usuarioId, revocadaEn: null }, data: { revocadaEn: new Date() } }),
     ]);

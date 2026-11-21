@@ -139,7 +139,8 @@ export function EntradaPortal({ pase, alTerminar }: { pase: string; alTerminar: 
 export function Recuperar() {
   const { go } = useRouter();
   const [sent, setSent] = useState(false);
-  // Sin correo configurado (SMTP), el enlace no puede llegar: el administrador lo entrega desde Usuarios y roles
+  // Sin correo configurado (SMTP) el enlace no llega solo: la solicitud le avisa al administrador, que lo envía por
+  // WhatsApp desde Usuarios (estándar 2 del ERP Terry-App)
   const [correo, setCorreo] = useState(true);
   useEffect(() => {
     if (!MODO_REAL) return;
@@ -156,24 +157,22 @@ export function Recuperar() {
     <AuthLayout>
       <button onClick={() => go('login')} className="mb-6 inline-flex items-center gap-1.5 text-[13px] font-medium text-muted hover:text-fg"><ArrowLeft size={16} /> Volver a ingresar</button>
       <h2 className="font-display text-2xl font-bold text-brand-strong">Recuperar contraseña</h2>
-      {!correo ? (
-        <div className="mt-6 rounded-xl border border-line bg-surface-2 p-5">
-          <KeyRound className="text-brand" />
-          <p className="mt-3 font-medium">Pídale el enlace a su administrador</p>
-          <p className="mt-1 text-muted">El envío de correos de la plataforma todavía no está activo. El administrador de Terry-App puede generarle un enlace para crear su contraseña desde <b>Usuarios y roles</b> y enviárselo por WhatsApp.</p>
-        </div>
-      ) : sent ? (
+      {sent ? (
         <div className="mt-6 rounded-xl border border-line bg-surface p-5">
-          <MailCheck className="text-ok" />
-          <p className="mt-3 font-medium">Revise su correo</p>
-          <p className="mt-1 text-muted">Si el correo está registrado, le llegará un enlace para crear una contraseña nueva. Sirve una sola vez y vence en 30 minutos.</p>
+          {correo ? <MailCheck className="text-ok" /> : <KeyRound className="text-brand" />}
+          <p className="mt-3 font-medium">{correo ? 'Revise su correo' : 'Solicitud enviada'}</p>
+          <p className="mt-1 text-muted">{correo
+            ? 'Si el correo está registrado, le llegará un enlace para crear una contraseña nueva. Sirve una sola vez y vence en 30 minutos.'
+            : 'Si el correo está registrado, el administrador de Terry-App ya recibió su solicitud y le enviará por WhatsApp un enlace para crear una contraseña nueva.'}</p>
         </div>
       ) : (
         <form className="mt-6 flex flex-col gap-4" onSubmit={submit}>
-          <p className="text-muted">Escriba su correo y le enviaremos un enlace para crear una contraseña nueva.</p>
+          <p className="text-muted">{correo
+            ? 'Escriba su correo y le enviaremos un enlace para crear una contraseña nueva.'
+            : 'Escriba su correo. El administrador recibirá su solicitud y le enviará por WhatsApp un enlace para crear una contraseña nueva.'}</p>
           <Field label="Correo" id="rec-email"><Input id="rec-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@terravivasas.com" /></Field>
           {err && <p className="rounded-lg bg-bad/10 px-3 py-2 text-[13px] text-bad" role="alert">{err}</p>}
-          <Button variant="primary" size="lg" type="submit">Enviar enlace</Button>
+          <Button variant="primary" size="lg" type="submit">{correo ? 'Enviar enlace' : 'Enviar solicitud'}</Button>
         </form>
       )}
     </AuthLayout>
