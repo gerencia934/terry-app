@@ -19,6 +19,8 @@ import { EnlaceAccesoHost } from '../../components/EnlaceAcceso';
 export interface SedePortal { id: string; codigo: string | null; nombre: string; municipio?: { nombre: string } | null }
 export interface YoPortal {
   usuario: { nombre: string; email: string; perfilPortal: 'ADMIN' | 'CONSULTA' };
+  /** Su rol en el portal y sus funciones (las decide Terra Viva en Ajustes › Roles). */
+  rol: { id: string; nombre: string }; permisos: string[];
   cliente: { id: string; razonSocial: string; nit: string; dv: string | null; tipo: 'DIRECTO' | 'GESTOR'; activo: boolean };
   perfil: 'ADMIN' | 'CONSULTA';
   /** Sedes que ve este usuario (todas las de su empresa si no está limitado). */
@@ -29,33 +31,36 @@ export interface YoPortal {
   /** Vuelve a leer «quién soy» (por ejemplo, después de crear o inactivar una sede). */
   recargar?: () => void;
 }
-/** Puede pedir servicios y cargar declaraciones: perfil Administrador y cliente activo. */
-export const puedeEscribir = (yo: YoPortal) => yo.perfil === 'ADMIN' && yo.cliente.activo;
+/** Su rol tiene alguna de estas funciones. */
+export const puede = (yo: YoPortal, ...codigos: string[]) => codigos.some((c) => yo.permisos.includes(c));
+/** Puede hacerlo ahora: su rol tiene la función y su empresa está activa (inactiva solo consulta y descarga). */
+export const puedeHacer = (yo: YoPortal, ...codigos: string[]) => yo.cliente.activo && puede(yo, ...codigos);
 const Ctx = createContext<YoPortal | null>(null);
 /** Quién está en el portal: su empresa, su perfil y las sedes que puede ver. */
 export const usePortal = () => useContext(Ctx)!;
 export const nitConDv = (c: { nit: string; dv: string | null }) => (c.dv ? `${c.nit}-${c.dv}` : c.nit);
 export const PERFIL: Record<'ADMIN' | 'CONSULTA', string> = { ADMIN: 'Administrador', CONSULTA: 'Consulta' };
 
-interface Item { route: RouteName; label: string; icon: LucideIcon; soloAdmin?: boolean }
+/** Cada sección se ve si su rol tiene alguna de esas funciones (Inicio, siempre). */
+interface Item { route: RouteName; label: string; icon: LucideIcon; funciones?: string[] }
 const MENU: Item[] = [
   { route: 'portal', label: 'Inicio', icon: Home },
-  { route: 'portal-sedes', label: 'Sedes', icon: Building2 },
-  { route: 'portal-declaraciones', label: 'Declaraciones', icon: FileText },
-  { route: 'portal-solicitudes', label: 'Solicitudes', icon: Truck },
-  { route: 'portal-manifiestos', label: 'Manifiestos', icon: FileStack },
-  { route: 'portal-certificados', label: 'Certificados', icon: Award },
-  { route: 'portal-informes', label: 'Informes', icon: BarChart3 },
-  { route: 'portal-usuarios', label: 'Usuarios', icon: UserCog, soloAdmin: true },
+  { route: 'portal-sedes', label: 'Sedes', icon: Building2, funciones: ['portal.sedes.ver', 'portal.sedes.gestionar'] },
+  { route: 'portal-declaraciones', label: 'Declaraciones', icon: FileText, funciones: ['portal.declaraciones.ver'] },
+  { route: 'portal-solicitudes', label: 'Solicitudes', icon: Truck, funciones: ['portal.solicitudes.ver'] },
+  { route: 'portal-manifiestos', label: 'Manifiestos', icon: FileStack, funciones: ['portal.manifiestos.ver'] },
+  { route: 'portal-certificados', label: 'Certificados', icon: Award, funciones: ['portal.certificados.ver'] },
+  { route: 'portal-informes', label: 'Informes', icon: BarChart3, funciones: ['portal.informes.ver'] },
+  { route: 'portal-usuarios', label: 'Usuarios', icon: UserCog, funciones: ['portal.usuarios.gestionar'] },
 ];
-const RUTAS = new Set<RouteName>(MENU.map((m) => m.route));
+const permitido = (yo: YoPortal | null, it: Item | undefined) => !!it && (!it.funciones || !yo || puede(yo, ...it.funciones));
 /** Cambia de sección sin dejar la anterior en el historial (el botón «atrás» no vuelve a una ruta de oficina). */
 const reemplazar = (r: RouteName) => location.replace(`#${r}`);
 
 export function PortalApp() {
   const { route } = useRouter();
   const yo = useApi<YoPortal>('/portal/yo');
-  const propia = RUTAS.has(route) && (route !== 'portal-usuarios' || !yo.datos || yo.datos.perfil === 'ADMIN');
+  const propia = permitido(yo.datos, MENU.find((m) => m.route === route));
   useEffect(() => { if (!propia) reemplazar('portal'); }, [propia]);
   if (yo.error) return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-bg p-6 text-center">
@@ -73,7 +78,7 @@ export function PortalApp() {
       case 'portal-manifiestos': return <PortalManifiestos />;
       case 'portal-certificados': return <PortalCertificados />;
       case 'portal-informes': return <PortalInformes />;
-      case 'portal-usuarios': return yo.datos.perfil === 'ADMIN' ? <PortalUsuarios /> : <PortalInicio />;
+      case 'portal-usuarios': return <PortalUsuarios />;
       default: return <PortalInicio />;
     }
   })();
@@ -88,7 +93,7 @@ function Marco({ children }: { children: ReactNode }) {
   const [cuenta, setCuenta] = useState(false);
   const [ver2fa, setVer2fa] = useState(false);
   useEffect(() => { setMenu(false); setCuenta(false); }, [route]);
-  const items = MENU.filter((m) => !m.soloAdmin || yo.perfil === 'ADMIN');
+  const items = MENU.filter((m) => permitido(yo, m));
   const actual = items.find((i) => i.route === route);
   const iniciales = yo.usuario.nombre.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
   const cerrar = async (todas: boolean) => { if (todas) await salirDeTodos(); else await salir(); go('login'); };
@@ -142,7 +147,7 @@ function Marco({ children }: { children: ReactNode }) {
                     <div className="px-3 py-2 text-[12px] text-muted">
                       <p className="text-[13px] font-medium text-fg">{yo.usuario.nombre}</p>
                       <p className="truncate">{yo.usuario.email}</p>
-                      <p>{PERFIL[yo.perfil]} · {yo.cliente.razonSocial}</p>
+                      <p>{yo.rol.nombre} · {yo.cliente.razonSocial}</p>
                     </div>
                     <button onClick={() => { setCuenta(false); setVer2fa(true); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2"><ShieldCheck size={15} className="text-brand" />Verificación en dos pasos</button>
                     <button onClick={() => cerrar(false)} className="flex w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-surface-2">Cerrar sesión</button>

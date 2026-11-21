@@ -16,10 +16,10 @@ certificado ante la CAS o el cliente.
 |---|---|---|
 | Web + app del conductor | React 18 + Vite 6 + TypeScript + Tailwind 3 | Hecho (modo demostración y modo servidor) |
 | API | NestJS 11 + Prisma 6 (monolito modular) | **Hecho — fase 1** |
-| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 87 tablas, 32 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
+| Base de datos | PostgreSQL 16 (imagen con PostGIS) | 87 tablas, 33 migraciones, reglas de toda la cadena en la base (ver `docs/operacion/MODELO_OPERACION.md`) |
 | Reglas compartidas | `packages/shared` (validaciones e importación de Excel y CSV) | Hecho |
 | Correo | Nodemailer (SMTP); sin SMTP escribe en la consola | Hecho |
-| Usuarios | `GET/POST usuarios`, `PATCH usuarios/:id`, `POST usuarios/:id/invitacion`, `GET roles` (solo administración) | Nadie escribe contraseñas: el usuario nuevo recibe una invitación de 72 horas para crear la suya; nada se borra: inactivar cierra sus sesiones al instante; nadie se inactiva ni se cambia el rol a sí mismo; desbloquear tras intentos fallidos; matriz de permisos por rol |
+| Usuarios | `GET/POST usuarios`, `PATCH usuarios/:id`, `POST usuarios/:id/invitacion`; `GET roles`, `GET roles/catalogo`, `POST roles`, `PATCH roles/:id`, `POST roles/:id/restaurar`, `DELETE roles/:id` (solo administración) | Nadie escribe contraseñas: el usuario nuevo recibe una invitación de 72 horas para crear la suya; nada se borra: inactivar cierra sus sesiones al instante; nadie se inactiva ni se cambia el rol a sí mismo; desbloquear tras intentos fallidos; roles configurables con sus funciones (Ajustes › Roles) |
 | Archivos | Carpeta local (desarrollo) o S3 / Cloudflare R2 / MinIO (`ALMACENAMIENTO=s3`; R2 también con sus nombres `R2_*`): fotos y firma de la inspección, firmas, licencias, PDF y lo que prepara la cola | Hecho (enlaces firmados de 5 minutos; R2 conectado el 19-11-2026) |
 | PDF | Gotenberg (HTML → PDF) | Fase 2 |
 | Integraciones | Siigo Nube (facturas y pagos) y Wialon (GPS de la flota), las dos solo lectura; RNDC | Siigo y Wialon hechos el 19-11-2026 (Wialon probado con un simulador: falta el token de la cuenta real); RNDC en su fase |
@@ -67,7 +67,19 @@ por minuto en cada ruta. En ingreso, recuperar y restablecer la contraseña hay 
 - 10 o 5 intentos por minuto para cada correo desde una IP;
 - un techo por IP para todos los correos juntos, `LIMITE_INGRESOS_IP_MIN` (60), contra el rociado de contraseñas.
 
-Roles iniciales: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar y Cliente (portal).
+**Roles y permisos (Ajustes › Roles, 20-11-2026, como los roles de Grinclic).** Cada rol tiene un solo acceso al
+sistema, que no cambia: OFICINA, CAMPO (conductores, auxiliares y planta) o CLIENTE (el portal de clientes, que es
+distinto de la empresa y tiene sus propias funciones `portal.*`). Las funciones que se pueden otorgar están en
+`MODULOS_PERMISOS` (`packages/shared/src/roles.ts`), por módulo y con su explicación, y cada una la exige de verdad el
+servidor (`@Permiso` en la oficina; `PortalService.exigir` en el portal, leyendo el rol de la base con 15 s de memoria).
+Los predeterminados (`ROLES_PREDETERMINADOS`: Administrador, Logística, HSEQ, Comercial, Facturación, Conductor, Auxiliar,
+«Cliente: administrador» y «Cliente: consulta») traen sus funciones marcadas, se ajustan y se restauran; se crean roles
+nuevos desde cero o copiando otro, y se borran solo si nadie los usó. La base (migración
+`20261211000000_roles_configurables`) exige que las funciones correspondan al acceso, que el Administrador conserve
+«*», que no se inactive un rol con personas activas y que cada usuario lleve un rol de su acceso (portal o empresa). En la
+oficina, un cambio de funciones rige al renovar el token (máximo 15 minutos). En el portal ya no hay perfiles fijos:
+`usuarios.perfil_portal` queda como dato derivado (ADMIN si el rol gestiona usuarios); la API sigue aceptando «perfil»,
+que elige el rol predeterminado equivalente, y quita los precios de las respuestas si el rol no tiene «ver tarifas».
 
 **Portal de clientes (requisitos de producción §2).** Un usuario del portal está ligado a un cliente (`usuarios.cliente_id`),
 con perfil **Administrador** (además carga sus declaraciones, pide y cancela servicios, e invita y gestiona a los de su

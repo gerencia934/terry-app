@@ -159,6 +159,8 @@ interface Opciones {
   sedes: { id: string; codigo: string | null; nombre: string; municipio: string | null; declaraciones: DeclPedido[] }[];
   especificaciones: { id: string; nombre: string; descripcion: string | null }[];
   destinos: { id: string; razonSocial: string }[]; arl: { id: string; nombre: string }[]; eps: { id: string; nombre: string }[];
+  /** Lo que permite su rol: recolecciones (CARGA), entregas en planta (DESCARGA) o ambas. */
+  operaciones: ('CARGA' | 'DESCARGA')[];
 }
 type Jornada = '' | 'AM' | 'PM' | 'DIA';
 interface Transporte {
@@ -213,7 +215,8 @@ export function PedirServicio({ listo, modo = 'nuevo', base, operacionInicial = 
       setFecha(sumarDias(op.hoy, 1));
     }
     if (!destinoId && op.destinos.length === 1) setDestinoId(op.destinos[0].id);
-  }, [op, fecha, base, modo, destinoId, toast]);
+    if (!base && !op.operaciones.includes(operacion) && op.operaciones.length) setOperacion(op.operaciones[0]);
+  }, [op, fecha, base, modo, destinoId, toast, operacion]);
   if (error) return <p className="rounded-xl bg-bad/10 p-4 text-bad">{error}</p>;
   if (!op || !fecha) return <p className="flex items-center gap-2 text-muted"><Loader2 size={16} className="animate-spin" />Cargando…</p>;
   if (!op.sedes.some((s) => s.declaraciones.length)) return (
@@ -260,9 +263,9 @@ export function PedirServicio({ listo, modo = 'nuevo', base, operacionInicial = 
   };
   return (
     <div className="flex flex-col gap-4">
-      {modo !== 'editar' && (
+      {modo !== 'editar' && op.operaciones.length > 1 && (
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tipo de servicio">
-          {([['CARGA', 'Recolección', 'Terra Viva recoge en sus sedes'], ['DESCARGA', 'Entrega en planta', 'Usted lleva el residuo en su vehículo']] as const).map(([v, titulo, texto]) => (
+          {([['CARGA', 'Recolección', 'Terra Viva recoge en sus sedes'], ['DESCARGA', 'Entrega en planta', 'Usted lleva el residuo en su vehículo']] as const).filter(([v]) => op.operaciones.includes(v)).map(([v, titulo, texto]) => (
             <button key={v} type="button" role="radio" aria-checked={operacion === v} onClick={() => setOperacion(v)}
               className={cx('rounded-xl border p-3 text-left text-[13px] transition-colors', operacion === v ? 'border-brand bg-brand-soft/50' : 'border-line hover:border-brand/40')}>
               <span className="flex items-center gap-1.5 font-semibold">{v === 'CARGA' ? <Truck size={15} /> : <Warehouse size={15} />}{titulo}</span>

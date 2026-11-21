@@ -32,6 +32,7 @@ import { TarifasServidor } from './pages/TarifasServidor';
 import { PermisosServidor } from './pages/PermisosServidor';
 import { FlotaServidor, InspeccionesServidor } from './pages/FlotaServidor';
 import { UsuariosServidor } from './pages/UsuariosServidor';
+import { RolesServidor } from './pages/RolesServidor';
 import { IndicadoresServidor } from './pages/IndicadoresServidor';
 import { TableroInicio } from './pages/TableroInicio';
 import { CatalogosServidor, InventarioServidor } from './pages/CatalogosServidor';
@@ -105,6 +106,7 @@ function Screen() {
       case 'empresa': return MODO_REAL ? <EmpresaServidor /> : <MisDatos />;
       case 'vehiculos': return MODO_REAL ? <FlotaServidor /> : <Vehiculos />;
       case 'usuarios': return MODO_REAL ? <UsuariosServidor /> : <Usuarios />;
+      case 'roles': return MODO_REAL ? <RolesServidor /> : <Usuarios />;
       case 'catalogos': return MODO_REAL ? <CatalogosServidor /> : <Catalogos />;
       case 'etapas': return MODO_REAL ? <CatalogosServidor inicial="etapas" /> : <Etapas />;
     }

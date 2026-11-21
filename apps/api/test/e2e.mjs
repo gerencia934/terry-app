@@ -711,9 +711,11 @@ r = await llamar('GET', '/usuarios', { token: thseq });
 prueba('usuarios: solo la administración los ve (HSEQ → 403)', r.status === 403, String(r.status));
 r = await llamar('GET', '/roles', { token: T });
 const rolesE2e = r.json;
-const rolComercialId = rolesE2e.roles?.find((x) => x.nombre === 'Comercial')?.id;
-prueba('roles con sus permisos (la matriz) y los usuarios activos de cada uno', r.status === 200 && rolesE2e.roles.find((x) => x.nombre === 'HSEQ')?.permisos.includes('importacion.revertir')
-  && rolesE2e.permisos.length > 10 && rolesE2e.roles.find((x) => x.nombre === 'Comercial')?.usuariosActivos >= 1, JSON.stringify(rolesE2e).slice(0, 300));
+const rolDe = (clave) => (Array.isArray(rolesE2e) ? rolesE2e : []).find((x) => x.clave === clave);
+const rolComercialId = rolDe('COMERCIAL')?.id;
+prueba('roles con sus funciones, su acceso (empresa, campo o portal de clientes) y las personas activas de cada uno', r.status === 200
+  && rolDe('HSEQ')?.permisos.includes('importacion.revertir') && rolDe('COMERCIAL')?.usuariosActivos >= 1 && rolDe('CONDUCTOR')?.acceso === 'CAMPO'
+  && rolDe('CLIENTE_ADMIN')?.acceso === 'CLIENTE' && rolDe('CLIENTE_CONSULTA')?.predeterminado === true, JSON.stringify(rolesE2e).slice(0, 300));
 r = await llamar('GET', '/usuarios?q=e2e', { token: T });
 prueba('…el listado busca por nombre o correo y nunca trae la contraseña', r.status === 200 && r.json.total >= 3 && !JSON.stringify(r.json).includes('passwordHash'), JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', '/usuarios', { token: T, cuerpo: { email: 'Nuevo.Comercial@terravivasas.com', nombre: 'Nuevo Comercial', documento: '1098765432', rolId: rolComercialId } });
@@ -748,6 +750,65 @@ prueba('reenviar la invitación crea un enlace nuevo (sin correo, vuelve el enla
 const rolAdminE2e = await db.rol.findFirst({ where: { nombre: 'Administrador', empresaId: cliente.empresaId } });
 await db.usuario.upsert({ where: { email: 'admin.e2e@terravivasas.com' }, update: {}, create: { empresaId: cliente.empresaId, rolId: rolAdminE2e.id, nombre: 'Administrador E2E', documento: '5', email: 'admin.e2e@terravivasas.com',
   passwordHash: await (await import('@node-rs/argon2')).hash('AdminE2E2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+
+console.log('\n5c. Roles y permisos (Ajustes › Roles, como en Grinclic)');
+const hashE2e = async (clave) => (await import('@node-rs/argon2')).hash(clave, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
+const entrarOficina = async (email, clave) => (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email, clave } })).json)).accessToken;
+r = await llamar('GET', '/roles/catalogo', { token: T });
+const catRoles = r.json;
+const funcionesDe = (acceso) => (catRoles.modulos ?? []).flatMap((m) => m.permisos.filter((p) => p.accesos.includes(acceso)).map((p) => p.codigo));
+prueba('catálogo: cada función con su módulo y su explicación; la empresa, el campo y el portal de clientes tienen funciones distintas', r.status === 200
+  && catRoles.modulos.every((m) => m.permisos.every((p) => p.nombre && p.descripcion.length > 20)) && funcionesDe('CLIENTE').length >= 10
+  && funcionesDe('CLIENTE').every((c) => c.startsWith('portal.')) && !funcionesDe('OFICINA').some((c) => c.startsWith('portal.')) && funcionesDe('CAMPO').length === 2,
+  JSON.stringify(catRoles).slice(0, 200));
+const [rr1, rr2] = await Promise.all([llamar('GET', '/roles', { token: thseq }), llamar('POST', '/roles', { token: thseq, cuerpo: { nombre: 'Intento', acceso: 'OFICINA' } })]);
+prueba('…solo quien administra la configuración ve y cambia los roles (HSEQ → 403)', rr1.status === 403 && rr2.status === 403, `${rr1.status} ${rr2.status}`);
+r = await llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Jefe de planta', descripcion: 'Recibe en planta y concilia', acceso: 'OFICINA', permisos: ['conciliaciones.gestionar', 'informes.ver'] } });
+const rolPlanta = r.json;
+prueba('crea un rol nuevo con las funciones que se le otorgan', r.status === 201 && !!rolPlanta.id, JSON.stringify(r.json));
+const [rm1, rm2, rm3, rm4] = await Promise.all([
+  llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'jefe de PLANTA', acceso: 'OFICINA' } }),
+  llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Mezclado', acceso: 'OFICINA', permisos: ['portal.sedes.ver'] } }),
+  llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Cliente mezclado', acceso: 'CLIENTE', permisos: ['finanzas.ver'] } }),
+  llamar('PATCH', `/roles/${rolDe('CONDUCTOR').id}`, { token: T, cuerpo: { permisos: ['rutas.operar', 'finanzas.ver'] } }),
+]);
+prueba('…no repite nombres ni mezcla funciones: la empresa, el campo y el portal de clientes tienen las suyas', rm1.status === 400 && rm2.status === 400 && rm3.status === 400
+  && rm4.status === 400, JSON.stringify([rm1.json?.mensaje, rm2.json?.mensaje, rm3.json?.mensaje, rm4.json?.mensaje]).slice(0, 400));
+r = await llamar('POST', '/usuarios', { token: T, cuerpo: { email: 'jefe.planta@terravivasas.com', nombre: 'Jefe de Planta E2E', documento: '1098700001', rolId: rolPlanta.id } });
+const jefePlanta = r.json;
+await db.usuario.update({ where: { id: jefePlanta.id }, data: { passwordHash: await hashE2e('JefePlanta2026!') } });
+let tJefe = await entrarOficina('jefe.planta@terravivasas.com', 'JefePlanta2026!');
+const borradorJefe = { tipo: 'RESIDUO', borrador: true, clienteId: cliente.id, nombre: 'Borrador del jefe de planta', categoriaId: formulario.categoriaId, lineaServicioId: formulario.lineaServicioId };
+const [j1, j2] = await Promise.all([
+  llamar('GET', '/informes/indicadores?desde=2026-01-01&hasta=2026-12-31', { token: tJefe }), llamar('POST', '/declaraciones', { token: tJefe, cuerpo: borradorJefe }),
+]);
+prueba('…la persona con ese rol usa lo marcado (indicadores) y no lo demás (declarar → 403)', r.status === 201 && j1.status === 200 && j2.status === 403, `${r.status} ${j1.status} ${j2.status}`);
+r = await llamar('PATCH', `/roles/${rolPlanta.id}`, { token: T, cuerpo: { permisos: ['conciliaciones.gestionar', 'informes.ver', 'declaraciones.crear'] } });
+tJefe = await entrarOficina('jefe.planta@terravivasas.com', 'JefePlanta2026!');
+const j3 = await llamar('POST', '/declaraciones', { token: tJefe, cuerpo: borradorJefe });
+prueba('…al otorgarle una función, la usa desde su siguiente ingreso o renovación (en máximo 15 minutos)', r.status === 200 && r.json.agregados?.includes('declaraciones.crear') && j3.status === 201,
+  JSON.stringify([r.json, j3.status]).slice(0, 200));
+const [ri1, ri2, ri3, ri4] = await Promise.all([
+  llamar('PATCH', `/roles/${rolPlanta.id}`, { token: T, cuerpo: { activo: false } }),
+  llamar('PATCH', `/roles/${rolDe('ADMINISTRADOR').id}`, { token: T, cuerpo: { permisos: ['configuracion.editar'] } }),
+  llamar('PATCH', `/roles/${rolDe('ADMINISTRADOR').id}`, { token: T, cuerpo: { activo: false } }),
+  llamar('POST', '/usuarios', { token: T, cuerpo: { email: 'rol.equivocado@terravivasas.com', nombre: 'Rol Equivocado', documento: '1098700002', rolId: rolDe('CLIENTE_CONSULTA').id } }),
+]);
+prueba('…un rol en uso no se inactiva; el Administrador no pierde el acceso total ni se inactiva; a la empresa no se le da un rol del portal',
+  ri1.status === 400 && ri2.status === 400 && ri3.status === 400 && ri4.status === 400, JSON.stringify([ri1.json?.mensaje, ri2.json?.mensaje, ri3.json?.mensaje, ri4.json?.mensaje]).slice(0, 400));
+const condId = rolDe('CONDUCTOR').id;
+r = await llamar('PATCH', `/roles/${condId}`, { token: T, cuerpo: { permisos: ['rutas.operar'] } });
+const restaurado = await llamar('POST', `/roles/${condId}/restaurar`, { token: T });
+const condDb = await db.rol.findUnique({ where: { id: condId }, include: { permisos: { include: { permiso: true } } } });
+prueba('…un predeterminado se ajusta y se restaura a sus funciones de fábrica (queda en la auditoría)', r.status === 200 && r.json.quitados?.includes('manifiestos.operar')
+  && restaurado.status === 200 && condDb.permisos.map((p) => p.permiso.codigo).sort().join() === 'manifiestos.operar,rutas.operar'
+  && (await db.auditoria.count({ where: { entidad: 'rol', entidadId: condId, accion: { in: ['EDITAR', 'RESTAURAR'] } } })) === 2, JSON.stringify([r.json, restaurado.json]).slice(0, 300));
+r = await llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Rol de paso', acceso: 'CAMPO', permisos: ['rutas.operar'] } });
+const [rd1, rd2, rd3] = await Promise.all([
+  llamar('DELETE', `/roles/${r.json.id}`, { token: T }), llamar('DELETE', `/roles/${condId}`, { token: T }), llamar('DELETE', `/roles/${rolPlanta.id}`, { token: T }),
+]);
+prueba('…se borra un rol que nadie usó; uno predeterminado o en uso no (se inactiva)', rd1.status === 200 && rd2.status === 400 && rd3.status === 400,
+  JSON.stringify([rd1.status, rd2.json?.mensaje, rd3.json?.mensaje]).slice(0, 300));
 
 console.log('\n6. Multiempresa (aislamiento de datos)');
 const otra = await db.empresa.upsert({ where: { nit: '800000001-1' }, update: {}, create: { nit: '800000001-1', razonSocial: 'Otra Empresa Prueba' } });
@@ -1222,8 +1283,9 @@ const [lB1, lB2, lB3, lB4, lB5] = await Promise.all([
   llamar('GET', `/portal/declaraciones?q=${encodeURIComponent(unaDeclA.nombre)}`, { token: tPB }), llamar('GET', '/portal/manifiestos', { token: tPB }),
   llamar('GET', '/portal/certificados?anio=2026', { token: tPB }), llamar('GET', '/portal/usuarios', { token: tPB }), llamar('GET', `/portal/informe?anio=${anioA}`, { token: tPB }),
 ]);
-prueba('…y en sus listados, filtros e informes no aparece nada del cliente A', lB1.json.total === 0 && lB2.json.total === 0 && lB3.json.total === 0
-  && lB4.json.every((u) => u.id !== portalA.id) && lB5.json.lineas.length === 0, JSON.stringify([lB1.json.total, lB2.json.total, lB3.json.total, lB4.json.length, lB5.json.lineas?.length]));
+prueba('…y en sus listados, filtros e informes no aparece nada del cliente A (y un usuario de consulta no ve los usuarios)', lB1.json.total === 0 && lB2.json.total === 0 && lB3.json.total === 0
+  // Los usuarios del portal los ve solo quien los gestiona (su rol): uno de consulta recibe 403
+  && lB4.status === 403 && lB5.json.lineas.length === 0, JSON.stringify([lB1.json.total, lB2.json.total, lB3.json.total, lB4.status, lB5.json.lineas?.length]));
 
 // Barrera 2: la base de datos (RLS) no deja ver otro cliente aunque la consulta lo pida.
 // PostgreSQL no aplica la RLS a un superusuario ni a un usuario con BYPASSRLS: la prueba (como producción) usa uno sin ellos.
@@ -1635,6 +1697,38 @@ const [ig1, ig2, ig3] = await Promise.all([
 prueba('…un usuario limitado a una sede ve solo su sede; el cliente B no ve nada del cliente A; máximo un año por consulta', ig1.status === 200 && ig1.json.lineas.every((l) => l.sedeCodigo === 'C002')
   && ig2.status === 200 && ig2.json.lineas.length === 0 && ig3.status === 400, JSON.stringify([ig1.json.lineas?.length, ig2.json.lineas?.length, ig3.status]));
 
+// --- Roles del portal (Ajustes › Roles): Terra Viva decide qué puede hacer cada rol de cliente
+r = await llamar('GET', '/portal/yo', { token: tPA });
+prueba('portal: «quién soy» trae su rol y sus funciones', r.status === 200 && r.json.rol?.nombre === 'Cliente: administrador' && r.json.permisos.includes('portal.entregas.pedir')
+  && r.json.perfil === 'ADMIN', JSON.stringify(r.json?.rol ?? r.json).slice(0, 200));
+r = await llamar('POST', '/roles', { token: T8, cuerpo: { nombre: 'Cliente: solo certificados', descripcion: 'Auditoría externa del cliente', acceso: 'CLIENTE', permisos: ['portal.certificados.ver'] } });
+const rolCert = r.json;
+r = await llamar('GET', '/portal/roles', { token: tPA });
+const rolesPortalB = await llamar('GET', '/portal/roles', { token: tPB });
+prueba('…el administrador del cliente ve los roles del portal que puede dar; uno de consulta no (403)', r.status === 200 && r.json.some((x) => x.id === rolCert.id)
+  && r.json.every((x) => x.permisos.every((p) => p.startsWith('portal.'))) && rolesPortalB.status === 403, JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', '/portal/usuarios', { token: tPA, cuerpo: { email: 'auditor@cliente-a.test', nombre: 'Auditor Externo A', documento: '52111000', rolId: rolCert.id } });
+const auditorA = r.json;
+await db.usuario.update({ where: { id: auditorA.id }, data: { passwordHash: await hashFijo('AuditorA2026!') } });
+const tAuditor = (await entrarPortal('auditor@cliente-a.test', 'AuditorA2026!')).accessToken;
+const [au1, au2, au3, au4] = await Promise.all([
+  llamar('GET', '/portal/certificados', { token: tAuditor }), llamar('GET', '/portal/declaraciones', { token: tAuditor }),
+  llamar('GET', '/portal/solicitudes/opciones', { token: tAuditor }), llamar('GET', '/portal/yo', { token: tAuditor }),
+]);
+prueba('…con un rol de solo certificados ve sus certificados, pero no declaraciones ni pide servicios (403)', auditorA.rol?.id === rolCert.id && au1.status === 200
+  && au2.status === 403 && au2.json.codigo === 'SIN_FUNCION' && au3.status === 403 && au4.json.permisos?.join() === 'portal.certificados.ver',
+  JSON.stringify([auditorA.rol, au1.status, au2.status, au3.status, au4.json?.permisos]).slice(0, 300));
+r = await llamar('PATCH', `/roles/${rolCert.id}`, { token: T8, cuerpo: { permisos: ['portal.certificados.ver', 'portal.declaraciones.ver'] } });
+await new Promise((listo) => setTimeout(listo, 15_500));
+const declAuditor = await llamar('GET', '/portal/declaraciones', { token: tAuditor });
+prueba('…Terra Viva le agrega «ver declaraciones»: rige en segundos, sin volver a entrar, y sin «ver tarifas» los precios no salen del servidor',
+  r.status === 200 && declAuditor.status === 200 && declAuditor.json.total > 0 && declAuditor.json.filas.every((d) => d.precio === null), JSON.stringify(declAuditor.json).slice(0, 200));
+const [rc1, rc2] = await Promise.all([
+  llamar('PATCH', `/portal/usuarios/${portalA.id}`, { token: tPA, cuerpo: { rolId: rolCert.id } }),
+  llamar('PATCH', `/roles/${rolCert.id}`, { token: T8, cuerpo: { activo: false } }),
+]);
+prueba('…nadie se cambia el rol a sí mismo, y un rol del portal en uso no se inactiva', rc1.status === 400 && rc2.status === 400, JSON.stringify([rc1.json?.mensaje, rc2.json?.mensaje]));
+
 // Cliente inactivo (gerencia, 19-11-2026): aviso amable; sigue consultando, pero no pide servicios ni carga declaraciones
 r = await llamar('PATCH', `/clientes/${clienteB.id}`, { token: T8, cuerpo: { activo: false, motivoInactivacion: 'PAGOS_PENDIENTES', notaInactivacion: 'Nota interna de cartera' } });
 const [yoB, pideB, cargaB, consultaB] = await Promise.all([
@@ -1721,7 +1815,7 @@ const sincronizarSiigo = async () => {
   return { inicio: x, estado: null };
 };
 const clienteFin = await db.cliente.findUnique({ where: { id: suc.clienteId } });
-const rolLogistica = rolesE2e.roles?.find((x) => x.nombre === 'Logística');
+const rolLogistica = rolDe('LOGISTICA');
 const logisticaE2e = await db.usuario.create({ data: { empresaId: clienteFin.empresaId, rolId: rolLogistica.id, nombre: 'Logística E2E', documento: '778', email: 'logistica.e2e@terravivasas.com',
   passwordHash: await hashFijo('Logistica2026!') } });
 const tLog = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: logisticaE2e.email, clave: 'Logistica2026!' } })).json)).accessToken;
@@ -2053,7 +2147,7 @@ const deRol = (rol) => resumen.json.porUsuario?.filter((x) => x.rol === rol) ?? 
 prueba('correo diario: a cada quien las alertas de su rol (Comercial ve facturación; HSEQ no ve facturación ni seguridad; el administrador, todo); solo lo envía quien configura',
   resumenHseq.status === 403 && resumen.status === 201 && resumen.json.enviados >= 2
   && deRol('Comercial').some((x) => x.tipos.includes('finanzas')) && deRol('HSEQ').every((x) => !x.tipos.includes('finanzas') && !x.tipos.includes('seguridad'))
-  && deRol('Administrador').some((x) => x.tipos.includes('seguridad')) && !deRol('Conductor').length && !deRol('Cliente (portal)').length,
+  && deRol('Administrador').some((x) => x.tipos.includes('seguridad')) && !deRol('Conductor').length && !deRol('Cliente: administrador').length,
   JSON.stringify(resumen.json).slice(0, 500));
 
 console.log('\n14. GPS de la flota con Wialon (simulado: las pruebas nunca tocan una cuenta real)');

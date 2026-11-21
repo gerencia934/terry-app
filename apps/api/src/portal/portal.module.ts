@@ -44,7 +44,8 @@ const FiltroInforme = z.object({ anio: z.coerce.number().int().min(2000).max(210
 const textoOpc = (max: number) => z.string().trim().max(max).transform((x) => x || null).nullish();
 const DatosUsuario = z.object({
   nombre: z.string().trim().min(3).max(150), documento: z.string().trim().regex(/^[0-9A-Za-z.-]{4,20}$/, 'Documento de 4 a 20 caracteres'), telefono: textoOpc(20),
-  perfil: z.nativeEnum(PerfilPortal).default('CONSULTA'), sucursalIds: z.array(z.string().uuid()).max(500).default([]),
+  // Rol del portal (Ajustes › Roles). «perfil» sigue sirviendo: ADMIN y CONSULTA eligen los dos roles predeterminados.
+  rolId: z.string().uuid().optional(), perfil: z.nativeEnum(PerfilPortal).optional(), sucursalIds: z.array(z.string().uuid()).max(500).default([]),
 });
 const CrearUsuario = DatosUsuario.extend({ email: z.string().trim().toLowerCase().email('Correo inválido').max(150) });
 const EditarUsuario = DatosUsuario.partial().extend({ activo: z.boolean().optional() });
@@ -84,7 +85,6 @@ const PedirServicio = z.object({
   if (!b.telefonoContacto) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['telefonoContacto'], message: 'Indique un teléfono de contacto para la entrega.' });
 });
 const Cancelar = z.object({ motivo: z.string().trim().min(5, 'Cuéntenos el motivo (mínimo 5 caracteres).').max(300) });
-const ROL_PORTAL = 'Cliente (portal)';
 /** Causal con la que queda una solicitud que cancela el propio cliente (se crea la primera vez que se usa). */
 const CAUSAL_PORTAL = { codigo: 'CAU-PORTAL', nombre: 'Cancelada por el cliente desde el portal' };
 type Documento = 'acta' | 'manifiesto' | 'comercial';
@@ -112,9 +112,26 @@ export class PortalService {
     }, { timeout, maxWait: 10_000 });
   }
 
-  /** Lo que escribe en el portal (cargar, pedir, cancelar, gestionar usuarios) lo hace solo el perfil Administrador. */
-  soloAdmin(a: Actor) {
-    if (a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Su perfil en el portal es de consulta: pídale a su administrador que lo haga o que le cambie el perfil.' });
+  /**
+   * Funciones del rol del usuario en el portal (las decide Terra Viva en Ajustes › Roles). Se leen de la base, con 15
+   * segundos de memoria: un cambio de rol o de sus funciones rige casi de inmediato, sin cerrar la sesión.
+   */
+  private readonly memoriaPermisos = new Map<string, { hasta: number; permisos: string[]; rol: { id: string; nombre: string } }>();
+  async permisosPortal(a: Actor) {
+    const m = this.memoriaPermisos.get(a.id);
+    if (m && m.hasta > Date.now()) return m;
+    const u = await this.db.usuario.findUnique({ where: { id: a.id }, select: { rol: { select: { id: true, nombre: true, activo: true, acceso: true,
+      permisos: { select: { permiso: { select: { codigo: true } } } } } } } });
+    const permisos = u?.rol.activo && u.rol.acceso === 'CLIENTE' ? u.rol.permisos.map((p) => p.permiso.codigo).filter((c) => c.startsWith('portal.')) : [];
+    const r = { hasta: Date.now() + 15_000, permisos, rol: { id: u?.rol.id ?? '', nombre: u?.rol.nombre ?? '' } };
+    this.memoriaPermisos.set(a.id, r);
+    return r;
+  }
+  async puede(a: Actor, ...codigos: string[]) { const p = (await this.permisosPortal(a)).permisos; return codigos.some((c) => p.includes(c)); }
+  /** El rol del usuario en el portal debe tener alguna de estas funciones. */
+  async exigir(a: Actor, ...codigos: string[]) {
+    if (!(await this.puede(a, ...codigos)))
+      throw new ForbiddenException({ mensaje: 'Su rol en el portal no incluye esta función: pídasela al administrador de su empresa en el portal.', codigo: 'SIN_FUNCION' });
   }
 
   /** Sedes que puede ver el usuario (vacío = todas las de su cliente). */
@@ -143,7 +160,9 @@ export class PortalService {
         this.sedes(tx, a),
         tx.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { nombre: true, email: true, perfilPortal: true } }),
       ]);
-      return { usuario: u, cliente, perfil: u.perfilPortal, sedes: permitidas.length ? sedes.filter((s) => permitidas.includes(s.id)) : sedes, restringido: permitidas.length > 0,
+      const { permisos, rol } = await this.permisosPortal(a);
+      return { usuario: u, cliente, rol, permisos, perfil: permisos.includes('portal.usuarios.gestionar') ? 'ADMIN' as const : 'CONSULTA' as const,
+        sedes: permitidas.length ? sedes.filter((s) => permitidas.includes(s.id)) : sedes, restringido: permitidas.length > 0,
         aviso: cliente.activo ? null : AVISO_CLIENTE_INACTIVO[motivoInactivacion ?? 'OTRO'] };
     });
   }
@@ -180,6 +199,8 @@ export class PortalService {
   }
 
   async declaraciones(a: Actor, f: z.infer<typeof FiltroDecl>) {
+    await this.exigir(a, 'portal.declaraciones.ver');
+    const precios = await this.puede(a, 'portal.precios.ver');
     const { take, skip, pagina, porPagina } = paginar(f);
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
@@ -200,11 +221,13 @@ export class PortalService {
         } }),
       ]);
       // La clave interna del archivo no sale del servidor: solo si la ficha de seguridad está en el expediente
-      return { total, pagina, porPagina, filas: filas.map(({ tarifas, fichaSeguridadUrl, ...d }) => ({ ...d, precio: tarifas[0] ?? null, tieneFichaSeguridad: !!fichaSeguridadUrl })) };
+      return { total, pagina, porPagina, filas: filas.map(({ tarifas, fichaSeguridadUrl, ...d }) => ({ ...d, precio: precios ? tarifas[0] ?? null : null, tieneFichaSeguridad: !!fichaSeguridadUrl })) };
     });
   }
 
   async declaracion(a: Actor, id: string) {
+    await this.exigir(a, 'portal.declaraciones.ver');
+    const precios = await this.puede(a, 'portal.precios.ver');
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
       const d = await tx.declaracion.findFirst({ where: { id, clienteId: a.clienteId, estado: { not: 'ANULADA' }, ...(sedes.length ? { sucursales: { some: { sucursalId: { in: sedes } } } } : {}) }, select: {
@@ -218,12 +241,14 @@ export class PortalService {
       } });
       if (!d) throw new NotFoundException({ mensaje: 'Declaración no encontrada.' });
       // La clave interna del archivo no sale del servidor: el cliente solo sabe si la ficha está en el expediente
-      const { fichaSeguridadUrl, caracterizacionUrl, ...resto } = d;
-      return { ...resto, tieneFichaSeguridad: !!fichaSeguridadUrl, tieneCaracterizacion: !!caracterizacionUrl };
+      const { fichaSeguridadUrl, caracterizacionUrl, tarifas, ...resto } = d;
+      return { ...resto, tarifas: precios ? tarifas : [], tieneFichaSeguridad: !!fichaSeguridadUrl, tieneCaracterizacion: !!caracterizacionUrl };
     });
   }
 
   async solicitudes(a: Actor, f: z.infer<typeof FiltroSol>) {
+    await this.exigir(a, 'portal.solicitudes.ver');
+    const precios = await this.puede(a, 'portal.precios.ver');
     const { take, skip, pagina, porPagina } = paginar(f);
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
@@ -247,11 +272,12 @@ export class PortalService {
             especificaciones: { select: { especificacion: { select: { nombre: true } } } } } },
         } }),
       ]);
-      return { total, pagina, porPagina, filas: filas.map(({ adjuntoUrl, totalEstimado, ...s }) => ({ ...s, totalEstimado: totalEstimado === null ? null : Number(totalEstimado), tieneAdjunto: !!adjuntoUrl })) };
+      return { total, pagina, porPagina, filas: filas.map(({ adjuntoUrl, totalEstimado, ...s }) => ({ ...s, totalEstimado: totalEstimado === null || !precios ? null : Number(totalEstimado), tieneAdjunto: !!adjuntoUrl })) };
     });
   }
 
   async listaManifiestos(a: Actor, f: z.infer<typeof FiltroFechas>) {
+    await this.exigir(a, 'portal.manifiestos.ver');
     const { take, skip, pagina, porPagina } = paginar(f);
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
@@ -273,6 +299,7 @@ export class PortalService {
   }
 
   async certificados(a: Actor, f: z.infer<typeof FiltroAnio>) {
+    await this.exigir(a, 'portal.certificados.ver');
     const { take, skip, pagina, porPagina } = paginar(f);
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
@@ -310,6 +337,7 @@ export class PortalService {
    * aprobada; mientras tanto, lo del manifiesto (y se cuenta como «por conciliar»). Se suma en la base: no trae líneas.
    */
   async informe(a: Actor, anio: number) {
+    await this.exigir(a, 'portal.informes.ver');
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
       const enSede = sedes.length ? Prisma.sql`AND mi.sucursal_id = ANY(${sedes}::uuid[])` : Prisma.empty;
@@ -354,7 +382,7 @@ export class PortalService {
    * guarda nada; confirmar exige aceptar la declaración de responsabilidad del generador y deja todo en revisión.
    */
   async cargueDeclaraciones(a: Actor, plantilla: string, file: Express.Multer.File | undefined, delimitador: string | undefined, confirmar: boolean, acepta: boolean) {
-    this.soloAdmin(a);
+    await this.exigir(a, 'portal.declaraciones.gestionar');
     const cliente = await this.conCliente(a, async (tx) => {
       await this.exigirActivo(tx, a);
       return { ...(await tx.cliente.findUniqueOrThrow({ where: { id: a.clienteId }, select: { id: true, nit: true } })), sedes: await this.sedes(tx, a) };
@@ -373,6 +401,8 @@ export class PortalService {
    * entrega en planta: las plantas propias de Terra Viva que reciben, y las ARL y EPS del conductor y el auxiliar.
    */
   async opcionesPedido(a: Actor) {
+    await this.exigir(a, 'portal.solicitudes.pedir', 'portal.entregas.pedir');
+    const operaciones = [...(await this.puede(a, 'portal.solicitudes.pedir') ? ['CARGA' as const] : []), ...(await this.puede(a, 'portal.entregas.pedir') ? ['DESCARGA' as const] : [])];
     const [base, especificaciones, destinos, entidades] = await Promise.all([
       this.conCliente(a, async (tx) => {
         const sedes = await this.sedes(tx, a);
@@ -395,7 +425,7 @@ export class PortalService {
       this.db.proveedor.findMany({ where: { empresaId: a.empresaId, esDestino: true, esPropio: true, activo: true }, orderBy: { razonSocial: 'asc' }, select: { id: true, razonSocial: true } }),
       this.db.entidadSeguridadSocial.findMany({ where: { activo: true }, orderBy: { nombre: 'asc' }, select: { id: true, tipo: true, nombre: true } }),
     ]);
-    return { ...base, especificaciones, destinos, arl: entidades.filter((e) => e.tipo === 'ARL').map(({ tipo: _t, ...e }) => e), eps: entidades.filter((e) => e.tipo === 'EPS').map(({ tipo: _t, ...e }) => e) };
+    return { ...base, operaciones, especificaciones, destinos, arl: entidades.filter((e) => e.tipo === 'ARL').map(({ tipo: _t, ...e }) => e), eps: entidades.filter((e) => e.tipo === 'EPS').map(({ tipo: _t, ...e }) => e) };
   }
 
   /** Revisa fecha, sedes, residuos, especificaciones, destino y adjunto de un pedido; devuelve sus líneas con precio. */
@@ -464,7 +494,7 @@ export class PortalService {
    * la tarifa vigente a esa fecha, como un pedido de la oficina.
    */
   async pedirServicio(a: Actor, b: z.infer<typeof PedirServicio>) {
-    this.soloAdmin(a);
+    await this.exigir(a, b.operacion === 'DESCARGA' ? 'portal.entregas.pedir' : 'portal.solicitudes.pedir');
     const adjunto = b.adjunto ? this.refs.leer(b.adjunto, a.clienteId!) : null;
     const r = await this.conCliente(a, async (tx) => {
       await this.exigirActivo(tx, a);
@@ -501,6 +531,7 @@ export class PortalService {
 
   /** Datos de un pedido para editarlo (mientras nadie lo confirma) o para pedirlo de nuevo. */
   async formularioSolicitud(a: Actor, id: string) {
+    await this.exigir(a, 'portal.solicitudes.ver');
     return this.conCliente(a, async (tx) => {
       const s = await this.solicitudVisible(tx, a, id);
       const t = s.transporte;
@@ -520,7 +551,7 @@ export class PortalService {
    * entrega en planta) el vehículo. No cambia el tipo (recolección o entrega).
    */
   async editarSolicitud(a: Actor, id: string, b: z.infer<typeof PedirServicio>) {
-    this.soloAdmin(a);
+    await this.exigir(a, b.operacion === 'DESCARGA' ? 'portal.entregas.pedir' : 'portal.solicitudes.pedir');
     const adjunto = b.adjunto === undefined ? undefined : b.adjunto === null ? null : this.refs.leer(b.adjunto, a.clienteId!);
     return this.conCliente(a, async (tx) => {
       await this.exigirActivo(tx, a);
@@ -551,6 +582,7 @@ export class PortalService {
 
   /** Enlace (5 minutos) al PDF que el cliente adjuntó a su pedido. */
   async adjuntoSolicitud(a: Actor, id: string) {
+    await this.exigir(a, 'portal.solicitudes.ver');
     const s = await this.conCliente(a, (tx) => this.solicitudVisible(tx, a, id));
     if (!s.adjuntoUrl || !esClaveAlmacen(s.adjuntoUrl)) throw new NotFoundException({ mensaje: 'La solicitud no tiene adjunto.' });
     const ext = s.adjuntoUrl.slice(s.adjuntoUrl.lastIndexOf('.') + 1);
@@ -559,7 +591,7 @@ export class PortalService {
 
   /** El cliente cancela un pedido que Terra Viva aún no ha confirmado ni programado. Sus líneas quedan descartadas (regla de la base). */
   async cancelarSolicitud(a: Actor, id: string, motivo: string) {
-    this.soloAdmin(a);
+    await this.exigir(a, 'portal.solicitudes.pedir', 'portal.entregas.pedir');
     return this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
       const s = await tx.solicitud.findFirst({ where: { id, clienteId: a.clienteId }, select: { id: true, numero: true, estado: true, aprobacion: true, observaciones: true, items: { select: { sucursalId: true } } } });
@@ -583,6 +615,7 @@ export class PortalService {
   // ---------------- Descargas con enlace firmado ----------------
   /** Verifica que el documento sea del cliente (y de sus sedes) y entrega un enlace firmado de 5 minutos. */
   async enlace(a: Actor, tipo: Documento, id: string) {
+    await this.exigir(a, tipo === 'acta' ? 'portal.certificados.ver' : 'portal.manifiestos.ver');
     await this.conCliente(a, async (tx) => {
       const sedes = await this.sedes(tx, a);
       const ok = tipo === 'acta'
@@ -600,6 +633,7 @@ export class PortalService {
    * expidió hoy, es la misma. Un cliente inactivo no la recibe (aviso amable).
    */
   async certificadoComercial(a: Actor) {
+    await this.exigir(a, 'portal.certificados.ver');
     await this.conCliente(a, (tx) => this.exigirActivo(tx, a));
     const r = await this.comercial.expedir(a.empresaId, a.clienteId!, { id: a.id }, 'PORTAL');
     const token = await this.jwt.signAsync({ t: 'comercial', id: r.id, sub: a.id, emp: a.empresaId, cli: a.clienteId }, { secret: this.claveDescargas, expiresIn: '5m', issuer: 'terraviva-descargas' });
@@ -611,7 +645,7 @@ export class PortalService {
     let p: { t: Documento; id: string; sub: string; emp: string; cli: string };
     try { p = await this.jwt.verifyAsync(token, { secret: this.claveDescargas, issuer: 'terraviva-descargas' }); }
     catch { throw new ForbiddenException({ mensaje: 'El enlace de descarga venció o no es válido. Pídalo de nuevo desde el portal.' }); }
-    const a: Actor = { id: p.sub, empresaId: p.emp, clienteId: p.cli, rol: ROL_PORTAL, permisos: [], nombre: 'portal' };
+    const a: Actor = { id: p.sub, empresaId: p.emp, clienteId: p.cli, rol: 'Portal de clientes', permisos: [], nombre: 'portal' };
     if (p.t === 'comercial') {
       const cc = await this.conCliente(a, (tx) => tx.certificadoComercial.findFirst({ where: { id: p.id, clienteId: p.cli }, select: { numero: true, pdfUrl: true } }));
       if (!cc) throw new NotFoundException({ mensaje: 'Documento no encontrado.' });
@@ -646,15 +680,37 @@ export class PortalService {
   // ---------------- Usuarios del portal ----------------
   /** Usuarios de un cliente. Desde el portal (administrador del cliente) o desde la oficina (Clientes › ficha). */
   async usuarios(a: Actor, clienteId: string) {
+    if (a.clienteId) await this.exigir(a, 'portal.usuarios.gestionar');
     const consulta = async (db: Tx | PrismaService) => {
       const filas = await db.usuario.findMany({ where: { clienteId, empresaId: a.empresaId }, orderBy: [{ activo: 'desc' }, { nombre: 'asc' }], select: {
         id: true, nombre: true, email: true, documento: true, telefono: true, activo: true, perfilPortal: true, ultimoLogin: true, datosAceptadosEn: true, totpActivoDesde: true,
-        sedesPortal: { select: { sucursal: { select: { id: true, codigo: true, nombre: true } } } },
+        rol: { select: { id: true, nombre: true } }, sedesPortal: { select: { sucursal: { select: { id: true, codigo: true, nombre: true } } } },
       } });
       const mias = a.clienteId ? await this.sedes(db, a) : [];
       return filas.filter((u) => u.id === a.id || this.dentroDeSusSedes(mias, u.sedesPortal.map((s) => s.sucursal.id)));
     };
     return a.clienteId ? this.conCliente(a, consulta) : consulta(this.db);
+  }
+
+  /** Roles del portal que se pueden dar a un usuario (activos, de acceso CLIENTE), con sus funciones. */
+  async rolesPortal(a: Actor) {
+    if (a.clienteId) await this.exigir(a, 'portal.usuarios.gestionar');
+    const roles = await this.db.rol.findMany({ where: { empresaId: a.empresaId, acceso: 'CLIENTE', activo: true }, orderBy: [{ predeterminado: 'desc' }, { nombre: 'asc' }],
+      select: { id: true, nombre: true, descripcion: true, clave: true, permisos: { select: { permiso: { select: { codigo: true } } } } } });
+    return roles.map(({ permisos, ...r }) => ({ ...r, permisos: permisos.map((p) => p.permiso.codigo) }));
+  }
+
+  /**
+   * Rol del portal de un usuario: el elegido (activo y de acceso CLIENTE) o, con «perfil» (como antes), el predeterminado
+   * equivalente. El perfil que se guarda sale del rol: ADMIN si puede gestionar los usuarios de su empresa.
+   */
+  private async rolPortal(db: Tx | PrismaService, empresaId: string, b: { rolId?: string; perfil?: 'ADMIN' | 'CONSULTA' }, porDefecto: 'ADMIN' | 'CONSULTA' | null) {
+    const perfil = b.perfil ?? porDefecto;
+    if (!b.rolId && !perfil) return null;
+    const r = await db.rol.findFirst({ where: { empresaId, acceso: 'CLIENTE', ...(b.rolId ? { id: b.rolId } : { clave: perfil === 'ADMIN' ? 'CLIENTE_ADMIN' : 'CLIENTE_CONSULTA' }) },
+      select: { id: true, nombre: true, activo: true, permisos: { select: { permiso: { select: { codigo: true } } } } } });
+    if (!r || !r.activo) throw new BadRequestException({ mensaje: 'Elija un rol del portal que esté activo.' });
+    return { id: r.id, nombre: r.nombre, perfil: r.permisos.some((p) => p.permiso.codigo === 'portal.usuarios.gestionar') ? 'ADMIN' as const : 'CONSULTA' as const };
   }
 
   private async validarSedes(db: Tx | PrismaService, clienteId: string, ids: string[]) {
@@ -664,22 +720,21 @@ export class PortalService {
   }
 
   async crearUsuario(a: Actor, clienteId: string, b: z.infer<typeof CrearUsuario>) {
-    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal crea usuarios.' });
+    if (a.clienteId) await this.exigir(a, 'portal.usuarios.gestionar');
     const cliente = await this.db.cliente.findFirst({ where: { id: clienteId, empresaId: a.empresaId } });
     if (!cliente) throw new NotFoundException({ mensaje: 'Cliente no encontrado.' });
     if (await this.db.usuario.findUnique({ where: { email: b.email }, select: { id: true } })) throw new BadRequestException({ mensaje: `El correo ${b.email} ya tiene un usuario en TERRY-GO.` });
-    const rol = await this.db.rol.findFirst({ where: { empresaId: a.empresaId, nombre: ROL_PORTAL } });
-    if (!rol) throw new BadRequestException({ mensaje: `Falta el rol «${ROL_PORTAL}»: ejecute la siembra (npm run db:seed).` });
+    const rol = (await this.rolPortal(this.db, a.empresaId, b, 'CONSULTA'))!;
     const crear = async (db: Tx) => {
       await this.validarSedes(db, clienteId, b.sucursalIds);
       if (a.clienteId && !this.dentroDeSusSedes(await this.sedes(db, a), b.sucursalIds))
         throw new ForbiddenException({ mensaje: 'Usted ve solo algunas sedes: el usuario nuevo debe quedar limitado a sedes suyas.' });
       const u = await db.usuario.create({ data: {
-        empresaId: a.empresaId, rolId: rol.id, clienteId, perfilPortal: b.perfil, nombre: b.nombre, documento: b.documento, telefono: b.telefono ?? null, email: b.email,
+        empresaId: a.empresaId, rolId: rol.id, clienteId, perfilPortal: rol.perfil, nombre: b.nombre, documento: b.documento, telefono: b.telefono ?? null, email: b.email,
         passwordHash: await hashClave(randomBytes(32).toString('base64url')),
         sedesPortal: b.sucursalIds.length ? { create: [...new Set(b.sucursalIds)].map((sucursalId) => ({ sucursalId })) } : undefined,
-      }, select: { id: true, nombre: true, email: true, perfilPortal: true } });
-      await this.audit.registrar(a, 'usuario', u.id, 'CREAR_PORTAL', undefined, { clienteId, perfil: b.perfil, sedes: b.sucursalIds.length }, db);
+      }, select: { id: true, nombre: true, email: true, perfilPortal: true, rol: { select: { id: true, nombre: true } } } });
+      await this.audit.registrar(a, 'usuario', u.id, 'CREAR_PORTAL', undefined, { clienteId, rol: rol.nombre, sedes: b.sucursalIds.length }, db);
       return u;
     };
     const u = a.clienteId ? await this.conCliente(a, crear) : await this.db.$transaction(crear);
@@ -688,14 +743,18 @@ export class PortalService {
   }
 
   /**
-   * Edita un usuario del portal: datos, perfil, sedes o activo. Nada se borra: inactivo no ingresa y sus sesiones se
-   * cierran. Nadie se cambia el perfil ni se inactiva a sí mismo, y el cliente conserva al menos un administrador activo.
+   * Edita un usuario del portal: datos, rol, sedes o activo. Nada se borra: inactivo no ingresa y sus sesiones se
+   * cierran. Nadie se cambia el rol ni se inactiva a sí mismo, y el cliente conserva al menos una persona activa que
+   * gestiona sus usuarios.
    */
   async editarUsuario(a: Actor, clienteId: string, id: string, b: z.infer<typeof EditarUsuario>) {
-    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal edita usuarios.' });
+    if (a.clienteId) await this.exigir(a, 'portal.usuarios.gestionar');
     const editar = async (db: Tx) => {
-      const u = await db.usuario.findFirst({ where: { id, clienteId, empresaId: a.empresaId } });
+      const u = await db.usuario.findFirst({ where: { id, clienteId, empresaId: a.empresaId }, include: { rol: { select: { nombre: true, permisos: { select: { permiso: { select: { codigo: true } } } } } } } });
       if (!u) throw new NotFoundException({ mensaje: 'Usuario no encontrado.' });
+      const nuevoRol = await this.rolPortal(db, a.empresaId, b, null);
+      const cambiaRol = !!nuevoRol && nuevoRol.id !== u.rolId;
+      const gestionaba = u.rol.permisos.some((p) => p.permiso.codigo === 'portal.usuarios.gestionar');
       const antes = (await db.usuarioSucursal.findMany({ where: { usuarioId: id }, select: { sucursalId: true } })).map((s) => s.sucursalId).sort();
       const nuevas = b.sucursalIds ? [...new Set(b.sucursalIds)].sort() : null;
       const cambianSedes = !!nuevas && nuevas.join() !== antes.join();
@@ -704,24 +763,26 @@ export class PortalService {
         if (id !== a.id && !this.dentroDeSusSedes(mias, antes)) throw new NotFoundException({ mensaje: 'Usuario no encontrado.' });
         if (cambianSedes && !this.dentroDeSusSedes(mias, nuevas!)) throw new ForbiddenException({ mensaje: 'Usted ve solo algunas sedes: el usuario debe quedar limitado a sedes suyas.' });
       }
-      if (id === a.id && (b.activo === false || (b.perfil && b.perfil !== u.perfilPortal))) throw new BadRequestException({ mensaje: 'Nadie se inactiva ni se cambia el perfil a sí mismo.' });
-      const dejaDeSerAdmin = u.activo && u.perfilPortal === 'ADMIN' && (b.activo === false || (b.perfil && b.perfil !== 'ADMIN'));
-      if (dejaDeSerAdmin && !(await db.usuario.count({ where: { clienteId, activo: true, perfilPortal: 'ADMIN', id: { not: id } } })))
-        throw new BadRequestException({ mensaje: 'Es el único administrador activo del portal de este cliente: primero dé ese perfil a otra persona.' });
+      if (id === a.id && (b.activo === false || cambiaRol)) throw new BadRequestException({ mensaje: 'Nadie se inactiva ni se cambia el rol a sí mismo.' });
+      const dejaDeGestionar = u.activo && gestionaba && (b.activo === false || (cambiaRol && nuevoRol!.perfil !== 'ADMIN'));
+      if (dejaDeGestionar && !(await db.usuario.count({ where: { clienteId, activo: true, id: { not: id }, rol: { permisos: { some: { permiso: { codigo: 'portal.usuarios.gestionar' } } } } } })))
+        throw new BadRequestException({ mensaje: 'Es la única persona activa que gestiona los usuarios del portal de este cliente: primero dé ese rol a otra persona.' });
       // Las sedes se leen en cada consulta: el cambio rige de inmediato, sin cerrar la sesión
       if (cambianSedes) {
         await this.validarSedes(db, clienteId, nuevas!);
         await db.usuarioSucursal.deleteMany({ where: { usuarioId: id } });
         if (nuevas!.length) await db.usuarioSucursal.createMany({ data: nuevas!.map((sucursalId) => ({ usuarioId: id, sucursalId })) });
       }
-      const r = await db.usuario.update({ where: { id }, data: { nombre: b.nombre, documento: b.documento, telefono: b.telefono, perfilPortal: b.perfil, activo: b.activo },
-        select: { id: true, nombre: true, email: true, activo: true, perfilPortal: true } });
-      // El perfil va en el token: si cambia (o el usuario se inactiva), sus sesiones se cierran
-      if ((b.activo === false && u.activo) || (b.perfil && b.perfil !== u.perfilPortal))
+      const r = await db.usuario.update({ where: { id }, data: { nombre: b.nombre, documento: b.documento, telefono: b.telefono, activo: b.activo,
+        ...(cambiaRol ? { rolId: nuevoRol!.id, perfilPortal: nuevoRol!.perfil } : {}) },
+        select: { id: true, nombre: true, email: true, activo: true, perfilPortal: true, rol: { select: { id: true, nombre: true } } } });
+      // El perfil va en el token: si cambia el rol (o el usuario se inactiva), sus sesiones se cierran
+      if ((b.activo === false && u.activo) || cambiaRol)
         await db.sesion.updateMany({ where: { usuarioId: id, revocadaEn: null }, data: { revocadaEn: new Date() } });
-      const { sucursalIds: _s, ...datos } = b;
+      const { sucursalIds: _s, rolId: _r, perfil: _p, ...datos } = b;
       await this.audit.registrar(a, 'usuario', id, b.activo === false && u.activo ? 'INACTIVAR_PORTAL' : 'EDITAR_PORTAL',
-        { perfil: u.perfilPortal, activo: u.activo, ...(cambianSedes ? { sedes: antes } : {}) }, { ...datos, clienteId, ...(cambianSedes ? { sedes: nuevas } : {}) }, db);
+        { rol: u.rol.nombre, activo: u.activo, ...(cambianSedes ? { sedes: antes } : {}) },
+        { ...datos, clienteId, ...(cambiaRol ? { rol: nuevoRol!.nombre } : {}), ...(cambianSedes ? { sedes: nuevas } : {}) }, db);
       return r;
     };
     return a.clienteId ? this.conCliente(a, editar) : this.db.$transaction(editar);
@@ -740,7 +801,7 @@ export class PortalService {
   }
 
   async reenviarInvitacion(a: Actor, clienteId: string, id: string) {
-    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal envía invitaciones.' });
+    if (a.clienteId) await this.exigir(a, 'portal.usuarios.gestionar');
     const u = await this.usuarioGestionable(a, clienteId, id);
     if (!u.activo) throw new BadRequestException({ mensaje: 'El usuario está inactivo: actívelo antes de enviarle la invitación.' });
     const invitacion = await this.auth.invitar(u.id);
@@ -750,7 +811,7 @@ export class PortalService {
 
   /** Verificación en dos pasos de un usuario del portal que perdió el celular y sus códigos: la restablece su administrador o la oficina. */
   async restablecer2fa(a: Actor, clienteId: string, id: string) {
-    if (a.clienteId && a.perfilPortal !== 'ADMIN') throw new ForbiddenException({ mensaje: 'Solo el administrador de su empresa en el portal la restablece.' });
+    if (a.clienteId) await this.exigir(a, 'portal.usuarios.gestionar');
     const u = await this.usuarioGestionable(a, clienteId, id);
     return this.auth.restablecer2fa(a, u.id);
   }
@@ -790,6 +851,7 @@ class PortalController {
   @Post('solicitudes/:id/adjunto/enlace') @HttpCode(200) adjunto(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.adjuntoSolicitud(a, id); }
   @Post('solicitudes/:id/cancelar') cancelar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Cancelar)) b: z.infer<typeof Cancelar>) { return this.s.cancelarSolicitud(a, id, b.motivo); }
   @Get('usuarios') usuarios(@ActorActual() a: Actor) { return this.s.usuarios(a, a.clienteId!); }
+  @Get('roles') roles(@ActorActual() a: Actor) { return this.s.rolesPortal(a); }
   @Post('usuarios') crearUsuario(@ActorActual() a: Actor, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, a.clienteId!, b); }
   @Patch('usuarios/:id') editarUsuario(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarUsuario)) b: z.infer<typeof EditarUsuario>) { return this.s.editarUsuario(a, a.clienteId!, id, b); }
   @Post('usuarios/:id/invitacion') reenviar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviarInvitacion(a, a.clienteId!, id); }
@@ -804,6 +866,7 @@ class PortalController {
 class UsuariosPortalOficinaController {
   constructor(private readonly s: PortalService) {}
   @Permiso('clientes.editar') @Get() listar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string) { return this.s.usuarios(a, c); }
+  @Permiso('clientes.editar') @Get('roles') roles(@ActorActual() a: Actor) { return this.s.rolesPortal(a); }
   @Permiso('clientes.editar') @Post() crear(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Body(new Zod(CrearUsuario)) b: z.infer<typeof CrearUsuario>) { return this.s.crearUsuario(a, c, b); }
   @Permiso('clientes.editar') @Patch(':id') editar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarUsuario)) b: z.infer<typeof EditarUsuario>) { return this.s.editarUsuario(a, c, id, b); }
   @Permiso('clientes.editar') @Post(':id/invitacion') reenviar(@ActorActual() a: Actor, @Param('clienteId', ParseUUIDPipe) c: string, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviarInvitacion(a, c, id); }

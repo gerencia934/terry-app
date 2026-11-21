@@ -1,7 +1,7 @@
 // Usuarios y roles con datos reales (fase 1c). Solo administración. Nadie escribe ni envía contraseñas: el usuario nuevo
 // recibe una invitación para crear la suya. Nada se borra: un usuario se inactiva y sus sesiones se cierran.
 import { useState, type FormEvent } from 'react';
-import { Check, Loader2, Lock, Mail, Minus, Plus, ShieldCheck, ShieldOff, Unlock } from 'lucide-react';
+import { KeyRound, Loader2, Lock, Mail, Plus, ShieldCheck, ShieldOff, Unlock } from 'lucide-react';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { api, ErrorApi, sesionActual, tienePermiso } from '../lib/api';
@@ -17,7 +17,8 @@ interface Usuario {
   totpActivoDesde: string | null;
   rol: { id: string; nombre: string };
 }
-interface Roles { permisos: { codigo: string; nombre: string }[]; roles: { id: string; nombre: string; usuariosActivos: number; permisos: string[] }[] }
+/** Roles de Ajustes › Roles (los del portal de clientes no se dan aquí: son de los usuarios de cada cliente). */
+interface RolLista { id: string; nombre: string; descripcion: string | null; acceso: 'OFICINA' | 'CAMPO' | 'CLIENTE'; activo: boolean; usuariosActivos: number; permisos: string[] }
 const LICENCIAS = ['A1', 'A2', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3'];
 function mensajeError(e: unknown, def: string) {
   if (!(e instanceof ErrorApi)) return def;
@@ -38,11 +39,11 @@ export function UsuariosServidor() {
   const [texto, setTexto] = useState('');
   const qs = new URLSearchParams({ ...(f.q && { q: f.q }), ...(f.rolId && { rolId: f.rolId }), ...(f.activo && { activo: f.activo }) }).toString();
   const lista = usePaginado<Usuario>(admin ? `/usuarios?${qs}` : null);
-  const roles = useApi<Roles>(admin ? '/roles' : null);
+  const roles = useApi<RolLista[]>(admin ? '/roles' : null);
   const [panel, setPanel] = useState<null | { usuario?: Usuario }>(null);
   if (!admin) return (
     <>
-      <PageHeader eyebrow="Ajustes" title="Usuarios y roles" />
+      <PageHeader eyebrow="Ajustes" title="Usuarios" />
       <p className="flex items-start gap-2 rounded-xl bg-surface-2 p-4 text-[14px] text-muted"><Lock size={16} className="mt-0.5 shrink-0" />Solo la administración ve y gestiona los usuarios (datos personales, Ley 1581).</p>
     </>
   );
@@ -60,14 +61,14 @@ export function UsuariosServidor() {
       </span>
     ), priority: 3 },
   ];
-  const r = roles.datos;
+  const r = roles.datos?.filter((x) => x.acceso !== 'CLIENTE');
   return (
     <>
-      <PageHeader eyebrow="Ajustes" title="Usuarios y roles" subtitle="Quién entra y qué puede hacer. El usuario nuevo recibe un correo para crear su contraseña; nadie la escribe por él. Nada se borra: un usuario se inactiva."
-        actions={<><Button onClick={() => go('importar')}>Importar</Button><Button variant="primary" onClick={() => setPanel({})}><Plus size={16} /> Invitar usuario</Button></>} />
+      <PageHeader eyebrow="Ajustes" title="Usuarios" subtitle="Quién entra y con qué rol. El usuario nuevo recibe un correo para crear su contraseña; nadie la escribe por él. Nada se borra: un usuario se inactiva. Lo que puede hacer cada rol se decide en Roles y permisos."
+        actions={<><Button onClick={() => go('roles')}><KeyRound size={16} /> Roles y permisos</Button><Button onClick={() => go('importar')}>Importar</Button><Button variant="primary" onClick={() => setPanel({})}><Plus size={16} /> Invitar usuario</Button></>} />
       <FilterBar active={Number(!!f.q) + Number(!!f.rolId) + Number(f.activo !== 'true')} onClear={() => { setF(vacio); setTexto(''); }}>
         <Field label="Buscar" id="us-q"><Input id="us-q" value={texto} onChange={(e) => setTexto(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setF((s) => ({ ...s, q: texto.trim() }))} onBlur={() => setF((s) => ({ ...s, q: texto.trim() }))} placeholder="Nombre, correo o documento" /></Field>
-        <Field label="Rol" id="us-r"><Select id="us-r" value={f.rolId} onChange={(e) => setF((s) => ({ ...s, rolId: e.target.value }))}><option value="">Todos</option>{(r?.roles ?? []).map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</Select></Field>
+        <Field label="Rol" id="us-r"><Select id="us-r" value={f.rolId} onChange={(e) => setF((s) => ({ ...s, rolId: e.target.value }))}><option value="">Todos</option>{(r ?? []).map((x) => <option key={x.id} value={x.id}>{x.nombre}{x.activo ? '' : ' (inactivo)'}</option>)}</Select></Field>
         <Field label="Estado" id="us-a"><Select id="us-a" value={f.activo} onChange={(e) => setF((s) => ({ ...s, activo: e.target.value }))}><option value="true">Activos</option><option value="false">Inactivos</option><option value="">Todos</option></Select></Field>
       </FilterBar>
       {lista.error ? <p className="rounded-xl bg-bad/10 p-4 text-bad">{lista.error}</p>
@@ -77,27 +78,22 @@ export function UsuariosServidor() {
             footer={<PieLista mostradas={lista.filas.length} total={lista.total} hayMas={lista.hayMas} cargando={lista.cargando} cargarMas={lista.cargarMas} />} empty="No hay usuarios con estos filtros." />}
 
       {r && (
-        <Card title="Permisos por rol" className="mt-5" pad={false}>
-          <div className="scroll-x"><table className="w-full min-w-[720px] text-[13px]">
-            <thead className="bg-surface-2 text-left text-[12px] uppercase tracking-[0.04em] text-muted"><tr><th className="px-4 py-2.5">Permiso</th>{r.roles.map((x) => <th key={x.id} className="px-2 py-2.5 text-center">{x.nombre}<br /><span className="font-normal normal-case text-subtle">{x.usuariosActivos} activos</span></th>)}</tr></thead>
-            <tbody>{r.permisos.filter((p) => p.codigo !== '*').map((p) => (
-              <tr key={p.codigo} className="border-t border-line"><td className="px-4 py-2"><span className="block">{p.nombre}</span><span className="text-[11px] text-subtle">{p.codigo}</span></td>
-                {r.roles.map((x) => { const si = x.permisos.includes('*') || x.permisos.includes(p.codigo); return <td key={x.id} className="px-2 py-2 text-center">{si ? <Check size={16} className="inline text-ok" aria-label="Sí" /> : <Minus size={16} className="inline text-subtle" aria-label="No" />}</td>; })}
-              </tr>))}
-            </tbody>
-          </table></div>
-          <p className="border-t border-line px-4 py-2 text-[12px] text-muted">El administrador tiene todos los permisos. Para cambiar lo que puede hacer un rol, pídalo al equipo de soporte: un cambio mal hecho puede dejar a alguien sin acceso.</p>
+        <Card title="Roles" className="mt-5" action={<Button size="sm" onClick={() => go('roles')}><KeyRound size={14} /> Configurar roles y permisos</Button>}>
+          <ul className="flex flex-wrap gap-2 text-[13px]">
+            {r.map((x) => <li key={x.id}><Badge tone={x.activo ? 'neutral' : 'warn'}>{x.nombre} · {x.usuariosActivos}</Badge></li>)}
+          </ul>
+          <p className="mt-3 text-[12px] text-muted">Cada rol tiene sus funciones marcadas una por una, con su explicación. Los roles del portal de clientes se asignan desde la ficha de cada cliente.</p>
         </Card>
       )}
 
       <Sheet open={!!panel} onClose={() => setPanel(null)} title={panel?.usuario ? 'Usuario' : 'Invitar usuario'}>
-        {panel && r && <FormUsuario u={panel.usuario} roles={r.roles} listo={() => { setPanel(null); lista.recargar(); roles.recargar(); }} />}
+        {panel && r && <FormUsuario u={panel.usuario} roles={r.filter((x) => x.activo || x.id === panel.usuario?.rol.id)} listo={() => { setPanel(null); lista.recargar(); roles.recargar(); }} />}
       </Sheet>
     </>
   );
 }
 
-function FormUsuario({ u, roles, listo }: { u?: Usuario; roles: Roles['roles']; listo: () => void }) {
+function FormUsuario({ u, roles, listo }: { u?: Usuario; roles: RolLista[]; listo: () => void }) {
   const toast = useToast();
   const yo = sesionActual()?.usuario.id === u?.id;
   const [v, setV] = useState({

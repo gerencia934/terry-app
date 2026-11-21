@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
   ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm, plantillaPortal,
-  resolverCodigo, sectorDe, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
+  resolverCodigo, ROLES_PREDETERMINADOS, sectorDe, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Municipios } from '../common/servicios';
@@ -342,8 +342,13 @@ export class ImportacionService {
         await tx.vehiculo.create({ data: { ...datos, empresaId: emp, placa } }); return 'creadas';
       }
       case 'usuarios': {
-        let rol = await tx.rol.findFirst({ where: { empresaId: emp, nombre: { equals: d.rol, mode: 'insensitive' } } });
-        if (!rol) rol = await tx.rol.create({ data: { empresaId: emp, nombre: d.rol } });
+        // El rol de la plantilla es uno predeterminado (por su clave, aunque le hayan cambiado el nombre) o uno de oficina o
+        // campo con ese nombre; los roles del portal son de los usuarios de cada cliente (se invitan desde su ficha).
+        const clave = ROLES_PREDETERMINADOS.find((r) => r.acceso !== 'CLIENTE' && r.nombre.toLowerCase() === String(d.rol).toLowerCase())?.clave;
+        let rol = (clave ? await tx.rol.findFirst({ where: { empresaId: emp, clave } }) : null)
+          ?? await tx.rol.findFirst({ where: { empresaId: emp, acceso: { not: 'CLIENTE' }, nombre: { equals: d.rol, mode: 'insensitive' } } });
+        if (!rol) rol = await tx.rol.create({ data: { empresaId: emp, nombre: d.rol, acceso: d.rol === 'Conductor' || d.rol === 'Auxiliar' ? 'CAMPO' : 'OFICINA' } });
+        if (!rol.activo) throw new BadRequestException({ mensaje: `El rol «${rol.nombre}» está inactivo: actívelo en Ajustes › Roles.` });
         // Clave aleatoria: el usuario la define con el enlace de «Recuperar contraseña» (invitación).
         await tx.usuario.create({ data: { empresaId: emp, rolId: rol.id, documento: d.documento, nombre: d.nombre, email: d.email.trim().toLowerCase(), passwordHash: await hashClave(randomBytes(24).toString('base64url')),
           telefono: d.telefono || null, esConductor: d.rol === 'Conductor', esAuxiliar: d.rol === 'Auxiliar', licenciaCat: d.licencia || null, licenciaVence: fecha(d.licenciaVence), cursoMpVence: fecha(d.cursoMp) } });

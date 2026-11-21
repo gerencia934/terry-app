@@ -9,7 +9,7 @@ import { PieLista, cant, fechaHoraCo, hoyCo, msg, useApi, usePaginado } from '..
 import { useRouter } from '../../lib/router';
 import { cx, fmtCOP, fmtFecha, fmtNum } from '../../lib/format';
 import { descargar } from '../../cargues/descargar';
-import { nitConDv, puedeEscribir, usePortal } from './PortalApp';
+import { nitConDv, puede, puedeHacer, usePortal } from './PortalApp';
 import { CancelarSolicitud, CargueDeclaraciones, PedirServicio, pedirAlEntrar, type FormularioSolicitud } from './Escritura';
 import { FormDeclaracionPortal } from './FormDeclaracion';
 import { abrirEnlace, areaCls, errorPortal } from './comun';
@@ -77,13 +77,13 @@ export function PortalInicio() {
         </Card>
         <Card title="Accesos rápidos">
           <div className="flex flex-col gap-2">
-            {puedeEscribir(yo) && <Acceso icon={Truck} titulo="Pedir una recolección" texto="Terra Viva recoge en sus sedes" onClick={() => { pedirAlEntrar.valor = true; go('portal-solicitudes'); }} />}
-            {puedeEscribir(yo) && <Acceso icon={Warehouse} titulo="Entrega en planta" texto="Usted lleva el residuo en su vehículo" onClick={() => { pedirAlEntrar.valor = 'DESCARGA'; go('portal-solicitudes'); }} />}
-            {puedeEscribir(yo) && <Acceso icon={FileText} titulo="Declarar un residuo" texto="Un residuo o servicio nuevo, con su ficha" onClick={() => { declararAlEntrar.valor = true; go('portal-declaraciones'); }} />}
-            <Acceso icon={Award} titulo="Descargar certificados" texto="De tratamiento, disposición final y aprovechamiento" onClick={() => go('portal-certificados')} />
-            {yo.cliente.activo && <AccesoCertificacionComercial />}
-            <Acceso icon={FileStack} titulo="Ver manifiestos" texto="Cada recolección, con lo pesado en planta" onClick={() => go('portal-manifiestos')} />
-            <Acceso icon={BarChart3} titulo="Informe del año" texto="Lo gestionado por residuo y por mes, en Excel" onClick={() => go('portal-informes')} />
+            {puedeHacer(yo, 'portal.solicitudes.pedir') && <Acceso icon={Truck} titulo="Pedir una recolección" texto="Terra Viva recoge en sus sedes" onClick={() => { pedirAlEntrar.valor = true; go('portal-solicitudes'); }} />}
+            {puedeHacer(yo, 'portal.entregas.pedir') && <Acceso icon={Warehouse} titulo="Entrega en planta" texto="Usted lleva el residuo en su vehículo" onClick={() => { pedirAlEntrar.valor = 'DESCARGA'; go('portal-solicitudes'); }} />}
+            {puedeHacer(yo, 'portal.declaraciones.gestionar') && <Acceso icon={FileText} titulo="Declarar un residuo" texto="Un residuo o servicio nuevo, con su ficha" onClick={() => { declararAlEntrar.valor = true; go('portal-declaraciones'); }} />}
+            {puede(yo, 'portal.certificados.ver') && <Acceso icon={Award} titulo="Descargar certificados" texto="De tratamiento, disposición final y aprovechamiento" onClick={() => go('portal-certificados')} />}
+            {yo.cliente.activo && puede(yo, 'portal.certificados.ver') && <AccesoCertificacionComercial />}
+            {puede(yo, 'portal.manifiestos.ver') && <Acceso icon={FileStack} titulo="Ver manifiestos" texto="Cada recolección, con lo pesado en planta" onClick={() => go('portal-manifiestos')} />}
+            {puede(yo, 'portal.informes.ver') && <Acceso icon={BarChart3} titulo="Informe del año" texto="Lo gestionado por residuo y por mes, en Excel" onClick={() => go('portal-informes')} />}
           </div>
         </Card>
       </div>
@@ -138,14 +138,15 @@ export function PortalDeclaraciones() {
   const yo = usePortal();
   const toast = useToast();
   const [cargar, setCargar] = useState(false);
-  const [formulario, setFormulario] = useState<null | { id?: string }>(() => { const v = declararAlEntrar.valor && puedeEscribir(yo); declararAlEntrar.valor = false; return v ? {} : null; });
+  const [formulario, setFormulario] = useState<null | { id?: string }>(() => { const v = declararAlEntrar.valor && puedeHacer(yo, 'portal.declaraciones.gestionar'); declararAlEntrar.valor = false; return v ? {} : null; });
   const vacio = { q: '', estado: '', tipo: '', activa: '' };
   const [f, setF] = useState(vacio);
   const [texto, setTexto] = useState('');
   const [sel, setSel] = useState<string | null>(null);
   const qs = new URLSearchParams({ ...(f.q && { q: f.q }), ...(f.estado && { estado: f.estado }), ...(f.tipo && { tipo: f.tipo }), ...(f.activa && { activa: f.activa }) }).toString();
   const lista = usePaginado<DeclFila>(`/portal/declaraciones?${qs}`);
-  const escribe = puedeEscribir(yo);
+  const escribe = puedeHacer(yo, 'portal.declaraciones.gestionar');
+  const precios = puede(yo, 'portal.precios.ver');
   if (formulario) return (
     <FormDeclaracionPortal id={formulario.id} volver={() => setFormulario(null)} listo={(r) => {
       toast(formulario.id ? `Declaración N.° ${r.numero} corregida: queda en revisión de Terra Viva${r.estabaAutorizada ? ' (no se puede pedir hasta que la autoricen de nuevo)' : ''}.`
@@ -161,7 +162,7 @@ export function PortalDeclaraciones() {
     { key: 's', header: 'Sedes', render: (d) => <span className="block max-w-[220px] truncate">{d.sucursales.map((s) => s.sucursal.nombre).join(', ') || '—'}</span>, priority: 1 },
     { key: 'disp', header: 'Tratamiento', render: (d) => <span className="block max-w-[220px] truncate">{principal(d) ?? '—'}</span>, priority: 1 },
     { key: 'fds', header: 'Ficha', render: (d) => (d.tieneFichaSeguridad ? <span title="Ficha de datos de seguridad en el expediente" className="text-ok"><Paperclip size={15} /></span> : <span className="text-subtle">—</span>), priority: 1 },
-    { key: 'p', header: 'Tarifa vigente', align: 'right', render: (d) => (d.precio ? <span className="whitespace-nowrap">{precioTexto(d.precio)}</span> : '—'), priority: 2 },
+    ...(precios ? [{ key: 'p', header: 'Tarifa vigente', align: 'right', render: (d) => (d.precio ? <span className="whitespace-nowrap">{precioTexto(d.precio)}</span> : '—'), priority: 2 } satisfies Column<DeclFila>] : []),
     { key: 'e', header: 'Estado', render: (d) => <EstadoDecl estado={d.estado} activa={d.activa} />, priority: 3 },
   ];
   return (
@@ -193,6 +194,7 @@ export function PortalDeclaraciones() {
 
 function DetalleDeclaracion({ id, escribe, corregir, cambio }: { id: string; escribe: boolean; corregir: () => void; cambio: () => void }) {
   const toast = useToast();
+  const precios = puede(usePortal(), 'portal.precios.ver');
   const { datos: d, error } = useApi<DeclDetalle>(`/portal/declaraciones/${id}`);
   const [accion, setAccion] = useState<'' | 'retirar' | 'inactivar'>('');
   const [motivo, setMotivo] = useState('');
@@ -232,7 +234,7 @@ function DetalleDeclaracion({ id, escribe, corregir, cambio }: { id: string; esc
         ['Frecuencia', d.frecuenciaDias ? `Cada ${d.frecuenciaDias} días${d.cantidadFrecuencia ? ` · ${cant(d.cantidadFrecuencia)} por servicio` : ''}` : 'A solicitud'],
         ['Tratamiento', d.disposiciones.map((x) => `${x.disposicion.nombre}${x.principal && d.disposiciones.length > 1 ? ' (principal)' : ''}`).join(' · ') || 'Lo define Terra Viva'],
         ['Sedes', d.sucursales.filter((s) => s.activa).map((s) => `${s.sucursal.codigo ? `${s.sucursal.codigo} · ` : ''}${s.sucursal.nombre}`).join(', ') || '—'],
-        ['Tarifa vigente', vigente ? precioTexto(vigente) : '—'],
+        ...(precios ? [['Tarifa vigente', vigente ? precioTexto(vigente) : '—'] as [string, ReactNode]] : []),
         ['Autorizada', d.aprobadaEn ? fechaHoraCo(d.aprobadaEn) : '—'],
         ['Responsabilidad del generador', d.responsabilidadAceptada ? `Aceptada${d.aceptadaEn ? ` el ${fechaHoraCo(d.aceptadaEn)}` : ''}` : 'Sin aceptar'],
       ]} />
@@ -295,7 +297,9 @@ const porConfirmar = (s: SolFila) => s.clase === 'FORMAL' && s.aprobacion === 'P
 export function PortalSolicitudes() {
   const yo = usePortal();
   const toast = useToast();
-  const escribe = puedeEscribir(yo);
+  const pideCarga = puedeHacer(yo, 'portal.solicitudes.pedir'), pideEntrega = puedeHacer(yo, 'portal.entregas.pedir');
+  const escribe = pideCarga || pideEntrega;
+  const puedeOperar = (s: SolFila) => (s.operacion === 'DESCARGA' ? pideEntrega : pideCarga);
   const vacio = { estado: '', operacion: '', desde: '', hasta: '' };
   const [f, setF] = useState(vacio);
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
@@ -303,7 +307,8 @@ export function PortalSolicitudes() {
   const [sel, setSel] = useState<SolFila | null>(null);
   const [pedir, setPedir] = useState<null | { modo: 'nuevo' | 'editar' | 'repetir'; base?: FormularioSolicitud; operacion?: 'CARGA' | 'DESCARGA' }>(() => {
     const v = pedirAlEntrar.valor; pedirAlEntrar.valor = false;
-    return v && escribe ? { modo: 'nuevo', operacion: v === 'DESCARGA' ? 'DESCARGA' : 'CARGA' } : null;
+    const operacion = v === 'DESCARGA' ? 'DESCARGA' as const : 'CARGA' as const;
+    return v && (operacion === 'DESCARGA' ? pideEntrega : pideCarga) ? { modo: 'nuevo', operacion } : null;
   });
   const [abriendo, setAbriendo] = useState(false);
   const residuos = (s: SolFila) => { const n = s.items.map((i) => i.declaracion.nombre); return n.length > 2 ? `${n.slice(0, 2).join(', ')} y ${n.length - 2} más` : n.join(', ') || '—'; };
@@ -325,8 +330,8 @@ export function PortalSolicitudes() {
   return (
     <>
       <PageHeader title="Solicitudes de servicio" subtitle="Las recolecciones y entregas en planta pedidas para su empresa y en qué van. Lo que usted pide queda «por confirmar» hasta que Terra Viva lo apruebe y lo programe; mientras tanto lo puede corregir o cancelar."
-        actions={escribe ? <div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => setPedir({ modo: 'nuevo', operacion: 'CARGA' })}><Plus size={16} /> Pedir una recolección</Button>
-          <Button onClick={() => setPedir({ modo: 'nuevo', operacion: 'DESCARGA' })}><Truck size={16} /> Entrega en planta</Button></div> : undefined} />
+        actions={escribe ? <div className="flex flex-wrap gap-2">{pideCarga && <Button variant="primary" onClick={() => setPedir({ modo: 'nuevo', operacion: 'CARGA' })}><Plus size={16} /> Pedir una recolección</Button>}
+          {pideEntrega && <Button variant={pideCarga ? 'secondary' : 'primary'} onClick={() => setPedir({ modo: 'nuevo', operacion: 'DESCARGA' })}><Truck size={16} /> Entrega en planta</Button>}</div> : undefined} />
       <FilterBar active={Object.values(f).filter(Boolean).length} onClear={() => setF(vacio)}>
         <Field label="Estado" id="sl-e"><Select id="sl-e" value={f.estado} onChange={(e) => setF((s) => ({ ...s, estado: e.target.value }))}>
           <option value="">Todos</option><option value="POR_CONFIRMAR">Por confirmar</option><option value="PENDIENTE">Confirmadas, por programar</option><option value="PROGRAMADA">Programadas</option>
@@ -364,13 +369,13 @@ export function PortalSolicitudes() {
                 ))}
               </ul>
             </div>
-            {escribe && (
+            {puedeOperar(sel) && (
               <div className="flex flex-wrap gap-2 border-t border-line pt-4">
                 {porConfirmar(sel) && <Button size="sm" variant="primary" disabled={abriendo} onClick={() => desde('editar', sel)}><Pencil size={14} /> Corregir</Button>}
                 {sel.clase === 'FORMAL' && <Button size="sm" disabled={abriendo} onClick={() => desde('repetir', sel)}><Copy size={14} /> Pedir de nuevo</Button>}
               </div>
             )}
-            {yo.perfil === 'ADMIN' && porConfirmar(sel) && <CancelarSolicitud id={sel.id} numero={sel.numero} listo={() => { setSel(null); lista.recargar(); }} />}
+            {puede(yo, sel.operacion === 'DESCARGA' ? 'portal.entregas.pedir' : 'portal.solicitudes.pedir') && porConfirmar(sel) && <CancelarSolicitud id={sel.id} numero={sel.numero} listo={() => { setSel(null); lista.recargar(); }} />}
           </div>
         )}
       </Sheet>

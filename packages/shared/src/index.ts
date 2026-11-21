@@ -5,6 +5,7 @@ export * from './clientes';
 export * from './declaraciones/esquema';
 export * from './operacion/totales';
 export * from './accesos';
+export * from './roles';
 export { construirPlantilla, leerArchivo, exportarErrores } from './importacion/excel';
 export * from './importacion/csv';
 export * from './importacion/planilla';

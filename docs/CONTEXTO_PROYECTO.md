@@ -102,6 +102,9 @@ En la cuenta nueva hay que conectar Google Drive con acceso a esa carpeta.
     varias sedes con especificaciones y PDF, corregir y repetir pedidos, entrega en planta con vehículo, ARL y EPS, e
     informe general por servicio (conciliado, precio, valor, factura y certificado). 113 pruebas de reglas y 522 e2e OK.
     Producción no tenía clientes cargados al 20-11-2026: el portal sirve cuando se carguen clientes, sedes y usuarios.
+  - ✅ roles y permisos configurables (20-11-2026, pedido de la gerencia como en Grinclic): Ajustes › Roles con cada
+    función explicada por módulo, accesos separados (empresa, campo y portal de clientes), predeterminados marcados que se
+    ajustan o restauran, roles nuevos y roles del portal en lugar de los perfiles fijos. 121 pruebas de reglas OK.
 - Verificación en dos pasos (requisitos de producción §4): ✅ el 19-11-2026. App de autenticación (TOTP) con códigos de
   respaldo; obligatoria para el personal en producción (o antes, con el interruptor de Ajustes › Empresa) y opcional
   en el portal; la restablece otro administrador. 85 pruebas de reglas y 376 e2e OK.

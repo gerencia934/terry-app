@@ -10,7 +10,7 @@ export const ROUTES = [
   'recepcion', 'descargues', 'inventario', 'certificados', 'facturacion',
   'permisos',
   'indicadores', 'informes',
-  'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'catalogos', 'etapas',
+  'ajustes', 'importar', 'empresa', 'vehiculos', 'usuarios', 'roles', 'catalogos', 'etapas',
   'campo', 'campo-preop', 'campo-parada', 'campo-envios',
   // Portal de clientes: solo lo usan los usuarios de un cliente (la oficina no entra y el cliente no sale de aquí)
   'portal', 'portal-sedes', 'portal-declaraciones', 'portal-solicitudes', 'portal-manifiestos', 'portal-certificados', 'portal-informes', 'portal-usuarios',

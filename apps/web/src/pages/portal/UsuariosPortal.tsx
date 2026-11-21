@@ -10,9 +10,13 @@ import { cx } from '../../lib/format';
 import { PERFIL, usePortal, type SedePortal } from './PortalApp';
 import { entregarInvitacion, type Invitacion } from '../../components/EnlaceAcceso';
 
+/** Rol del portal que se puede asignar (activo, de acceso «Portal de clientes»). */
+interface RolPortal { id: string; nombre: string; descripcion: string | null; clave: string | null; permisos: string[] }
 export interface UsuarioPortal {
   id: string; nombre: string; email: string; documento: string; telefono: string | null; activo: boolean; perfilPortal: 'ADMIN' | 'CONSULTA';
   ultimoLogin: string | null; datosAceptadosEn: string | null; sedesPortal: { sucursal: { id: string; codigo: string | null; nombre: string } }[];
+  /** Su rol en el portal (Ajustes › Roles de Terra Viva). */
+  rol?: { id: string; nombre: string };
   /** Desde cuándo tiene activa la verificación en dos pasos (null: sin activar; en el portal es opcional). */
   totpActivoDesde?: string | null;
 }
@@ -54,7 +58,7 @@ export function ListaUsuariosPortal({ lista, abrir, vacio }: { lista: ReturnType
           <button onClick={() => abrir?.(u)} disabled={!abrir} className={cx('flex w-full items-start gap-3 rounded-xl border p-3 text-left text-[13px]', u.activo ? 'border-line' : 'border-dashed border-line opacity-70', abrir && 'hover:bg-surface-2')}>
             <span className={cx('rounded-full p-2', u.perfilPortal === 'ADMIN' ? 'bg-brand-soft text-brand-ink' : 'bg-surface-2 text-muted')}>{u.perfilPortal === 'ADMIN' ? <ShieldCheck size={16} /> : <UserRound size={16} />}</span>
             <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-1.5"><span className="font-medium">{u.nombre}</span><Badge tone={u.perfilPortal === 'ADMIN' ? 'brand' : 'neutral'}>{PERFIL[u.perfilPortal]}</Badge>{!u.activo && <Badge>Inactivo</Badge>}{u.totpActivoDesde && <Badge tone="info">Verificación en dos pasos</Badge>}</span>
+              <span className="flex flex-wrap items-center gap-1.5"><span className="font-medium">{u.nombre}</span><Badge tone={u.perfilPortal === 'ADMIN' ? 'brand' : 'neutral'}>{u.rol?.nombre ?? PERFIL[u.perfilPortal]}</Badge>{!u.activo && <Badge>Inactivo</Badge>}{u.totpActivoDesde && <Badge tone="info">Verificación en dos pasos</Badge>}</span>
               <span className="block truncate text-muted">{u.email}</span>
               <span className="block text-[12px] text-subtle">
                 {u.sedesPortal.length ? `Sedes: ${u.sedesPortal.map((s) => s.sucursal.nombre).join(', ')}` : 'Todas las sedes'} · {u.ultimoLogin ? `último ingreso ${fechaHoraCo(u.ultimoLogin)}` : 'aún no ha ingresado'}
@@ -76,7 +80,10 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
 }) {
   const toast = useToast();
   const yo = !!u && u.email === yoEmail;
-  const [v, setV] = useState({ email: '', nombre: u?.nombre ?? '', documento: u?.documento ?? '', telefono: u?.telefono ?? '', perfil: u?.perfilPortal ?? perfilInicial, activo: u?.activo ?? true });
+  const roles = useApi<RolPortal[]>(`${base}/roles`);
+  const [v, setV] = useState({ email: '', nombre: u?.nombre ?? '', documento: u?.documento ?? '', telefono: u?.telefono ?? '', rolId: u?.rol?.id ?? '', activo: u?.activo ?? true });
+  // Sin rol elegido: el predeterminado equivalente al perfil inicial (administrador para el primer usuario del cliente)
+  const rolId = v.rolId || roles.datos?.find((r) => r.clave === (perfilInicial === 'ADMIN' ? 'CLIENTE_ADMIN' : 'CLIENTE_CONSULTA'))?.id || roles.datos?.[0]?.id || '';
   const [todas, setTodas] = useState(!limitado && !(u?.sedesPortal.length));
   const [elegidas, setElegidas] = useState<Set<string>>(new Set(u?.sedesPortal.map((s) => s.sucursal.id) ?? (limitado && sedes.length === 1 ? [sedes[0].id] : [])));
   const [enviando, setEnviando] = useState(false);
@@ -86,7 +93,7 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
     if (sinSedes) return toast('Elija al menos una sede, o «Todas las sedes».', 'warn');
-    const cuerpo = { nombre: v.nombre, documento: v.documento, telefono: v.telefono, sucursalIds: todas ? [] : [...elegidas], ...(yo ? {} : { perfil: v.perfil }) };
+    const cuerpo = { nombre: v.nombre, documento: v.documento, telefono: v.telefono, sucursalIds: todas ? [] : [...elegidas], ...(yo || !rolId ? {} : { rolId }) };
     setEnviando(true);
     try {
       if (u) {
@@ -124,13 +131,16 @@ export function FormUsuarioPortal({ base, sedes, limitado = false, u, yoEmail, p
         <Field label="Teléfono" id="up-t"><Input id="up-t" inputMode="tel" value={v.telefono} onChange={set('telefono')} maxLength={20} /></Field>
       </div>
       <fieldset className="flex flex-col gap-2" disabled={yo}>
-        <legend className="mb-1.5 text-[12px] font-medium text-muted">Perfil{yo ? ' (nadie se cambia el perfil a sí mismo)' : ''}</legend>
-        {(['CONSULTA', 'ADMIN'] as const).map((p) => (
-          <label key={p} className={cx('flex items-start gap-2.5 rounded-lg border p-3 text-[13px]', v.perfil === p ? 'border-brand bg-brand-soft/40' : 'border-line', yo && 'opacity-60')}>
-            <input type="radio" name="perfil" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={v.perfil === p} onChange={() => setV((s) => ({ ...s, perfil: p }))} />
-            <span><span className="font-medium">{PERFIL[p]}</span><br /><span className="text-muted">{p === 'ADMIN' ? 'Consulta y descarga, carga declaraciones, pide y cancela servicios, e invita a los usuarios de su empresa.' : 'Solo consulta y descarga: no carga, no pide ni gestiona usuarios.'}</span></span>
+        <legend className="mb-1.5 text-[12px] font-medium text-muted">Rol en el portal{yo ? ' (nadie se cambia el rol a sí mismo)' : ''}</legend>
+        {roles.error && <p className="text-[13px] text-bad">{roles.error}</p>}
+        {!roles.datos && !roles.error && <p className="flex items-center gap-2 text-[13px] text-muted"><Loader2 size={14} className="animate-spin" />Cargando roles…</p>}
+        {roles.datos?.map((r) => (
+          <label key={r.id} className={cx('flex items-start gap-2.5 rounded-lg border p-3 text-[13px]', rolId === r.id ? 'border-brand bg-brand-soft/40' : 'border-line', yo && 'opacity-60')}>
+            <input type="radio" name="rol" className="mt-0.5 h-4 w-4 accent-[rgb(var(--brand))]" checked={rolId === r.id} onChange={() => setV((s) => ({ ...s, rolId: r.id }))} />
+            <span><span className="font-medium">{r.nombre}</span><br /><span className="text-muted">{r.descripcion ?? `${r.permisos.length} funciones`}</span></span>
           </label>
         ))}
+        {u?.rol && roles.datos && !roles.datos.some((r) => r.id === u.rol!.id) && <p className="text-[12px] text-warn">Su rol actual («{u.rol.nombre}») está inactivo: elija otro.</p>}
       </fieldset>
       <fieldset className={cx('flex flex-col gap-2', yo && 'opacity-60')} disabled={yo}>
         <legend className="mb-1.5 text-[12px] font-medium text-muted">Sedes que ve{yo ? ' (sus sedes las cambia otro administrador)' : ''}</legend>

@@ -225,13 +225,26 @@ await rechaza('…ni se borra la obligación que lo tiene', () => db.obligacionP
 console.log('\n10. Portal de clientes: usuarios del cliente y barrera en la base');
 const [rolBase] = await db.$queryRaw`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`;
 prueba('la base se usa con un usuario sin superusuario ni BYPASSRLS (si no, la RLS no actúa)', !rolBase.rolsuper && !rolBase.rolbypassrls, JSON.stringify(rolBase));
-const rolPortal = await db.rol.findFirstOrThrow({ where: { empresaId: E, nombre: 'Cliente (portal)' } });
+const rolPortal = await db.rol.findFirstOrThrow({ where: { empresaId: E, clave: 'CLIENTE_ADMIN' } });
 const datosPortal = (x) => ({ empresaId: E, rolId: rolPortal.id, nombre: 'Portal reglas', documento: '9' + sufijo, email: `portal.${x}.${sufijo}@reglas.test`, passwordHash: 'x', clienteId: cliente.id, perfilPortal: 'CONSULTA' });
 await rechaza('un usuario del portal lleva su perfil (y uno de oficina no lo lleva)', () => db.usuario.create({ data: { ...datosPortal('a'), perfilPortal: null } }), /chk_usuario_portal/);
 await rechaza('un usuario del portal no es conductor ni auxiliar', () => db.usuario.create({ data: { ...datosPortal('b'), esConductor: true } }), /chk_usuario_portal_campo/);
 const otroCliente = await db.cliente.create({ data: { empresaId: E, nit: `8${sufijo}02`, razonSocial: `Otro cliente reglas ${sufijo}` } });
 const sedeOtro = await db.sucursal.create({ data: { clienteId: otroCliente.id, nombre: 'Sede de otro cliente' } });
 const usuarioPortal = await db.usuario.create({ data: datosPortal('c') });
+
+// Roles configurables (migración 20261211000000_roles_configurables): la empresa y el portal tienen funciones distintas
+const rolAdmin = await db.rol.findFirstOrThrow({ where: { empresaId: E, clave: 'ADMINISTRADOR' }, include: { permisos: { include: { permiso: true } } } });
+const rolLogistica = await db.rol.findFirstOrThrow({ where: { empresaId: E, clave: 'LOGISTICA' } });
+const permisoDe = async (codigo) => (await db.permiso.findUniqueOrThrow({ where: { codigo } })).id;
+await rechaza('roles: un rol del portal no lleva funciones de la empresa', async () => db.rolPermiso.create({ data: { rolId: rolPortal.id, permisoId: await permisoDe('finanzas.ver') } }), /no corresponde al acceso/);
+await rechaza('…ni uno de la empresa funciones del portal', async () => db.rolPermiso.create({ data: { rolId: rolLogistica.id, permisoId: await permisoDe('portal.sedes.ver') } }), /no corresponde al acceso/);
+await rechaza('…el Administrador no pierde el acceso total', () => db.rolPermiso.deleteMany({ where: { rolId: rolAdmin.id, permiso: { codigo: '*' } } }), /conserva el acceso total/);
+await rechaza('…el acceso de un rol no cambia', () => db.rol.update({ where: { id: rolLogistica.id }, data: { acceso: 'CLIENTE' } }), /no se cambia/);
+await rechaza('…un rol predeterminado no se borra', () => db.rol.delete({ where: { id: rolLogistica.id } }), /predeterminado/);
+await rechaza('…un rol del portal no se da a una persona de la empresa', () => db.usuario.update({ where: { id: admin.id }, data: { rolId: rolPortal.id } }), /no corresponde/);
+await rechaza('…ni uno de la empresa a un usuario del portal', () => db.usuario.update({ where: { id: usuarioPortal.id }, data: { rolId: rolLogistica.id } }), /no corresponde/);
+await rechaza('…ni se inactiva un rol con personas activas', () => db.rol.update({ where: { id: rolPortal.id }, data: { activo: false } }), /usuarios activos/);
 await rechaza('no se le asigna una sede de otro cliente', () => db.usuarioSucursal.create({ data: { usuarioId: usuarioPortal.id, sucursalId: sedeOtro.id } }), /no es del cliente/);
 const vista = await db.$transaction(async (tx) => { await tx.$executeRaw`SELECT set_config('app.cliente_id', ${otroCliente.id}, true)`; return { suyos: await tx.sucursal.count(), ajenas: await tx.declaracion.count({ where: { clienteId: cliente.id } }) }; });
 prueba('RLS: con la sesión de un cliente, la base solo muestra sus filas', vista.suyos === 1 && vista.ajenas === 0, JSON.stringify(vista));

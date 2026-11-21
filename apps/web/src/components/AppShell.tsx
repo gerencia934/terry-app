@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Bell, Menu, X, Home, FileText, Tags, Truck, CalendarDays, ClipboardCheck, FileStack, Scale, BarChart3, Users, Car, UserCog,
   ListTree, ShieldCheck, Smartphone, Moon, Sun, Search, Upload, Download, Hourglass, Radar, Table2, Boxes, Settings,
-  Building2, Award, Milestone, FileSpreadsheet, Server, FlaskConical, Receipt, Handshake, LayoutGrid, type LucideIcon,
+  Building2, Award, Milestone, FileSpreadsheet, Server, FlaskConical, Receipt, Handshake, LayoutGrid, KeyRound, type LucideIcon,
 } from 'lucide-react';
 import { useRouter, type RouteName } from '../lib/router';
 import { cx } from '../lib/format';
@@ -42,11 +42,13 @@ export const GRUPOS: Grupo[] = [
   { id: 'analisis', label: 'Análisis', items: [{ route: 'indicadores', label: 'Indicadores', icon: BarChart3 }, { route: 'informes', label: 'Informes', icon: FileSpreadsheet }] },
   { id: 'ajustes', label: 'Ajustes', items: [
     { route: 'ajustes', label: 'Configuración', icon: Settings }, { route: 'importar', label: 'Importar datos', icon: Upload, desc: 'Plantillas de Excel' },
-    { route: 'usuarios', label: 'Usuarios y roles', icon: UserCog }, { route: 'vehiculos', label: 'Flota', icon: Car },
+    { route: 'usuarios', label: 'Usuarios', icon: UserCog },
+    { route: 'roles', label: 'Roles y permisos', icon: KeyRound, desc: 'Qué puede hacer cada rol: empresa, campo y portal de clientes', permiso: 'configuracion.editar' },
+    { route: 'vehiculos', label: 'Flota', icon: Car },
     { route: 'catalogos', label: 'Catálogos', icon: ListTree }, { route: 'etapas', label: 'Etapas del recorrido', icon: Milestone }, { route: 'empresa', label: 'Datos de la empresa', icon: Building2 }] },
 ];
 /** Secciones que ya leen y escriben en el servidor (el resto se conecta en la fase 1b). */
-const CONECTADAS = new Set<RouteName>(['inicio', 'comercial', 'facturacion', 'indicadores', 'inventario', 'catalogos', 'etapas', 'clientes', 'tarifas', 'permisos', 'inspecciones', 'vehiculos', 'usuarios', 'declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
+const CONECTADAS = new Set<RouteName>(['inicio', 'comercial', 'facturacion', 'indicadores', 'inventario', 'catalogos', 'etapas', 'clientes', 'tarifas', 'permisos', 'inspecciones', 'vehiculos', 'usuarios', 'roles', 'declaraciones', 'importar', 'solicitudes', 'por-confirmar', 'descargues', 'empresa', 'programacion', 'programacion-tabla', 'seguimiento', 'manifiestos', 'recepcion', 'certificados']);
 const TODOS = GRUPOS.flatMap((g) => g.items.map((i) => ({ ...i, grupo: g.label })));
 /** El ítem se ve si no pide permiso o si el usuario lo tiene (Facturación: solo Comercial, Facturación y Gerencia). */
 const visible = (i: Item) => !i.permiso || !MODO_REAL || tienePermiso(i.permiso);

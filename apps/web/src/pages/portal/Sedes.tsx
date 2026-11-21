@@ -7,7 +7,7 @@ import { Badge, Button, DefList, Field, Input, PageHeader, Select, Sheet, useToa
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/servidor';
 import { cx } from '../../lib/format';
-import { puedeEscribir, usePortal } from './PortalApp';
+import { puedeHacer, usePortal } from './PortalApp';
 import { errorPortal } from './comun';
 
 export interface SedeCompleta {
@@ -25,7 +25,7 @@ export function PortalSedes() {
   const lista = useApi<SedeCompleta[]>('/portal/sedes');
   const [sel, setSel] = useState<SedeCompleta | null>(null);
   const [form, setForm] = useState<null | { sede?: SedeCompleta }>(null);
-  const escribe = puedeEscribir(yo);
+  const escribe = puedeHacer(yo, 'portal.sedes.gestionar');
   const activas = lista.datos?.filter((s) => s.activa) ?? [];
   const inactivas = lista.datos?.filter((s) => !s.activa) ?? [];
   const listo = () => { setForm(null); setSel(null); lista.recargar(); yo.recargar?.(); };

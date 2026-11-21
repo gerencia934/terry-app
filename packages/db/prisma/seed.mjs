@@ -8,42 +8,14 @@ import shared from '@terraviva/shared';
 
 const { CATEGORIAS, TIPOS_RESIDUO, UNIDADES_NEGOCIO, LINEAS_SERVICIO, METRICAS, TIPOS_EMBALAJE, MATERIALES_EMBALAJE, DISPOSICIONES,
   PERMISOS_CAS, RIESGOS, SISTEMAS_ETIQUETADO, CODIGOS_CLASIFICACION, MUNICIPIOS,
-  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR, TEXTOS_LEGALES, TEXTOS_LEGALES_RETIRADOS, GESTORES_ALIADOS } = shared;
+  ENTIDADES_SEGURIDAD_SOCIAL, ESPECIFICACIONES_ADICIONALES, ETAPAS_RECORRIDO, SERVICIOS_ESTANDAR, TEXTOS_LEGALES, TEXTOS_LEGALES_RETIRADOS, GESTORES_ALIADOS,
+  MODULOS_PERMISOS, ROLES_PREDETERMINADOS } = shared;
 const db = new PrismaClient();
 const hashClave = (c) => hash(c, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
-const PERMISOS = [
-  ['*', 'Acceso total'], ['declaraciones.crear', 'Crear declaraciones'], ['declaraciones.autorizar', 'Autorizar o rechazar declaraciones'],
-  ['tarifas.asignar', 'Asignar tarifas'], ['clientes.editar', 'Crear y editar clientes y sucursales'], ['solicitudes.crear', 'Crear y gestionar solicitudes'],
-  ['solicitudes.aprobar', 'Aprobar o no aprobar solicitudes'],
-  ['manifiestos.operar', 'Diligenciar, firmar y grabar manifiestos'], ['manifiestos.anular', 'Anular manifiestos'],
-  ['conciliaciones.gestionar', 'Conciliar cantidades y registrar facturas y pagos'], ['conciliaciones.aprobar', 'Aprobar y reabrir conciliaciones'],
-  ['actas.emitir', 'Emitir, cargar y anular actas y certificados'], ['informes.ver', 'Ver informes de operación'],
-  ['exportar.masivo', 'Exportar a Excel y descargar documentos en bloque (queda en la auditoría)'],
-  ['rutas.programar', 'Programar rutas'], ['rutas.operar', 'Operar rutas en campo (preoperacional, paradas, estados)'],
-  ['permisos.gestionar', 'Gestionar permisos ambientales y obligaciones'], ['importacion.cargar', 'Importar datos desde Excel o CSV'],
-  ['importacion.revertir', 'Deshacer cargues de declaraciones de otras personas o con declaraciones autorizadas (las anula; no borra)'],
-  ['reportes.facturacion', 'Ver informes de facturación'], ['configuracion.editar', 'Editar configuración'],
-  // Facturación (Siigo): solo Comercial, Facturación (financiero) y Gerencia ven facturas, pagos y sus alertas
-  ['finanzas.ver', 'Ver facturas, pagos, la regla de certificado de los clientes y las alertas de manifiestos sin facturar'],
-  ['finanzas.gestionar', 'Sincronizar con Siigo, enlazar facturas, registrar pagos, marcar manifiestos sin cobro y liberar certificados'],
-  // Comercial (reemplaza a Bigin): prospectos, oportunidades, actividades, cotizaciones e importación de Bigin
-  ['comercial.gestionar', 'Prospectos, oportunidades, tareas y cotizaciones; ganar una oportunidad crea el cliente y sus declaraciones con tarifa'],
-];
-const ROLES = {
-  Administrador: ['*'],
-  Logística: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar',
-    'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'],
-  HSEQ: ['declaraciones.crear', 'declaraciones.autorizar', 'importacion.revertir', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'],
-  Comercial: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo',
-    'finanzas.ver', 'comercial.gestionar'],
-  Facturación: ['tarifas.asignar', 'reportes.facturacion', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo',
-    'finanzas.ver', 'finanzas.gestionar'],
-  Conductor: ['rutas.operar', 'manifiestos.operar'],
-  Auxiliar: ['rutas.operar', 'manifiestos.operar'],
-  // Portal de clientes: sin permisos de oficina; lo que ve lo decide su cliente y su perfil (apps/api/src/portal)
-  'Cliente (portal)': [],
-};
+// Funciones que se pueden otorgar: el catálogo de la pantalla Ajustes › Roles (MODULOS_PERMISOS de @terraviva/shared),
+// más una antigua que ya no se muestra (la conserva el rol que la tenía).
+const PERMISOS = [...MODULOS_PERMISOS.flatMap((m) => m.permisos.map((p) => [p.codigo, p.nombre])), ['reportes.facturacion', 'Ver informes de facturación (antiguo)']];
 /** Upsert por (empresa, código) de un catálogo paramétrico del módulo Declaraciones. */
 async function porEmpresa(modelo, empresaId, items, datos = (x) => ({ nombre: x.nombre, descripcion: x.descripcion ?? null })) {
   for (const x of items) await db[modelo].upsert({ where: { empresaId_codigo: { empresaId, codigo: x.codigo } }, update: datos(x), create: { empresaId, codigo: x.codigo, ...datos(x) } });
@@ -61,11 +33,14 @@ async function main() {
   const E = empresa.id;
 
   for (const [codigo, nombre] of PERMISOS) await db.permiso.upsert({ where: { codigo }, update: { nombre }, create: { codigo, nombre } });
-  for (const [nombre, codigos] of Object.entries(ROLES)) {
-    const rol = await db.rol.upsert({ where: { empresaId_nombre: { empresaId: E, nombre } }, update: {}, create: { empresaId: E, nombre } });
-    for (const c of codigos) {
+  // Roles predeterminados: se crean una sola vez con sus funciones marcadas. Después la empresa los ajusta en Ajustes ›
+  // Roles (o los restaura); volver a correr el seed no les cambia nada.
+  for (const r of ROLES_PREDETERMINADOS) {
+    if (await db.rol.findFirst({ where: { empresaId: E, clave: r.clave }, select: { id: true } })) continue;
+    const rol = await db.rol.create({ data: { empresaId: E, nombre: r.nombre, clave: r.clave, acceso: r.acceso, descripcion: r.descripcion, predeterminado: true } });
+    for (const c of r.permisos) {
       const p = await db.permiso.findUniqueOrThrow({ where: { codigo: c } });
-      await db.rolPermiso.upsert({ where: { rolId_permisoId: { rolId: rol.id, permisoId: p.id } }, update: {}, create: { rolId: rol.id, permisoId: p.id } });
+      await db.rolPermiso.create({ data: { rolId: rol.id, permisoId: p.id } });
     }
   }
 
@@ -239,7 +214,7 @@ async function main() {
   const email = (process.env.SEED_ADMIN_EMAIL ?? 'gerencia@terravivasas.com').toLowerCase();
   if (!(await db.usuario.findUnique({ where: { email } }))) {
     const clave = process.env.SEED_ADMIN_PASSWORD || randomBytes(9).toString('base64url');
-    const rol = await db.rol.findUniqueOrThrow({ where: { empresaId_nombre: { empresaId: E, nombre: 'Administrador' } } });
+    const rol = await db.rol.findFirstOrThrow({ where: { empresaId: E, clave: 'ADMINISTRADOR' } });
     await db.usuario.create({ data: { empresaId: E, rolId: rol.id, nombre: 'Gerencia', documento: '0', email, passwordHash: await hashClave(clave) } });
     console.log(`\n  Usuario administrador: ${email}\n  Contraseña: ${process.env.SEED_ADMIN_PASSWORD ? '(la de SEED_ADMIN_PASSWORD)' : clave}\n  Cámbiela después del primer ingreso.\n`);
   }

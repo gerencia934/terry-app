@@ -1,4 +1,5 @@
 // Usuarios y roles (fase 1c). Solo administración (permiso «configuracion.editar»; el administrador lo tiene por «*»).
+// Los roles y sus funciones se administran en ./roles.ts (Ajustes › Roles, 20-11-2026).
 // - Nadie escribe ni envía contraseñas: a un usuario nuevo le llega una invitación para crear la suya (72 horas).
 // - Nada se borra: un usuario se inactiva y sus sesiones se cierran de inmediato.
 // - Nadie se inactiva ni se cambia el rol a sí mismo, y siempre queda al menos un administrador activo.
@@ -11,6 +12,7 @@ import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
 import { AuthModule } from '../auth/auth.module';
 import { AuthService, hashClave } from '../auth/auth.service';
 import { randomBytes } from 'node:crypto';
+import { RolesController, RolesService } from './roles';
 
 const textoOpc = (max: number) => z.string().trim().max(max).transform((x) => x || null).nullish();
 const fechaOpc = z.union([z.literal('').transform(() => null), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD').transform((x) => new Date(`${x}T00:00:00Z`))]).nullish();
@@ -49,18 +51,11 @@ class UsuariosService {
     return { total, pagina, porPagina, filas: filas.map(({ bloqueadoHasta, ...u }) => ({ ...u, bloqueado: !!bloqueadoHasta && bloqueadoHasta > new Date() })) };
   }
 
-  /** Roles de la empresa con sus permisos y cuántos usuarios activos tienen (matriz de permisos). */
-  async roles(a: Actor) {
-    const [roles, permisos] = await Promise.all([
-      this.db.rol.findMany({ where: { empresaId: a.empresaId, nombre: { not: 'Cliente (portal)' } }, orderBy: { nombre: 'asc' }, include: { permisos: { include: { permiso: { select: { codigo: true } } } }, _count: { select: { usuarios: { where: { activo: true, clienteId: null } } } } } }),
-      this.db.permiso.findMany({ orderBy: { codigo: 'asc' }, select: { codigo: true, nombre: true } }),
-    ]);
-    return { permisos, roles: roles.map((r) => ({ id: r.id, nombre: r.nombre, usuariosActivos: r._count.usuarios, permisos: r.permisos.map((p) => p.permiso.codigo) })) };
-  }
-
   private async rolDe(a: Actor, rolId: string) {
-    const r = await this.db.rol.findFirst({ where: { id: rolId, empresaId: a.empresaId, nombre: { not: 'Cliente (portal)' } }, include: { permisos: { include: { permiso: { select: { codigo: true } } } } } });
+    // Un usuario de la empresa lleva un rol de oficina o de campo, activo (los del portal son de los usuarios de cada cliente)
+    const r = await this.db.rol.findFirst({ where: { id: rolId, empresaId: a.empresaId, acceso: { not: 'CLIENTE' } }, include: { permisos: { include: { permiso: { select: { codigo: true } } } } } });
     if (!r) throw new BadRequestException({ mensaje: 'Rol no válido.' });
+    if (!r.activo) throw new BadRequestException({ mensaje: `El rol «${r.nombre}» está inactivo: actívelo en Ajustes › Roles o elija otro.` });
     return { ...r, codigos: r.permisos.map((p) => p.permiso.codigo) };
   }
 
@@ -113,11 +108,10 @@ class UsuariosService {
 class UsuariosController {
   constructor(private readonly s: UsuariosService) {}
   @Permiso('configuracion.editar') @Get('usuarios') listar(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.listar(a, f); }
-  @Permiso('configuracion.editar') @Get('roles') roles(@ActorActual() a: Actor) { return this.s.roles(a); }
   @Permiso('configuracion.editar') @Post('usuarios') crear(@ActorActual() a: Actor, @Body(new Zod(Crear)) b: z.infer<typeof Crear>) { return this.s.crear(a, b); }
   @Permiso('configuracion.editar') @Patch('usuarios/:id') editar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Editar)) b: z.infer<typeof Editar>) { return this.s.editar(a, id, b); }
   @Permiso('configuracion.editar') @Post('usuarios/:id/invitacion') @HttpCode(200) reenviar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.reenviar(a, id); }
 }
 
-@Module({ imports: [AuthModule], controllers: [UsuariosController], providers: [UsuariosService] })
+@Module({ imports: [AuthModule], controllers: [UsuariosController, RolesController], providers: [UsuariosService, RolesService] })
 export class UsuariosModule {}

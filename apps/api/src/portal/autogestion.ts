@@ -83,7 +83,7 @@ export class AutogestionService {
   // ======================= Archivos =======================
   /** Guarda un PDF o una foto que sube el administrador del cliente (ficha de seguridad, caracterización, orden de compra). */
   async subirArchivo(a: Actor, f: Express.Multer.File | undefined) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.declaraciones.gestionar', 'portal.solicitudes.pedir', 'portal.entregas.pedir');
     if (!f) throw new BadRequestException({ mensaje: 'Adjunte el archivo.' });
     await this.p.conCliente(a, (tx) => this.p.exigirActivo(tx, a));
     const g = await this.archivos.guardar(a.empresaId, 'portal', f.buffer, ['pdf', 'jpg', 'png']);
@@ -93,6 +93,7 @@ export class AutogestionService {
 
   // ======================= Sedes =======================
   async sedes(a: Actor) {
+    await this.p.exigir(a, 'portal.sedes.ver', 'portal.sedes.gestionar');
     return this.p.conCliente(a, async (tx) => {
       const mias = await this.p.sedesDe(tx, a);
       const filas = await tx.sucursal.findMany({
@@ -112,7 +113,7 @@ export class AutogestionService {
     });
   }
 
-  municipiosBuscar(q: string) { return q.length < 2 ? [] : this.municipios.buscar(q, undefined, 15); }
+  async municipiosBuscar(a: Actor, q: string) { await this.p.exigir(a, 'portal.sedes.gestionar'); return q.length < 2 ? [] : this.municipios.buscar(q, undefined, 15); }
 
   private async validarSede(tx: Tx, a: Actor, b: Partial<z.infer<typeof DatosSede>>, actual?: { id: string; generadorNit: string | null }) {
     if ((b.latitud === undefined) !== (b.longitud === undefined) || ((b.latitud ?? null) === null) !== ((b.longitud ?? null) === null))
@@ -127,7 +128,7 @@ export class AutogestionService {
 
   /** Sede nueva: la crea el administrador que ve toda la empresa. Si el cliente no tiene principal, esta lo es. */
   async crearSede(a: Actor, b: z.infer<typeof DatosSede>) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.sedes.gestionar');
     const s = await this.p.conCliente(a, async (tx) => {
       await this.p.exigirActivo(tx, a);
       if ((await this.p.sedesDe(tx, a)).length)
@@ -145,7 +146,7 @@ export class AutogestionService {
 
   /** Corrige una sede o la inactiva (no se borra). La principal no se inactiva ni se cambia desde el portal. */
   async editarSede(a: Actor, id: string, b: z.infer<typeof EditarSede>) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.sedes.gestionar');
     return this.p.conCliente(a, async (tx) => {
       await this.p.exigirActivo(tx, a);
       const mias = await this.p.sedesDe(tx, a);
@@ -175,6 +176,7 @@ export class AutogestionService {
   // ======================= Declaraciones =======================
   /** Catálogos para el formulario del cliente (solo lo que necesita: sin causales, precios ni soportes internos). */
   async catalogos(a: Actor) {
+    await this.p.exigir(a, 'portal.declaraciones.gestionar');
     const c = await this.declaraciones.catalogos(a);
     const item = (x: { id: string; codigo: string; nombre: string }) => ({ id: x.id, codigo: x.codigo, nombre: x.nombre });
     return {
@@ -188,6 +190,7 @@ export class AutogestionService {
 
   /** Una declaración del cliente con lo que necesita el formulario para corregirla. */
   async formularioDeclaracion(a: Actor, id: string) {
+    await this.p.exigir(a, 'portal.declaraciones.gestionar');
     return this.p.conCliente(a, async (tx) => {
       const d = await this.declaracionVisible(tx, a, id);
       const x = await tx.declaracion.findUniqueOrThrow({ where: { id }, include: { sucursales: true, disposiciones: true, riesgos: true } });
@@ -241,7 +244,7 @@ export class AutogestionService {
 
   /** Declaración nueva: queda «en revisión» (Terra Viva fija la tarifa y la autoriza). */
   async crearDeclaracion(a: Actor, cuerpo: z.infer<typeof CuerpoDecl>) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.declaraciones.gestionar');
     const datos = this.datosDeclaracion(a, cuerpo);
     if (!datos.responsabilidadAceptada) throw new BadRequestException({ mensaje: 'Acepte la declaración de responsabilidad del generador.' });
     const d = await this.p.conCliente(a, async (tx) => {
@@ -257,7 +260,7 @@ export class AutogestionService {
 
   /** Corrige una declaración: vuelve a revisión (inactiva) hasta que Terra Viva la autorice de nuevo. */
   async editarDeclaracion(a: Actor, id: string, cuerpo: z.infer<typeof CuerpoDecl>) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.declaraciones.gestionar');
     const r = await this.p.conCliente(a, async (tx) => {
       await this.p.exigirActivo(tx, a);
       const previo = await this.declaracionVisible(tx, a, id);
@@ -275,7 +278,7 @@ export class AutogestionService {
 
   /** Retira una declaración que Terra Viva aún no ha autorizado y que no se ha usado (queda anulada, como constancia). */
   async retirarDeclaracion(a: Actor, id: string, motivo: string) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.declaraciones.gestionar');
     return this.p.conCliente(a, async (tx) => {
       const d = await this.declaracionVisible(tx, a, id);
       this.exigirSedes(d.mias, { alcanceSedes: 'SELECCION', sucursalIds: d.sucursales.map((s) => s.sucursalId) } as Datos);
@@ -289,7 +292,7 @@ export class AutogestionService {
 
   /** Inactiva una declaración autorizada que el cliente ya no genera. Volver a activarla lo hace Terra Viva. */
   async inactivarDeclaracion(a: Actor, id: string, motivo: string) {
-    this.p.soloAdmin(a);
+    await this.p.exigir(a, 'portal.declaraciones.gestionar');
     const r = await this.p.conCliente(a, async (tx) => {
       const d = await this.declaracionVisible(tx, a, id);
       this.exigirSedes(d.mias, { alcanceSedes: 'SELECCION', sucursalIds: d.sucursales.map((s) => s.sucursalId) } as Datos);
@@ -310,6 +313,7 @@ export class AutogestionService {
 
   /** Enlace (5 minutos) a la ficha de seguridad o a la caracterización que subió el cliente. */
   async enlaceDocumento(a: Actor, id: string, cual: 'ficha' | 'caracterizacion') {
+    await this.p.exigir(a, 'portal.declaraciones.ver');
     const d = await this.p.conCliente(a, (tx) => this.declaracionVisible(tx, a, id));
     const v = cual === 'ficha' ? d.fichaSeguridadUrl : d.caracterizacionUrl;
     if (!v) throw new NotFoundException({ mensaje: 'La declaración no tiene ese documento.' });
@@ -325,6 +329,8 @@ export class AutogestionService {
    * está aprobada, lo pesado en planta, el precio conciliado, su valor, la factura y el certificado.
    */
   async informeGeneral(a: Actor, f: z.infer<typeof FiltroGeneral>) {
+    await this.p.exigir(a, 'portal.informes.ver');
+    const precios = await this.p.puede(a, 'portal.precios.ver');
     const desde = new Date(`${f.desde}T00:00:00Z`), hasta = new Date(`${f.hasta}T00:00:00Z`);
     if (Number.isNaN(desde.getTime()) || Number.isNaN(hasta.getTime()) || hasta < desde) throw new BadRequestException({ mensaje: 'Revise el rango de fechas.' });
     if (hasta.getTime() - desde.getTime() > 400 * 86_400_000) throw new BadRequestException({ mensaje: 'Pida el informe de máximo un año a la vez.' });
@@ -353,7 +359,8 @@ export class AutogestionService {
           sede: x.sucursal.nombre, sedeCodigo: x.sucursal.codigo, declaracion: x.declaracion.numero, residuo: x.declaracion.nombre, codigoInterno: x.declaracion.codigoInterno, peligroso: x.declaracion.esPeligroso,
           cargado: Number(x.cantidad), unidad: x.metrica?.abreviacion ?? null, conciliada: aprobada, pesado, unidadPlanta: conc?.metrica?.abreviacion ?? x.metrica?.abreviacion ?? null,
           tratamiento: conc?.disposicion?.nombre ?? x.disposicion?.nombre ?? null, destino: x.manifiesto.destino.razonSocial,
-          precio, valor: precio !== null && pesado !== null ? Math.round(precio * pesado * 100) / 100 : null, negociacion: conc?.tipoNegociacion ?? null,
+          // Sin «ver tarifas y valores» en su rol, el precio y el valor no salen del servidor
+          precio: precios ? precio : null, valor: precios && precio !== null && pesado !== null ? Math.round(precio * pesado * 100) / 100 : null, negociacion: precios ? conc?.tipoNegociacion ?? null : null,
           factura: conc?.facturaNumero ?? null, certificado: conc?.acta?.estado === 'EMITIDA' ? conc.acta.numero : null,
         };
       });
@@ -380,7 +387,7 @@ export class AutogestionController {
   @Post('archivos') @UseInterceptors(archivo) subir(@ActorActual() a: Actor, @UploadedFile() f?: Express.Multer.File) { return this.s.subirArchivo(a, f); }
   // Sedes
   @Get('sedes') sedes(@ActorActual() a: Actor) { return this.s.sedes(a); }
-  @Get('municipios') municipios(@Query(new Zod(BuscarMunicipio)) q: z.infer<typeof BuscarMunicipio>) { return this.s.municipiosBuscar(q.q); }
+  @Get('municipios') municipios(@ActorActual() a: Actor, @Query(new Zod(BuscarMunicipio)) q: z.infer<typeof BuscarMunicipio>) { return this.s.municipiosBuscar(a, q.q); }
   @Post('sedes') crearSede(@ActorActual() a: Actor, @Body(new Zod(DatosSede)) b: z.infer<typeof DatosSede>) { return this.s.crearSede(a, b); }
   @Patch('sedes/:id') editarSede(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EditarSede)) b: z.infer<typeof EditarSede>) { return this.s.editarSede(a, id, b); }
   // Declaraciones (los catálogos van en otra ruta: «declaraciones/:id» ya es el detalle)

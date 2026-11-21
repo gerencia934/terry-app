@@ -327,13 +327,28 @@ model Empresa {
   @@map("empresas")
 }
 
+/// Acceso al sistema de un rol (como en Grinclic: uno solo). El portal de clientes es otro acceso, con sus propias funciones.
+enum AccesoRol {
+  OFICINA
+  CAMPO
+  CLIENTE
+}
+
 model Rol {
-  id        String       @id @default(uuid()) @db.Uuid
-  empresaId String       @map("empresa_id") @db.Uuid
-  nombre    String       @db.VarChar(60)
-  empresa   Empresa      @relation(fields: [empresaId], references: [id])
-  permisos  RolPermiso[]
-  usuarios  Usuario[]
+  id             String       @id @default(uuid()) @db.Uuid
+  empresaId      String       @map("empresa_id") @db.Uuid
+  nombre         String       @db.VarChar(60)
+  /// Rol predeterminado (ADMINISTRADOR, LOGISTICA… CLIENTE_ADMIN): así lo encuentra el código aunque le cambien el nombre
+  clave          String?      @db.VarChar(40)
+  descripcion    String?      @db.VarChar(400)
+  acceso         AccesoRol    @default(OFICINA)
+  activo         Boolean      @default(true)
+  predeterminado Boolean      @default(false)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  empresa        Empresa      @relation(fields: [empresaId], references: [id])
+  permisos       RolPermiso[]
+  usuarios       Usuario[]
 
   @@unique([empresaId, nombre])
   @@map("roles")
