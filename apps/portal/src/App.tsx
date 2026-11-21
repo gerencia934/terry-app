@@ -9,6 +9,12 @@ import { MiCuenta } from './pantallas/MiCuenta';
 import { Cuentas } from './pantallas/Cuentas';
 
 type Vista = 'menu' | 'mi-cuenta' | 'cuentas';
+// Selector de módulos (App Shell): desde cualquier módulo, «…/#abrir=crm» abre ese módulo con su pase.
+// Se guarda antes de que el ingreso limpie la barra de direcciones; el menú lo abre al cargar.
+{
+  const m = location.hash.match(/^#abrir=(residuos|mantenimiento|crm|planta)$/);
+  if (m) { try { sessionStorage.setItem('tv-abrir', m[1]); } catch { /* sin almacenamiento: queda el menú */ } history.replaceState(null, '', location.pathname); }
+}
 const vistaDelHash = (): Vista => (location.hash === '#mi-cuenta' ? 'mi-cuenta' : location.hash === '#cuentas' ? 'cuentas' : 'menu');
 
 export default function App() {

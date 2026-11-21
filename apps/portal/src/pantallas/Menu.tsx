@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight, Factory, Handshake, Loader2, Recycle, Wrench, type LucideIcon } from 'lucide-react';
 import { Badge, Button } from '../componentes/ui';
 import { api, cx, ErrorApi, mensajeDe, type IdModulo, type ModuloMenu, type Yo } from '../lib';
@@ -33,6 +33,14 @@ export function Menu({ yo }: { yo: Yo }) {
       }
     }
   };
+  // Llegó desde el selector de módulos de otro módulo (#abrir=…): se abre directo si la cuenta tiene acceso
+  useEffect(() => {
+    let id: string | null = null;
+    try { id = sessionStorage.getItem('tv-abrir'); sessionStorage.removeItem('tv-abrir'); } catch { /* nada */ }
+    const m = id ? yo.modulos.find((x) => x.id === id && x.acceso && x.estado !== 'proximamente') : undefined;
+    if (m) void abrir(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const nombre = yo.cuenta.nombre.split(' ')[0];
   return (
     <div className="mx-auto w-full max-w-5xl">
