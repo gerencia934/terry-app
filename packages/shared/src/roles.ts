@@ -42,7 +42,8 @@ export const MODULOS_PERMISOS: ModuloPermisos[] = [
   ] },
   { clave: 'solicitudes', nombre: 'Solicitudes', permisos: [
     { codigo: 'solicitudes.crear', nombre: 'Crear y gestionar solicitudes', descripcion: 'Registrar pedidos de recolección o de entrega en planta, cambiar su estado y cancelarlos.', accesos: O },
-    { codigo: 'solicitudes.aprobar', nombre: 'Aprobar solicitudes', descripcion: 'Confirmar o no aprobar los pedidos, también los que llegan del portal de clientes.', accesos: O },
+    { codigo: 'solicitudes.aprobar', nombre: 'Aprobar recolecciones', descripcion: 'Confirmar o no aprobar los pedidos de recolección con transporte de Terra Viva, también los que llegan del portal (Líder de Operaciones).', accesos: O },
+    { codigo: 'solicitudes.autorizar_entrega', nombre: 'Autorizar entregas en planta', descripcion: 'Autorizar o no los pedidos en que el cliente trae el residuo a la planta en su propio vehículo (Jefe de Planta).', accesos: O },
   ] },
   { clave: 'rutas', nombre: 'Rutas y campo', permisos: [
     { codigo: 'rutas.programar', nombre: 'Programar rutas', descripcion: 'Armar y cambiar rutas con vehículo, conductor y auxiliar, descartar líneas y ver el rastreo GPS.', accesos: O },
@@ -105,20 +106,30 @@ export const modulosDeAcceso = (acceso: AccesoRol): ModuloPermisos[] =>
 /** Códigos que admite un rol con ese acceso. */
 export const codigosDeAcceso = (acceso: AccesoRol): string[] => modulosDeAcceso(acceso).flatMap((m) => m.permisos.map((p) => p.codigo));
 
-export type ClaveRol = 'ADMINISTRADOR' | 'LOGISTICA' | 'HSEQ' | 'COMERCIAL' | 'FACTURACION' | 'CONDUCTOR' | 'AUXILIAR' | 'CLIENTE_ADMIN' | 'CLIENTE_CONSULTA';
-export interface RolPredeterminado { clave: ClaveRol; nombre: string; acceso: AccesoRol; descripcion: string; permisos: string[] }
+export type ClaveRol = 'ADMINISTRADOR' | 'JEFE_OPERACIONES' | 'LOGISTICA' | 'JEFE_PLANTA' | 'HSEQ' | 'COMERCIAL' | 'FACTURACION' | 'CONDUCTOR' | 'AUXILIAR' | 'CLIENTE_ADMIN' | 'CLIENTE_CONSULTA';
+export interface RolPredeterminado { clave: ClaveRol; nombre: string; acceso: AccesoRol; descripcion: string; permisos: string[]; /** Nombres anteriores (cargues viejos). */ alias?: string[] }
 
 const PORTAL_VER = ['portal.sedes.ver', 'portal.declaraciones.ver', 'portal.solicitudes.ver', 'portal.manifiestos.ver', 'portal.certificados.ver', 'portal.informes.ver', 'portal.precios.ver'];
 
-/** Roles con los que arranca la empresa: vienen con sus funciones marcadas y se pueden ajustar o restaurar. */
+/**
+ * Roles con los que arranca la empresa: vienen con sus funciones marcadas y se pueden ajustar o restaurar.
+ * Siguen la cadena del servicio de Terra Viva (gerencia, 20-11-2026): Comercial o el Jefe de Operaciones crean el cliente y
+ * su acceso al portal; el Líder de Operaciones aprueba las recolecciones y arma las rutas; el Jefe de Planta autoriza las
+ * entregas en planta y recibe; Facturación concilia, factura y libera el acta.
+ */
 export const ROLES_PREDETERMINADOS: RolPredeterminado[] = [
   { clave: 'ADMINISTRADOR', nombre: 'Administrador', acceso: 'OFICINA', descripcion: 'Gerencia y administración del sistema: acceso total. No se le quitan permisos (así nadie queda por fuera de la configuración).', permisos: ['*'] },
-  { clave: 'LOGISTICA', nombre: 'Logística', acceso: 'OFICINA', descripcion: 'Programa rutas, atiende solicitudes, maneja manifiestos y concilia cantidades.',
-    permisos: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'clientes.editar', 'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'] },
+  { clave: 'JEFE_OPERACIONES', nombre: 'Jefe de Operaciones', acceso: 'OFICINA', descripcion: 'Dirige la operación: crea clientes y su acceso al portal, aprueba recolecciones y entregas en planta, programa rutas y concilia.',
+    permisos: ['clientes.editar', 'declaraciones.crear', 'solicitudes.crear', 'solicitudes.aprobar', 'solicitudes.autorizar_entrega', 'rutas.programar', 'manifiestos.operar', 'manifiestos.anular',
+      'conciliaciones.gestionar', 'conciliaciones.aprobar', 'importacion.cargar', 'informes.ver', 'exportar.masivo'] },
+  { clave: 'LOGISTICA', nombre: 'Líder de Operaciones', alias: ['Logística', 'Logistica'], acceso: 'OFICINA', descripcion: 'Revisa y aprueba las solicitudes de recolección, programa las rutas, maneja los manifiestos y concilia cantidades.',
+    permisos: ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar', 'rutas.operar', 'importacion.cargar', 'manifiestos.operar', 'manifiestos.anular', 'conciliaciones.gestionar', 'informes.ver', 'exportar.masivo'] },
+  { clave: 'JEFE_PLANTA', nombre: 'Jefe de Planta', acceso: 'OFICINA', descripcion: 'Autoriza las entregas en planta, recibe los residuos y genera el manifiesto de entrada (descargue).',
+    permisos: ['solicitudes.autorizar_entrega', 'manifiestos.operar', 'informes.ver'] },
   { clave: 'HSEQ', nombre: 'HSEQ', acceso: 'OFICINA', descripcion: 'Revisa y autoriza declaraciones, lleva permisos y licencias ambientales y emite los certificados.',
     permisos: ['declaraciones.crear', 'declaraciones.autorizar', 'importacion.revertir', 'permisos.gestionar', 'rutas.operar', 'manifiestos.anular', 'actas.emitir', 'informes.ver', 'exportar.masivo'] },
   { clave: 'COMERCIAL', nombre: 'Comercial', acceso: 'OFICINA', descripcion: 'Clientes, declaraciones, tarifas, solicitudes y gestión comercial (reemplaza a Bigin).',
-    permisos: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'solicitudes.aprobar', 'informes.ver', 'exportar.masivo', 'finanzas.ver', 'comercial.gestionar'] },
+    permisos: ['declaraciones.crear', 'clientes.editar', 'tarifas.asignar', 'importacion.cargar', 'solicitudes.crear', 'informes.ver', 'exportar.masivo', 'finanzas.ver', 'comercial.gestionar'] },
   { clave: 'FACTURACION', nombre: 'Facturación', acceso: 'OFICINA', descripcion: 'Tarifas, conciliaciones, facturas y pagos con Siigo.',
     permisos: ['tarifas.asignar', 'conciliaciones.gestionar', 'conciliaciones.aprobar', 'informes.ver', 'exportar.masivo', 'finanzas.ver', 'finanzas.gestionar'] },
   { clave: 'CONDUCTOR', nombre: 'Conductor', acceso: 'CAMPO', descripcion: 'Opera sus rutas en el celular: inspección preoperacional, paradas y manifiestos.', permisos: ['rutas.operar', 'manifiestos.operar'] },
@@ -128,3 +139,5 @@ export const ROLES_PREDETERMINADOS: RolPredeterminado[] = [
   { clave: 'CLIENTE_CONSULTA', nombre: 'Cliente: consulta', acceso: 'CLIENTE', descripcion: 'Consulta y descarga lo de su empresa (o de sus sedes): no declara ni pide servicios.', permisos: PORTAL_VER },
 ];
 export const rolPredeterminado = (clave: string | null | undefined) => ROLES_PREDETERMINADOS.find((r) => r.clave === clave);
+/** Nombre de una función del catálogo (para los mensajes): «clientes.editar» → «Crear y editar clientes». */
+export const nombreFuncion = (codigo: string) => MODULOS_PERMISOS.flatMap((m) => m.permisos).find((p) => p.codigo === codigo)?.nombre ?? codigo;

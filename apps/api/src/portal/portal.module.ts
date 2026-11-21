@@ -511,7 +511,7 @@ export class PortalService {
       return { id: s.id, numero: s.numero };
     });
     // Aviso push a quienes aprueban: un pedido nuevo del portal espera su confirmación
-    void this.db.cliente.findUnique({ where: { id: a.clienteId! }, select: { razonSocial: true } }).then((c) => this.notificaciones.aPermisos(a.empresaId, ['solicitudes.aprobar', 'solicitudes.crear'], {
+    void this.db.cliente.findUnique({ where: { id: a.clienteId! }, select: { razonSocial: true } }).then((c) => this.notificaciones.aPermisos(a.empresaId, [b.operacion === 'DESCARGA' ? 'solicitudes.autorizar_entrega' : 'solicitudes.aprobar', 'solicitudes.crear'], {
       titulo: b.operacion === 'DESCARGA' ? 'Entrega en planta pedida desde el portal' : 'Pedido nuevo desde el portal',
       cuerpo: `N.° ${r.numero} · ${c?.razonSocial ?? 'Cliente'} · para el ${b.fechaSolicitada}`, ruta: 'por-confirmar', etiqueta: `solicitud-${r.numero}`,
     })).catch(() => undefined);

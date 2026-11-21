@@ -14,6 +14,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma, ReglaCertificado } from '@prisma/client';
 import { z } from 'zod';
+import { esExcepcionCertificado } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { ActorActual, Permiso, Zod, fechaColombia, paginar, type Actor } from '../common/http';
@@ -29,7 +30,7 @@ const Filtros = z.object({
 });
 const Enlazar = z.object({ factura: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,10}-\d{1,4}-\d{1,12}$/, 'Escriba el número como sale en Siigo, por ejemplo FV-2-1234.') });
 const Libre = z.object({ motivo: z.string().trim().min(5, 'Escriba el motivo (mínimo 5 caracteres).').max(300) });
-const Regla = z.object({ regla: z.nativeEnum(ReglaCertificado) });
+const Regla = z.object({ regla: z.nativeEnum(ReglaCertificado), motivo: z.string().trim().max(300).optional() });
 /** La alerta cuenta los manifiestos realizados hace más de estos días y aún sin factura. */
 export const DIAS_PARA_FACTURAR = 5;
 /** Lo que muestra el panel de cada manifiesto. */
@@ -324,13 +325,18 @@ export class FinanzasService implements OnApplicationBootstrap, OnModuleDestroy 
     return this.fila(a, id);
   }
 
-  /** Regla del certificado del cliente (Comercial, Facturación o Gerencia). */
+  /**
+   * Regla del certificado del cliente. La de Terra Viva es «Exigir factura» (gerencia, 20-11-2026); una más flexible es una
+   * excepción que solo dan Facturación o Gerencia (finanzas.gestionar), siempre con su motivo.
+   */
   async regla(a: Actor, id: string, b: z.infer<typeof Regla>) {
     const c = await this.db.cliente.findFirst({ where: { id, empresaId: a.empresaId }, select: { id: true, reglaCertificado: true } });
     if (!c) throw new NotFoundException({ mensaje: 'Cliente no encontrado.' });
     if (c.reglaCertificado === b.regla) return c;
+    if (esExcepcionCertificado(b.regla) && (b.motivo ?? '').length < 10)
+      throw new BadRequestException({ mensaje: 'Una excepción a «Exigir factura» necesita su motivo (mínimo 10 caracteres): queda en la auditoría.' });
     const r = await this.db.cliente.update({ where: { id }, data: { reglaCertificado: b.regla }, select: { id: true, reglaCertificado: true } });
-    await this.audit.registrar(a, 'cliente', id, 'REGLA_CERTIFICADO', { regla: c.reglaCertificado }, { regla: b.regla });
+    await this.audit.registrar(a, 'cliente', id, 'REGLA_CERTIFICADO', { regla: c.reglaCertificado }, { regla: b.regla, ...(b.motivo ? { motivo: b.motivo } : {}) });
     return r;
   }
 
@@ -347,7 +353,7 @@ class FinanzasController {
   @Permiso('finanzas.ver') @Get('siigo') siigo(@ActorActual() a: Actor) { return this.s.estadoSiigo(a); }
   @Permiso('finanzas.ver') @Get('manifiestos') manifiestos(@ActorActual() a: Actor, @Query(new Zod(Filtros)) f: z.infer<typeof Filtros>) { return this.s.manifiestos(a, f); }
   @Permiso('finanzas.ver') @Get('clientes/:id') cliente(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string) { return this.s.cliente(a, id); }
-  @Permiso('finanzas.ver') @Patch('clientes/:id/regla-certificado') regla(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Regla)) b: z.infer<typeof Regla>) { return this.s.regla(a, id, b); }
+  @Permiso('finanzas.gestionar') @Patch('clientes/:id/regla-certificado') regla(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Regla)) b: z.infer<typeof Regla>) { return this.s.regla(a, id, b); }
   @Permiso('finanzas.gestionar') @Post('siigo/sincronizar') @HttpCode(202) sincronizar(@ActorActual() a: Actor) { return this.s.sincronizarAhora(a); }
   @Permiso('finanzas.gestionar') @Post('manifiestos/:id/facturas') enlazar(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(Enlazar)) b: z.infer<typeof Enlazar>) { return this.s.enlazar(a, id, b); }
   @Permiso('finanzas.gestionar') @Delete('manifiestos/:id/facturas/:facturaId')

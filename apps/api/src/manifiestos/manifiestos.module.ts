@@ -183,19 +183,22 @@ export class ManifiestosService {
       this.db.manifiesto.findMany({ where, take, skip, orderBy: [{ fechaServicio: 'desc' }, { numero: 'desc' }], include: {
         cliente: { select: { razonSocial: true } }, ruta: { select: { codigo: true } }, vehiculo: { select: { placa: true } }, transporte: { select: { placa: true, empresaTransportadora: true } },
         conciliacion: { select: { estado: true } }, causalAnulacion: { select: { nombre: true } },
+        // Marca de facturación (Siigo): solo si está facturado; sin montos
+        finanzas: { select: { facturado: true } },
         items: { select: { sucursal: { select: { nombre: true } }, solicitudItem: { select: { solicitud: { select: { numero: true } } } } } },
       } }),
     ]);
-    return { total, pagina, porPagina, filas: filas.map(({ items, ...m }) => ({
-      ...m, lineas: items.length, sedes: [...new Set(items.map((i) => i.sucursal.nombre))], solicitudes: [...new Set(items.map((i) => i.solicitudItem?.solicitud.numero).filter(Boolean))],
+    return { total, pagina, porPagina, filas: filas.map(({ items, finanzas, ...m }) => ({
+      ...m, facturado: finanzas?.facturado ?? false, lineas: items.length, sedes: [...new Set(items.map((i) => i.sucursal.nombre))], solicitudes: [...new Set(items.map((i) => i.solicitudItem?.solicitud.numero).filter(Boolean))],
     })) };
   }
 
   async obtener(a: Actor, id: string) {
-    const m = await this.db.manifiesto.findFirst({ where: { id, empresaId: a.empresaId }, include: detalle });
+    const m = await this.db.manifiesto.findFirst({ where: { id, empresaId: a.empresaId }, include: { ...detalle, finanzas: { select: { facturado: true } } } });
     if (!m) throw new NotFoundException({ mensaje: 'Manifiesto no encontrado.' });
     const total = m.items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precioUnitario ?? 0), 0);
-    return { ...m, items: m.items.map((i) => ({ ...i, subtotal: Math.round(Number(i.cantidad) * Number(i.precioUnitario ?? 0) * 100) / 100 })), total: Math.round(total * 100) / 100 };
+    const { finanzas, ...resto } = m;
+    return { ...resto, facturado: finanzas?.facturado ?? false, items: m.items.map((i) => ({ ...i, subtotal: Math.round(Number(i.cantidad) * Number(i.precioUnitario ?? 0) * 100) / 100 })), total: Math.round(total * 100) / 100 };
   }
 
   async agregarLinea(a: Actor, id: string, l: z.infer<typeof Linea>) {

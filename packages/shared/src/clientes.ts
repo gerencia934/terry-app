@@ -18,14 +18,21 @@ export const AVISO_CLIENTE_INACTIVO: Record<MotivoInactivacionCliente, string> =
   OTRO: 'Su cuenta está inactiva por el momento. Puede seguir consultando su información; para pedir servicios o cargar declaraciones, comuníquese con su asesor comercial.',
 };
 
-/** Regla del certificado de disposición de cada cliente (Siigo, gerencia 19-11-2026). */
+/**
+ * Regla del certificado de disposición de cada cliente (Siigo, gerencia 19-11-2026). Desde el 20-11-2026 la regla de Terra
+ * Viva es «Exigir factura»: el acta solo se libera cuando el manifiesto está facturado. Las reglas más flexibles son
+ * excepciones: solo las dan Facturación o Gerencia, con su motivo (queda en la auditoría).
+ */
 export const REGLAS_CERTIFICADO = {
-  AL_VENCER: { nombre: 'Retener si hay facturas vencidas', descripcion: 'La regla amable: se emite siempre; en el portal se descarga salvo que tenga una factura vencida (días de gracia en Ajustes).' },
-  EXIGIR_FACTURA: { nombre: 'Exigir factura', descripcion: 'No se emite ni se descarga el certificado mientras sus manifiestos no tengan factura.' },
-  EXIGIR_PAGO: { nombre: 'Exigir pago', descripcion: 'No se emite ni se descarga el certificado mientras sus facturas no estén pagadas.' },
-  LIBRE: { nombre: 'Libre', descripcion: 'Se emite y se descarga sin restricciones financieras.' },
+  EXIGIR_FACTURA: { nombre: 'Exigir factura (regla de Terra Viva)', descripcion: 'No se emite ni se descarga el certificado mientras sus manifiestos no tengan factura.' },
+  EXIGIR_PAGO: { nombre: 'Exigir pago', descripcion: 'Más estricta: no se emite ni se descarga el certificado mientras sus facturas no estén pagadas.' },
+  AL_VENCER: { nombre: 'Excepción: retener solo si hay facturas vencidas', descripcion: 'Se emite siempre; en el portal se descarga salvo que tenga una factura vencida (días de gracia en Ajustes).' },
+  LIBRE: { nombre: 'Excepción: libre', descripcion: 'Se emite y se descarga sin restricciones financieras.' },
 } as const;
 export type ReglaCertificado = keyof typeof REGLAS_CERTIFICADO;
+/** La regla de la empresa; las más flexibles que ella son excepciones con motivo. */
+export const REGLA_CERTIFICADO_EMPRESA: ReglaCertificado = 'EXIGIR_FACTURA';
+export const esExcepcionCertificado = (r: ReglaCertificado) => r === 'AL_VENCER' || r === 'LIBRE';
 
 /** Sector económico del cliente: lista cerrada (los primeros seis los pidió la gerencia; el resto completa «entre otros»). */
 export const SECTORES = [

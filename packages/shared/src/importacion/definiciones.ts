@@ -75,7 +75,7 @@ export const L = {
   unidad: ['kg', 't', 'm³', 'gal', 'L', 'und'],
   tipoVehiculo: ['Furgón', 'Camión estacas', 'Volqueta', 'Carrotanque / vactor', 'Camioneta', 'Tractocamión'],
   // Roles de oficina y campo (los del portal son de los usuarios de cada cliente: se invitan desde su ficha)
-  rol: ['Administrador', 'Logística', 'HSEQ', 'Comercial', 'Facturación', 'Conductor', 'Auxiliar'],
+  rol: ['Administrador', 'Jefe de Operaciones', 'Líder de Operaciones', 'Jefe de Planta', 'HSEQ', 'Comercial', 'Facturación', 'Conductor', 'Auxiliar'],
   licencia: ['B1', 'B2', 'B3', 'C1', 'C2', 'C3'],
   tipoSolicitud: ['Recolección en sede', 'Entrega en planta'],
   jornada: ['AM', 'PM'],

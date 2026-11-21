@@ -532,7 +532,7 @@ model Cliente {
   motivoInactivacion MotivoInactivacion? @map("motivo_inactivacion")
   notaInactivacion   String?             @map("nota_inactivacion") @db.VarChar(500) // interna: el portal no la muestra
   inactivadoEn       DateTime?           @map("inactivado_en") @db.Timestamptz
-  reglaCertificado   ReglaCertificado    @default(AL_VENCER) @map("regla_certificado") // solo la ven y cambian Comercial, Facturación y Gerencia
+  reglaCertificado   ReglaCertificado    @default(EXIGIR_FACTURA) @map("regla_certificado") // sin factura no hay acta; las excepciones las dan Facturación o Gerencia con motivo
   camposExtra        Json                @default("{}") @map("campos_extra")
 
   empresa                 Empresa                @relation(fields: [empresaId], references: [id])

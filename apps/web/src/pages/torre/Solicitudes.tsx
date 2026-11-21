@@ -96,7 +96,8 @@ function DetalleSolicitud({ s, onClose, onCambio }: { s: Sol | null; onClose: ()
     setOcupado(true);
     try { await fn(); toast(ok); onCambio(); } catch (e) { toast(msg(e), 'warn'); } finally { setOcupado(false); }
   };
-  const aprobable = s && s.aprobacion === 'PENDIENTE' && s.estado === 'PENDIENTE' && tienePermiso('solicitudes.aprobar');
+  // Recolección: la aprueba el Líder de Operaciones; entrega en planta: la autoriza el Jefe de Planta
+  const aprobable = s && s.aprobacion === 'PENDIENTE' && s.estado === 'PENDIENTE' && tienePermiso(s.operacion === 'DESCARGA' ? 'solicitudes.autorizar_entrega' : 'solicitudes.aprobar');
   const cancelable = s && !['RECOLECTADA', 'CANCELADA'].includes(s.estado) && tienePermiso('solicitudes.crear');
   return (
     <Sheet open={!!s} onClose={onClose} title={s ? `Solicitud ${s.numero}` : ''}

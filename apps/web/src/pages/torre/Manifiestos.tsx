@@ -14,6 +14,8 @@ interface MfFila {
   id: string; numero: string; tipo: 'CARGUE' | 'DESCARGUE'; estado: 'PENDIENTE' | 'REALIZADO' | 'ANULADO'; fechaServicio: string;
   cliente: { razonSocial: string }; ruta: { codigo: string } | null; vehiculo: { placa: string } | null; transporte: { placa: string | null; empresaTransportadora: string } | null;
   conciliacion: { estado: string } | null; lineas: number; sedes: string[]; solicitudes: number[];
+  /** Marca de facturación (Siigo): sin factura no se libera el acta. */
+  facturado: boolean;
 }
 interface Evidencia { id: string; tipo: 'FOTO' | 'PDF'; url: string; nombreArchivo: string | null; tomadaEn: string | null; createdAt: string }
 interface MfDetalle {
@@ -26,7 +28,7 @@ interface MfDetalle {
   receptorNombre: string | null; receptorDocumento: string | null; firmaReceptorUrl: string | null;
   transporte: { empresaTransportadora: string; nit: string | null; placa: string | null; conductorNombre: string | null; conductorDocumento: string | null; auxiliarNombre: string | null;
     conductorArl: { nombre: string } | null; conductorEps: { nombre: string } | null } | null;
-  causalAnulacion: { nombre: string } | null; conciliacion: { id: string; estado: string } | null; evidencias: Evidencia[];
+  causalAnulacion: { nombre: string } | null; conciliacion: { id: string; estado: string } | null; evidencias: Evidencia[]; facturado: boolean;
   items: { id: string; cantidad: string; embalajes: number | null; precioUnitario: string | null; subtotal: number; observaciones: string | null;
     declaracion: { nombre: string; codigoInterno: string | null; esPeligroso: boolean }; sucursal: { codigo: string | null; nombre: string };
     metrica: { abreviacion: string } | null; disposicion: { nombre: string } | null; tipoEmbalaje: { nombre: string } | null;
@@ -56,6 +58,7 @@ export function ManifiestosServidor() {
     { key: 'placa', header: 'Placa', render: (m) => <span className="num">{placa(m)}</span>, priority: 2 },
     { key: 'lin', header: 'Líneas', align: 'right', render: (m) => m.lineas, priority: 3 },
     { key: 'conc', header: 'Conciliación', render: (m) => (m.conciliacion ? <EstadoBadge estado={m.conciliacion.estado} /> : '—'), priority: 3 },
+    { key: 'fac', header: 'Facturación', render: (m) => (m.estado !== 'REALIZADO' ? '—' : m.facturado ? <Badge tone="ok">Facturado</Badge> : <Badge tone="warn">No facturado</Badge>), priority: 2 },
     { key: 'est', header: 'Estado', render: (m) => <EstadoBadge estado={m.estado} />, priority: 3 },
   ];
   return (
@@ -130,6 +133,7 @@ function DetalleManifiesto({ id, onClose, onCambio }: { id: string | null; onClo
         <div className="flex flex-col gap-5">
           <DefList items={[
             ['Estado', <EstadoBadge estado={m.estado} />],
+            ...(m.estado === 'REALIZADO' ? [['Facturación', m.facturado ? <Badge tone="ok">Facturado</Badge> : <Badge tone="warn">No facturado: el acta espera la factura</Badge>]] as [string, React.ReactNode][] : []),
             ['Tipo', `${TIPO[m.tipo]} · conciliación ${m.tipoConciliacion === 'INTERNA' ? 'interna' : 'externa'}`],
             ['Servicio', fmtFecha(m.fechaServicio)],
             ['Cliente', `${m.cliente.razonSocial} · NIT ${m.cliente.nit}${m.cliente.dv ? `-${m.cliente.dv}` : ''}`],

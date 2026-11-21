@@ -45,7 +45,12 @@ const CrearRuta = z.object({
   // Programación por solicitud completa (sus líneas pendientes) o por líneas sueltas
   solicitudes: z.array(z.string().uuid()).default([]), items: z.array(z.string().uuid()).default([]),
 }).refine((b) => b.solicitudes.length + b.items.length > 0, { message: 'Elija al menos una solicitud o una línea.' });
-const puedeAprobar = (a: Actor) => a.permisos.includes('*') || a.permisos.includes('solicitudes.aprobar');
+/** Aprobar una recolección (Líder de Operaciones) y autorizar una entrega en planta (Jefe de Planta) son funciones distintas. */
+export const funcionAprobar = (operacion: Operacion) => (operacion === 'DESCARGA' ? 'solicitudes.autorizar_entrega' : 'solicitudes.aprobar');
+const puedeAprobar = (a: Actor, operacion: Operacion) => a.permisos.includes('*') || a.permisos.includes(funcionAprobar(operacion));
+const noAprueba = (operacion: Operacion) => operacion === 'DESCARGA'
+  ? 'Autorizar entregas en planta es del Jefe de Planta: su rol no tiene la función «Autorizar entregas en planta».'
+  : 'Aprobar recolecciones es del Líder de Operaciones: su rol no tiene la función «Aprobar recolecciones».';
 const EditarRuta = z.object({
   fechaProgramada: z.coerce.date().optional(), horaProgramada: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora HH:MM').nullish(), zonaId: z.string().uuid().nullish(),
   vehiculoId: z.string().uuid().nullish(), conductorId: z.string().uuid().nullish(), auxiliarId: z.string().uuid().nullish(),
@@ -105,7 +110,7 @@ export class LogisticaService {
   }
 
   async crearSolicitud(a: Actor, b: z.infer<typeof CrearSol>) {
-    if (b.aprobacion === 'APROBADA' && !puedeAprobar(a)) throw new BadRequestException({ mensaje: 'Su rol no aprueba solicitudes: créela pendiente.' });
+    if (b.aprobacion === 'APROBADA' && !puedeAprobar(a, b.operacion)) throw new BadRequestException({ mensaje: `${noAprueba(b.operacion)} Créela pendiente.` });
     const lineas = b.items.map((i) => ({ ...i, sucursalId: i.sucursalId ?? b.sucursalId }));
     if (lineas.some((i) => !i.sucursalId)) throw new BadRequestException({ mensaje: 'Indique la sede de cada línea.' });
     const decls = await this.db.declaracion.findMany({ where: { id: { in: lineas.map((i) => i.declaracionId) }, empresaId: a.empresaId, clienteId: b.clienteId }, include: { tarifas: { where: { vigenteDesde: { lte: b.fechaSolicitada }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: b.fechaSolicitada } }] }, take: 1, orderBy: { vigenteDesde: "desc" } } } }); // tarifa vigente en la fecha del servicio
@@ -135,11 +140,11 @@ export class LogisticaService {
   }
 
   /** Aviso push a quienes programan y aprueban: hay una solicitud de recolección nueva. */
-  private async avisarSolicitud(a: Actor, s: { numero: number; clase: string; clienteId: string; fechaSolicitada: Date; aprobacion: string }) {
+  private async avisarSolicitud(a: Actor, s: { numero: number; clase: string; operacion: Operacion; clienteId: string; fechaSolicitada: Date; aprobacion: string }) {
     if (s.clase !== 'FORMAL') return;
     const cliente = await this.db.cliente.findUnique({ where: { id: s.clienteId }, select: { razonSocial: true } }).catch(() => null);
-    await this.notificaciones.aPermisos(a.empresaId, ['solicitudes.crear', 'solicitudes.aprobar', 'rutas.programar'], {
-      titulo: 'Nueva solicitud de recolección', cuerpo: `N.° ${s.numero} · ${cliente?.razonSocial ?? 'Cliente'} · para el ${s.fechaSolicitada.toISOString().slice(0, 10)}`,
+    await this.notificaciones.aPermisos(a.empresaId, ['solicitudes.crear', funcionAprobar(s.operacion), ...(s.operacion === 'CARGA' ? ['rutas.programar'] : [])], {
+      titulo: s.operacion === 'DESCARGA' ? 'Nueva entrega en planta' : 'Nueva solicitud de recolección', cuerpo: `N.° ${s.numero} · ${cliente?.razonSocial ?? 'Cliente'} · para el ${s.fechaSolicitada.toISOString().slice(0, 10)}`,
       ruta: s.aprobacion === 'PENDIENTE' ? 'por-confirmar' : 'solicitudes', etiqueta: `solicitud-${s.numero}`,
     }, a.id);
   }
@@ -147,6 +152,7 @@ export class LogisticaService {
   async aprobarSolicitud(a: Actor, id: string, b: z.infer<typeof AprobacionSol>) {
     const s = await this.db.solicitud.findFirst({ where: { id, empresaId: a.empresaId } });
     if (!s) throw new NotFoundException({ mensaje: 'Solicitud no encontrada.' });
+    if (!puedeAprobar(a, s.operacion)) throw new ForbiddenException({ mensaje: noAprueba(s.operacion) });
     if (s.estado !== 'PENDIENTE' || s.aprobacion === b.aprobacion) throw new BadRequestException({ mensaje: 'La solicitud ya fue programada, gestionada o tiene esa aprobación.' });
     const aprobada = b.aprobacion === 'APROBADA';
     const r = await this.db.solicitud.update({ where: { id }, data: {
@@ -418,7 +424,8 @@ class LogisticaController {
   constructor(private readonly s: LogisticaService) {}
   @Get('solicitudes') solicitudes(@ActorActual() a: Actor, @Query(new Zod(FiltroSol)) f: z.infer<typeof FiltroSol>) { return this.s.solicitudes(a, f); }
   @Permiso('solicitudes.crear') @Post('solicitudes') crearSol(@ActorActual() a: Actor, @Body(new Zod(CrearSol)) b: z.infer<typeof CrearSol>) { return this.s.crearSolicitud(a, b); }
-  @Permiso('solicitudes.aprobar') @Patch('solicitudes/:id/aprobacion') aprobarSol(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(AprobacionSol)) b: z.infer<typeof AprobacionSol>) { return this.s.aprobarSolicitud(a, id, b); }
+  // Sin @Permiso: el servicio exige «Aprobar recolecciones» o «Autorizar entregas en planta» según la operación
+  @Patch('solicitudes/:id/aprobacion') aprobarSol(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(AprobacionSol)) b: z.infer<typeof AprobacionSol>) { return this.s.aprobarSolicitud(a, id, b); }
   @Permiso('solicitudes.crear') @Patch('solicitudes/:id/estado') estadoSol(@ActorActual() a: Actor, @Param('id', ParseUUIDPipe) id: string, @Body(new Zod(EstadoSol)) b: z.infer<typeof EstadoSol>) { return this.s.estadoSolicitud(a, id, b); }
   @Get('rutas') rutas(@ActorActual() a: Actor, @Query(new Zod(FiltroRuta)) f: z.infer<typeof FiltroRuta>) { return this.s.rutas(a, f); }
   @Get('programacion/pendientes') pendientes(@ActorActual() a: Actor, @Query(new Zod(Pendientes)) f: z.infer<typeof Pendientes>) { return this.s.pendientes(a, f); }

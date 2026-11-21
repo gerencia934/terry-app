@@ -1,7 +1,7 @@
 // Clientes y sedes conectados al API (fase 1c). Nada se borra: un cliente o una sede se inactiva.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, BadgeCheck, Building2, Clock, FileText, Loader2, Mail, MapPin, Pencil, Phone, Plus, Star, Upload } from 'lucide-react';
-import { MOTIVOS_INACTIVACION, REGLAS_CERTIFICADO, SECTORES, dvNit, type MotivoInactivacionCliente, type ReglaCertificado } from '@terraviva/shared';
+import { MOTIVOS_INACTIVACION, REGLAS_CERTIFICADO, SECTORES, dvNit, esExcepcionCertificado, type MotivoInactivacionCliente, type ReglaCertificado } from '@terraviva/shared';
 import { ResponsiveTable, FilterBar, type Column } from '../components/data';
 import { Badge, Button, ColorBadge, DefList, Field, Input, PageHeader, Select, Sheet, useToast } from '../components/ui';
 import { BuscarMunicipio, type MunicipioBuscado } from '../components/BuscarMunicipio';
@@ -237,29 +237,55 @@ function BotonCertificadoComercial({ clienteId }: { clienteId: string }) {
 }
 
 /**
- * Facturación del cliente (solo Comercial, Facturación y Gerencia): la regla de su certificado de disposición y cuántos
- * manifiestos tiene sin facturar o por pagar según Siigo.
+ * Facturación del cliente (Comercial, Facturación y Gerencia la ven): la regla de su certificado de disposición y cuántos
+ * manifiestos tiene sin facturar o por pagar según Siigo. La regla de Terra Viva es «Exigir factura»; cambiarla es de
+ * Facturación o Gerencia, y una excepción más flexible pide su motivo (queda en la auditoría).
  */
 function FacturacionCliente({ clienteId }: { clienteId: string }) {
   const toast = useToast();
   const { go } = useRouter();
   const d = useApi<{ reglaCertificado: ReglaCertificado; sinFacturar: number; porPagar: number }>(`/finanzas/clientes/${clienteId}`);
   const [ocupado, setOcupado] = useState(false);
-  const cambiar = async (regla: ReglaCertificado) => {
+  const [elegida, setElegida] = useState<ReglaCertificado | null>(null);
+  const [motivo, setMotivo] = useState('');
+  const puedeCambiar = tienePermiso('finanzas.gestionar');
+  const guardar = async (regla: ReglaCertificado) => {
     setOcupado(true);
-    try { await api(`/finanzas/clientes/${clienteId}/regla-certificado`, { metodo: 'PATCH', cuerpo: { regla } }); d.recargar(); toast(`Regla del certificado: ${REGLAS_CERTIFICADO[regla].nombre}.`, 'ok'); }
-    catch (e) { toast(mensajeError(e, 'No se pudo cambiar la regla.'), 'warn'); }
+    try {
+      await api(`/finanzas/clientes/${clienteId}/regla-certificado`, { metodo: 'PATCH', cuerpo: { regla, ...(motivo.trim() ? { motivo: motivo.trim() } : {}) } });
+      d.recargar(); setElegida(null); setMotivo(''); toast(`Regla del certificado: ${REGLAS_CERTIFICADO[regla].nombre}.`, 'ok');
+    } catch (e) { toast(mensajeError(e, 'No se pudo cambiar la regla.'), 'warn'); }
     setOcupado(false);
   };
   if (!d.datos) return null;
+  const actual = d.datos.reglaCertificado;
+  const pendiente = elegida && elegida !== actual ? elegida : null;
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-line p-3.5">
       <p className="text-[13px] font-semibold">Facturación</p>
-      <Field label="Regla del certificado" id="cl-regla" hint={REGLAS_CERTIFICADO[d.datos.reglaCertificado].descripcion}>
-        <Select id="cl-regla" value={d.datos.reglaCertificado} disabled={ocupado} onChange={(e) => cambiar(e.target.value as ReglaCertificado)}>
-          {(Object.entries(REGLAS_CERTIFICADO) as [ReglaCertificado, { nombre: string }][]).map(([k, x]) => <option key={k} value={k}>{x.nombre}</option>)}
-        </Select>
-      </Field>
+      {puedeCambiar ? (
+        <Field label="Regla del certificado" id="cl-regla" hint={REGLAS_CERTIFICADO[pendiente ?? actual].descripcion}>
+          <Select id="cl-regla" value={pendiente ?? actual} disabled={ocupado} onChange={(e) => {
+            const r = e.target.value as ReglaCertificado;
+            if (esExcepcionCertificado(r)) { setElegida(r); setMotivo(''); } else { setElegida(null); void guardar(r); }
+          }}>
+            {(Object.entries(REGLAS_CERTIFICADO) as [ReglaCertificado, { nombre: string }][]).map(([k, x]) => <option key={k} value={k}>{x.nombre}</option>)}
+          </Select>
+        </Field>
+      ) : (
+        <p className="text-[13px]"><span className="text-muted">Regla del certificado:</span> {REGLAS_CERTIFICADO[actual].nombre}
+          <span className="block text-[12px] text-muted">La cambian Facturación o Gerencia.</span></p>
+      )}
+      {pendiente && (
+        <div className="flex flex-col gap-2 rounded-lg bg-warn/10 p-3">
+          <p className="text-[13px] text-warn">Es una excepción a «Exigir factura»: escriba por qué (queda en la auditoría).</p>
+          <Input aria-label="Motivo de la excepción" value={motivo} maxLength={300} placeholder="Por ejemplo: cliente con contrato de pago anticipado" onChange={(e) => setMotivo(e.target.value)} />
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" disabled={ocupado || motivo.trim().length < 10} onClick={() => guardar(pendiente)}>Guardar excepción</Button>
+            <Button size="sm" onClick={() => { setElegida(null); setMotivo(''); }}>Cancelar</Button>
+          </div>
+        </div>
+      )}
       <p className="text-[13px] text-muted">{d.datos.sinFacturar} {d.datos.sinFacturar === 1 ? 'manifiesto sin facturar' : 'manifiestos sin facturar'} · {d.datos.porPagar} por pagar.{' '}
         <button type="button" className="font-medium text-brand underline" onClick={() => go('facturacion')}>Ver en Facturación</button></p>
     </div>

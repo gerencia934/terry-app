@@ -418,7 +418,7 @@ class CumplimientoService {
  */
 const QUIEN: Record<Alerta['tipo'], string[]> = {
   cumplimiento: ['permisos.gestionar'], flota: ['rutas.programar'], personal: ['rutas.programar'],
-  operacion: ['rutas.programar', 'solicitudes.aprobar', 'declaraciones.autorizar'], finanzas: ['finanzas.ver'], seguridad: [], gps: ['rutas.programar'], comercial: ['comercial.gestionar'],
+  operacion: ['rutas.programar', 'solicitudes.aprobar', 'solicitudes.autorizar_entrega', 'declaraciones.autorizar'], finanzas: ['finanzas.ver'], seguridad: [], gps: ['rutas.programar'], comercial: ['comercial.gestionar'],
 };
 const leToca = (permisos: string[], tipo: Alerta['tipo']) => permisos.includes('*') || QUIEN[tipo].some((p) => permisos.includes(p));
 const NIVEL: Record<Alerta['nivel'], string> = { alta: 'URGENTE', media: 'PARA ATENDER', info: 'PARA SABER' };

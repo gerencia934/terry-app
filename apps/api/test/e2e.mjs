@@ -760,6 +760,11 @@ const rolComercialId = rolDe('COMERCIAL')?.id;
 prueba('roles con sus funciones, su acceso (empresa, campo o portal de clientes) y las personas activas de cada uno', r.status === 200
   && rolDe('HSEQ')?.permisos.includes('importacion.revertir') && rolDe('COMERCIAL')?.usuariosActivos >= 1 && rolDe('CONDUCTOR')?.acceso === 'CAMPO'
   && rolDe('CLIENTE_ADMIN')?.acceso === 'CLIENTE' && rolDe('CLIENTE_CONSULTA')?.predeterminado === true, JSON.stringify(rolesE2e).slice(0, 300));
+prueba('roles de la cadena del servicio: Jefe de Operaciones, Líder de Operaciones y Jefe de Planta', rolDe('JEFE_OPERACIONES')?.permisos.includes('clientes.editar')
+  && rolDe('JEFE_OPERACIONES').permisos.includes('solicitudes.autorizar_entrega') && rolDe('LOGISTICA')?.nombre === 'Líder de Operaciones'
+  && rolDe('LOGISTICA').permisos.includes('solicitudes.aprobar') && !rolDe('LOGISTICA').permisos.includes('clientes.editar') && !rolDe('LOGISTICA').permisos.includes('solicitudes.autorizar_entrega')
+  && rolDe('JEFE_PLANTA')?.permisos.includes('solicitudes.autorizar_entrega') && !rolDe('JEFE_PLANTA').permisos.includes('solicitudes.aprobar')
+  && rolDe('COMERCIAL')?.permisos.includes('clientes.editar') && !rolDe('COMERCIAL').permisos.includes('solicitudes.aprobar'), JSON.stringify(rolesE2e.map?.((x) => [x.clave, x.nombre])));
 r = await llamar('GET', '/usuarios?q=e2e', { token: T });
 prueba('…el listado busca por nombre o correo y nunca trae la contraseña', r.status === 200 && r.json.total >= 3 && !JSON.stringify(r.json).includes('passwordHash'), JSON.stringify(r.json).slice(0, 200));
 r = await llamar('POST', '/usuarios', { token: T, cuerpo: { email: 'Nuevo.Comercial@terravivasas.com', nombre: 'Nuevo Comercial', documento: '1098765432', rolId: rolComercialId } });
@@ -795,6 +800,18 @@ const rolAdminE2e = await db.rol.findFirst({ where: { nombre: 'Administrador', e
 await db.usuario.upsert({ where: { email: 'admin.e2e@terravivasas.com' }, update: {}, create: { empresaId: cliente.empresaId, rolId: rolAdminE2e.id, nombre: 'Administrador E2E', documento: '5', email: 'admin.e2e@terravivasas.com',
   passwordHash: await (await import('@node-rs/argon2')).hash('AdminE2E2026!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
 
+{
+  const lider = await db.usuario.create({ data: { empresaId: cliente.empresaId, rolId: rolDe('LOGISTICA').id, nombre: 'Líder E2E', documento: '8801', email: 'lider.e2e@terravivasas.com',
+    passwordHash: await (await import('@node-rs/argon2')).hash('Lider2026!!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+  const tLider = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: lider.email, clave: 'Lider2026!!' } })).json)).accessToken;
+  const [crea, carga] = await Promise.all([
+    llamar('POST', '/clientes', { token: tLider, cuerpo: { nit: '900555111', razonSocial: 'No Debe S.A.S.', representanteLegal: 'Nadie' } }),
+    llamar('POST', '/importacion/clientes/vista-previa', { token: tLider, form: await excel('clientes', [{ nit: '900555111', razonSocial: 'No Debe S.A.S.', representante: 'Nadie', negociacion: 'Cobro', pago: 'Contado' }]) }),
+  ]);
+  prueba('el Líder de Operaciones no crea clientes, ni por Excel (solo Comercial y el Jefe de Operaciones) → 403', crea.status === 403 && carga.status === 403 && /Crear y editar clientes/.test(carga.json.mensaje),
+    JSON.stringify([crea.status, carga.status, carga.json.mensaje]));
+}
+
 console.log('\n5c. Roles y permisos (Ajustes › Roles, como en Grinclic)');
 const hashE2e = async (clave) => (await import('@node-rs/argon2')).hash(clave, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 const entrarOficina = async (email, clave) => (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email, clave } })).json)).accessToken;
@@ -807,7 +824,7 @@ prueba('catálogo: cada función con su módulo y su explicación; la empresa, e
   JSON.stringify(catRoles).slice(0, 200));
 const [rr1, rr2] = await Promise.all([llamar('GET', '/roles', { token: thseq }), llamar('POST', '/roles', { token: thseq, cuerpo: { nombre: 'Intento', acceso: 'OFICINA' } })]);
 prueba('…solo quien administra la configuración ve y cambia los roles (HSEQ → 403)', rr1.status === 403 && rr2.status === 403, `${rr1.status} ${rr2.status}`);
-r = await llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Jefe de planta', descripcion: 'Recibe en planta y concilia', acceso: 'OFICINA', permisos: ['conciliaciones.gestionar', 'informes.ver'] } });
+r = await llamar('POST', '/roles', { token: T, cuerpo: { nombre: 'Báscula de planta E2E', descripcion: 'Recibe en planta y concilia', acceso: 'OFICINA', permisos: ['conciliaciones.gestionar', 'informes.ver'] } });
 const rolPlanta = r.json;
 prueba('crea un rol nuevo con las funciones que se le otorgan', r.status === 201 && !!rolPlanta.id, JSON.stringify(r.json));
 const [rm1, rm2, rm3, rm4] = await Promise.all([
@@ -991,6 +1008,11 @@ prueba('exportar la conciliación a Excel: se prepara en la cola y se baja con e
 r = await llamar('POST', `/manifiestos/${mfB.id}/anular`, { token: T8, cuerpo: { motivo: 'Prueba' } });
 prueba('no se anula un manifiesto con conciliación aprobada → 409', r.status === 409 && /conciliación aprobada/.test(r.json.mensaje), JSON.stringify(r.json));
 
+r = await llamar('PATCH', `/finanzas/clientes/${suc.clienteId}/regla-certificado`, { token: T8, cuerpo: { regla: 'LIBRE' } });
+prueba('acta solo con factura: una excepción a «Exigir factura» pide su motivo → 400', r.status === 400 && /motivo/.test(r.json.mensaje), JSON.stringify(r.json));
+r = await llamar('PATCH', `/finanzas/clientes/${suc.clienteId}/regla-certificado`, { token: T8, cuerpo: { regla: 'LIBRE', motivo: 'Cliente de pruebas: certificados sin factura' } });
+prueba('…Gerencia la deja con su motivo, que queda en la auditoría', r.status === 200 && r.json.reglaCertificado === 'LIBRE'
+  && !!(await db.auditoria.findFirst({ where: { entidad: 'cliente', entidadId: suc.clienteId, accion: 'REGLA_CERTIFICADO', despues: { path: ['motivo'], equals: 'Cliente de pruebas: certificados sin factura' } } })), JSON.stringify(r.json));
 r = await llamar('GET', `/actas/pendientes?clienteId=${suc.clienteId}`, { token: T8 });
 prueba('la línea aprobada queda pendiente de certificar', r.status === 200 && r.json.some((x) => x.id === lineaB));
 r = await llamar('POST', '/actas', { token: T8, cuerpo: { clienteId: suc.clienteId, periodoDesde: '2026-11-01', periodoHasta: '2026-11-30' } });
@@ -1363,6 +1385,8 @@ const bajadaMf = await fetch(API + r.json.url);
 prueba('…también el PDF de sus manifiestos', bajadaMf.status === 200 && Buffer.from(await bajadaMf.arrayBuffer()).subarray(0, 4).toString() === '%PDF', String(bajadaMf.status));
 
 // Cartera (respuesta de la gerencia): con una factura vencida y sin pagar, el certificado se ve pero se descarga al pagar
+r = await llamar('PATCH', `/finanzas/clientes/${clienteA.id}/regla-certificado`, { token: T8, cuerpo: { regla: 'AL_VENCER', motivo: 'Acuerdo de cartera: retener solo con facturas vencidas' } });
+prueba('cartera: Gerencia deja al cliente con la excepción «retener solo si hay facturas vencidas», con su motivo', r.status === 200 && r.json.reglaCertificado === 'AL_VENCER', JSON.stringify(r.json));
 // Un certificado del cliente A con líneas conciliadas (el cargado de un aliado no tiene facturas)
 const actaCartera = await db.acta.findFirst({ where: { clienteId: clienteA.id, estado: 'EMITIDA', items: { some: {} } }, include: { items: { take: 1 } }, orderBy: { numero: 'asc' } });
 const lineaCartera = actaCartera.items[0];
@@ -1724,6 +1748,17 @@ prueba('…si cambia de vehículo, se registra el nuevo y el anterior queda como
   && entregaEditada.transporteId !== solEntrega.transporteId && (await db.transporteTercero.count({ where: { id: solEntrega.transporteId } })) === 1, JSON.stringify(r.json));
 r = await llamar('PUT', `/portal/solicitudes/${entrega.id}`, { token: tPA, cuerpo: { operacion: 'CARGA', fechaSolicitada: fechaEn(4), items: [{ declaracionId: declPedir.id, sucursalId: opcionC001.id, cantidadEstimada: 180 }] } });
 prueba('…no cambia una entrega en planta por una recolección (se cancela y se pide otra)', r.status === 400, JSON.stringify(r.json));
+{
+  // Cadena del servicio: la entrega en planta la autoriza el Jefe de Planta; la recolección, el Líder de Operaciones
+  const jefePlanta = await db.usuario.create({ data: { empresaId: cliente.empresaId, rolId: rolDe('JEFE_PLANTA').id, nombre: 'Jefe de Planta E2E', documento: '8802', email: 'jefe.planta.e2e@terravivasas.com',
+    passwordHash: await (await import('@node-rs/argon2')).hash('Planta2026!!', { memoryCost: 19456, timeCost: 2, parallelism: 1 }) } });
+  const tJP = (await aceptarDatos((await llamar('POST', '/auth/login', { cuerpo: { email: jefePlanta.email, clave: 'Planta2026!!' } })).json)).accessToken;
+  const cargaPend = (await llamar('POST', '/solicitudes', { token: T8, cuerpo: { clienteId: clienteA.id, sucursalId: opcionC001.id, fechaSolicitada: fechaEn(5), items: [{ declaracionId: declPedir.id, cantidadEstimada: 10 }] } })).json;
+  const noCarga = await llamar('PATCH', `/solicitudes/${cargaPend.id}/aprobacion`, { token: tJP, cuerpo: { aprobacion: 'APROBADA' } });
+  const siEntrega = await llamar('PATCH', `/solicitudes/${entrega.id}/aprobacion`, { token: tJP, cuerpo: { aprobacion: 'APROBADA' } });
+  prueba('el Jefe de Planta autoriza la entrega en planta, pero no aprueba recolecciones (son del Líder de Operaciones) → 403', siEntrega.status === 200 && siEntrega.json.aprobacion === 'APROBADA'
+    && noCarga.status === 403 && /Líder de Operaciones/.test(noCarga.json.mensaje), JSON.stringify([siEntrega.status, noCarga.status, noCarga.json?.mensaje]));
+}
 
 // --- Informe general: lo cargado, lo pesado y conciliado en planta, el precio y el certificado
 const desdeG = `${anioA}-01-01`, hastaG = `${anioA}-12-31`;
@@ -1911,11 +1946,14 @@ const editaLog = await llamar('PATCH', `/conciliaciones/${mf2.conc.id}/items`, {
 prueba('la conciliación muestra factura y pago solo a facturación; Logística no los registra → 403', concHseq.status === 200 && !('facturaNumero' in concHseq.json.items[0])
   && !('estadoPago' in concHseq.json.items[0]) && concFac.json.items[0].facturaNumero === 'FV-2-9001' && editaLog.status === 403, JSON.stringify([concHseq.json.items?.[0]?.facturaNumero, editaLog.status]));
 // Regla «Exigir factura»: el manifiesto 1 no tiene factura
-const reglaLog = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: tLog, cuerpo: { regla: 'EXIGIR_FACTURA' } });
-r = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: tcom, cuerpo: { regla: 'EXIGIR_FACTURA' } });
+const vuelve = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: T8, cuerpo: { regla: 'EXIGIR_FACTURA' } });
+const reglaLog = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: tLog, cuerpo: { regla: 'EXIGIR_PAGO' } });
+const reglaCom = await llamar('PATCH', `/finanzas/clientes/${clienteFin.id}/regla-certificado`, { token: tcom, cuerpo: { regla: 'EXIGIR_PAGO' } });
+const reglaFin = (await llamar('GET', `/finanzas/clientes/${clienteFin.id}`, { token: tcom })).json;
 const fichaLog = await llamar('GET', `/clientes/${clienteFin.id}`, { token: tLog });
-prueba('la regla del certificado la cambia Comercial (no Logística) y solo la ven facturación', r.status === 200 && r.json.reglaCertificado === 'EXIGIR_FACTURA' && reglaLog.status === 403
-  && fichaLog.status === 200 && !('reglaCertificado' in fichaLog.json), JSON.stringify([r.status, reglaLog.status, 'reglaCertificado' in (fichaLog.json ?? {})]));
+prueba('sin factura no hay acta: volver a «Exigir factura» no pide motivo; la regla la cambian Facturación o Gerencia (Comercial y Logística → 403) y solo la ven facturación',
+  vuelve.status === 200 && reglaFin.reglaCertificado === 'EXIGIR_FACTURA' && reglaCom.status === 403 && reglaLog.status === 403 && fichaLog.status === 200 && !('reglaCertificado' in fichaLog.json),
+  JSON.stringify([reglaFin.reglaCertificado, reglaCom.status, reglaLog.status, 'reglaCertificado' in (fichaLog.json ?? {})]));
 const periodoFin = { clienteId: suc.clienteId, periodoDesde: fechaEn(-12), periodoHasta: fechaEn(-1) };
 const actaF1 = (await llamar('POST', '/actas', { token: T8, cuerpo: { ...periodoFin, conciliacionItemIds: mf1.conc.items.map((x) => x.id) } })).json;
 r = await llamar('POST', `/actas/${actaF1.id}/emitir`, { token: thseq });

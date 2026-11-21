@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
   ESTADOS_FISICOS, ErrorPlanilla, EsquemaDeclaracion, PLANTILLAS, construirPlantilla, construirPlantillaCsv, corrienteDe, delimitadorDe, dvNit, leerPlanilla, lista, norm, plantillaPortal,
-  resolverCodigo, ROLES_PREDETERMINADOS, sectorDe, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
+  nombreFuncion, resolverCodigo, ROLES_PREDETERMINADOS, sectorDe, tipoRcdDe, validarFilas, type ClaveCatalogo, type Contexto, type FilaValidada, type Plantilla, type PlanillaLeida,
 } from '@terraviva/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria, Municipios } from '../common/servicios';
@@ -28,6 +28,11 @@ const si = (v?: string) => norm(v ?? '') === 'si';
 const num = (v?: string) => (v ? Number(v.replace(',', '.')) : undefined);
 const fecha = (v?: string) => (v ? new Date(`${v}T00:00:00Z`) : undefined);
 const DECL = new Set(['decl-residuos', 'decl-servicios']);
+/** Función que exige cada plantilla además de «Cargar desde Excel»: la de lo que crea. */
+const FUNCION_PLANTILLA: Record<string, string> = {
+  clientes: 'clientes.editar', sucursales: 'clientes.editar', 'decl-residuos': 'declaraciones.crear', 'decl-servicios': 'declaraciones.crear',
+  precios: 'tarifas.asignar', vehiculos: 'rutas.programar', usuarios: 'configuracion.editar', solicitudes: 'solicitudes.crear',
+};
 const Reversion = z.object({ motivo: z.string().trim().min(10, 'Explique el motivo (mínimo 10 caracteres).').max(300) });
 type Tx = Prisma.TransactionClient;
 /** Código (mayúsculas) → id, por catálogo. */
@@ -173,6 +178,11 @@ export class ImportacionService {
   async validar(a: Actor, id: string, file?: Express.Multer.File, delimitador?: string) {
     if (!file) throw new BadRequestException({ mensaje: 'Adjunte el archivo en el campo «archivo».' });
     const p = this.plantilla(id);
+    // Además de «Cargar desde Excel», cada plantilla exige la función de lo que crea: los clientes, por ejemplo, solo los
+    // cargan quienes los crean (Comercial y el Jefe de Operaciones, gerencia 20-11-2026)
+    const funcion = FUNCION_PLANTILLA[id];
+    if (funcion && !a.permisos.includes('*') && !a.permisos.includes(funcion))
+      throw new ForbiddenException({ mensaje: `Para cargar «${p.nombre}» su rol necesita también la función «${nombreFuncion(funcion)}».` });
     const separador = delimitadorDe(delimitador);
     if (delimitador && !separador) throw new BadRequestException({ mensaje: 'Separador no válido: use punto y coma, coma, tabulador o barra vertical.' });
     let leido: PlanillaLeida;
@@ -344,7 +354,8 @@ export class ImportacionService {
       case 'usuarios': {
         // El rol de la plantilla es uno predeterminado (por su clave, aunque le hayan cambiado el nombre) o uno de oficina o
         // campo con ese nombre; los roles del portal son de los usuarios de cada cliente (se invitan desde su ficha).
-        const clave = ROLES_PREDETERMINADOS.find((r) => r.acceso !== 'CLIENTE' && r.nombre.toLowerCase() === String(d.rol).toLowerCase())?.clave;
+        const nombre = String(d.rol).toLowerCase();
+        const clave = ROLES_PREDETERMINADOS.find((r) => r.acceso !== 'CLIENTE' && (r.nombre.toLowerCase() === nombre || r.alias?.some((x) => x.toLowerCase() === nombre)))?.clave;
         let rol = (clave ? await tx.rol.findFirst({ where: { empresaId: emp, clave } }) : null)
           ?? await tx.rol.findFirst({ where: { empresaId: emp, acceso: { not: 'CLIENTE' }, nombre: { equals: d.rol, mode: 'insensitive' } } });
         if (!rol) rol = await tx.rol.create({ data: { empresaId: emp, nombre: d.rol, acceso: d.rol === 'Conductor' || d.rol === 'Auxiliar' ? 'CAMPO' : 'OFICINA' } });

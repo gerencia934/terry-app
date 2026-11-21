@@ -45,7 +45,7 @@ const EJEMPLOS: Record<string, Record<string, string>[]> = {
   usuarios: [
     { documento: '1098111222', nombre: 'Conductor Nuevo', email: 'cnuevo@terravivasas.com', rol: 'Conductor', licencia: 'C2', licenciaVence: '2029-01-01', cursoMp: '2027-08-01' },
     { documento: '1098333444', nombre: 'Conductor sin curso', email: 'sincurso@terravivasas.com', rol: 'Conductor', licencia: 'C2' },
-    { documento: '1098555666', nombre: 'Correo repetido', email: 'logistica@terravivasas.com', rol: 'Logística' },
+    { documento: '1098555666', nombre: 'Correo repetido', email: 'logistica@terravivasas.com', rol: 'Líder de Operaciones' },
   ],
   solicitudes: [
     { nit: '901223456', sucursal: 'EDS Principal', tipo: 'Recolección en sede', fecha: '2026-12-02', jornada: 'AM', codigo: 'RP-008', cantidad: '120' },
