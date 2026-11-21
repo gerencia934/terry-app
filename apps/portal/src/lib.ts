@@ -38,7 +38,8 @@ export interface CuentaAdmin {
   /** «Olvidé mi contraseña» sin atender: cuándo la pidió. */
   restablecerPedidoEn?: string | null;
 }
-export const NOMBRES_MODULOS: Record<IdModulo, string> = { residuos: 'Residuos', mantenimiento: 'Mantenimiento', crm: 'CRM Comercial', planta: 'Planta' };
+// Nombres oficiales del ERP Terry-App (estándar 4 de docs/ECOSISTEMA.md)
+export const NOMBRES_MODULOS: Record<IdModulo, string> = { residuos: 'Residuos', mantenimiento: 'Mtto', crm: 'CRM', planta: 'Planta' };
 
 export const fechaHora = (s: string | null) =>
   s ? new Date(s).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';

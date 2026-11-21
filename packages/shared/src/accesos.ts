@@ -1,5 +1,5 @@
 /**
- * Accesos rápidos del tablero de inicio (Terry-App · Gestión de Residuos): enlaces a las entidades con las que Terra Viva
+ * Accesos rápidos del tablero de inicio (Terry-App Residuos): enlaces a las entidades con las que Terra Viva
  * cumple (respuesta de la gerencia, 20-11-2026). Se cambian en Ajustes › Datos de la empresa sin tocar el código.
  */
 export interface AccesoRapido { etiqueta: string; url: string }

@@ -6,10 +6,10 @@ export const IDS_MODULOS: readonly IdModulo[] = ['residuos', 'mantenimiento', 'c
 
 interface Definicion { id: IdModulo; nombre: string; descripcion: string; variable: string; defecto: string }
 const DEFINICIONES: Definicion[] = [
-  { id: 'residuos', nombre: 'Gestión de Residuos', descripcion: 'Recolección, manifiestos, certificados y portal de clientes', variable: 'MODULO_RESIDUOS_URL', defecto: 'https://residuos.terravivasas.net' },
-  { id: 'mantenimiento', nombre: 'Mantenimiento', descripcion: 'Flota, maquinaria, órdenes de trabajo y preoperacionales', variable: 'MODULO_MANTENIMIENTO_URL', defecto: 'https://mantenimiento.terravivasas.net' },
-  { id: 'crm', nombre: 'CRM Comercial', descripcion: 'Prospectos, visitas con check-in GPS y cotizaciones', variable: 'MODULO_CRM_URL', defecto: '' },
-  { id: 'planta', nombre: 'Tratamiento y Planta', descripcion: 'Cronograma diario, formatos y cumplimiento ambiental', variable: 'MODULO_PLANTA_URL', defecto: '' },
+  { id: 'residuos', nombre: 'Terry-App Residuos', descripcion: 'Recolección, manifiestos, certificados y portal de clientes', variable: 'MODULO_RESIDUOS_URL', defecto: 'https://residuos.terravivasas.net' },
+  { id: 'mantenimiento', nombre: 'Terry-App Mtto', descripcion: 'Flota, maquinaria, órdenes de trabajo y preoperacionales', variable: 'MODULO_MANTENIMIENTO_URL', defecto: 'https://mantenimiento.terravivasas.net' },
+  { id: 'crm', nombre: 'Terry-App CRM', descripcion: 'Prospectos, visitas con check-in GPS y cotizaciones', variable: 'MODULO_CRM_URL', defecto: '' },
+  { id: 'planta', nombre: 'Terry-App Planta', descripcion: 'Cronograma diario, formatos y cumplimiento ambiental', variable: 'MODULO_PLANTA_URL', defecto: '' },
 ];
 
 export type EstadoModulo = 'disponible' | 'sin-respuesta' | 'proximamente';

@@ -41,7 +41,7 @@ export class Monitoreo implements OnModuleInit {
     const repeticiones = await this.db.errorServidor.count({ where: { firma, fecha: { gte: new Date(Date.now() - 24 * UNA_HORA) } } });
     const cuando = x.fecha.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
     const texto = [
-      'Terry-App · Gestión de Residuos tuvo un error inesperado y la persona vio «Error interno».', '',
+      'Terry-App Residuos tuvo un error inesperado y la persona vio «Error interno».', '',
       `Cuándo: ${cuando}`, `Dónde: ${e.metodo} ${ruta}`, `Error: ${mensaje}`,
       `Veces en las últimas 24 horas: ${repeticiones}`, '',
       'El detalle técnico quedó en el registro del servidor. Si se repite, avise a quien da soporte a la plataforma.',

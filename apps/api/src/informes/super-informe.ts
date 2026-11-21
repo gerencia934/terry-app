@@ -116,7 +116,7 @@ export async function prepararSuperInforme(db: PrismaService, a: Actor, desde: D
   const ahora = new Date();
   const fechaDocumento = ahora.toLocaleString('sv-SE', { timeZone: 'America/Bogota' });
   const hoy = dia(new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Bogota' })));
-  const wb = new ExcelJS.Workbook(); wb.creator = 'Terry-App · Gestión de Residuos · Terra Viva S.A.S. E.S.P.'; wb.created = ahora;
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Terry-App Residuos · Terra Viva S.A.S. E.S.P.'; wb.created = ahora;
   const logo = wb.addImage({ buffer: LOGO_TERRA_VIVA as unknown as ExcelJS.Buffer, extension: 'png' });
   const periodo = `${dia(desde)} a ${dia(hasta)}`;
 
@@ -142,7 +142,7 @@ export async function prepararSuperInforme(db: PrismaService, a: Actor, desde: D
   const res = hoja(wb, 'Resumen', `SÚPER INFORME DE CUMPLIMIENTO INTEGRAL – ${empresa.razonSocial}`, fechaDocumento, [{ t: 'Concepto', w: 46 }, { t: 'Valor', w: 22 }, { t: 'Detalle', w: 70 }], logo);
   const filasResumen: [string, string | number, string][] = [
     ['Empresa', empresa.razonSocial, `NIT ${empresa.nit}`],
-    ['Periodo (fecha de servicio)', periodo, `Generado por ${a.nombre} con Terry-App · Gestión de Residuos`],
+    ['Periodo (fecha de servicio)', periodo, `Generado por ${a.nombre} con Terry-App Residuos`],
     ['Toneladas gestionadas', r2(kgTotal / 1000), 'Líneas en kg o toneladas: lo conciliado en planta o, si aún no, lo cargado'],
     ['Servicios (manifiestos)', servicios, `${lineas.length} líneas de residuos y servicios`],
     ['Clientes atendidos', new Set(lineas.map((l) => l.manifiesto.cliente.nit)).size, ''],

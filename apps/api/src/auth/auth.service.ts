@@ -101,7 +101,7 @@ export class AuthService {
     this.db.pasePortal.deleteMany({ where: { expiraEn: { lt: new Date(Date.now() - 86_400_000) } } }).catch(() => undefined);
     if (!u || !u.activo) {
       await this.audit.registrar(u ? { id: u.id } : null, 'usuario', u?.id ?? 'desconocido', 'INGRESO_FALLIDO', undefined, { motivo: u ? 'usuario inactivo' : 'sin usuario en Residuos', via: 'portal' });
-      throw new ForbiddenException({ mensaje: 'Su cuenta Terry-App no tiene acceso a Gestión de Residuos. Pídale al administrador que lo cree aquí con el mismo correo.', codigo: 'SIN_ACCESO' });
+      throw new ForbiddenException({ mensaje: 'Su cuenta Terry-App no tiene acceso a Terry-App Residuos. Pídale al administrador que lo cree aquí con el mismo correo.', codigo: 'SIN_ACCESO' });
     }
     if (u.bloqueadoHasta && u.bloqueadoHasta > new Date()) throw new ForbiddenException({ mensaje: 'Cuenta bloqueada temporalmente por intentos fallidos. Intente de nuevo en unos minutos.' });
     if (this.obligatorio(u) && !d.amr.includes('otp')) {
@@ -375,7 +375,7 @@ export class AuthService {
     const url = `${this.cfg.get('WEB_URL', { infer: true })}/?token=${token}#restablecer`;
     const que = u.clientePortal
       ? `Le dimos acceso al portal de clientes de Terra Viva, a nombre de ${u.clientePortal.razonSocial}. Allí consulta y descarga sus declaraciones, manifiestos, certificados e informes.`
-      : 'Terra Viva le creó un usuario en Terry-App · Gestión de Residuos.';
+      : 'Terra Viva le creó un usuario en Terry-App Residuos.';
     const enviada = await this.correo.enviar(u.email, u.clientePortal ? 'Portal de clientes de Terra Viva · cree su contraseña' : 'Bienvenido a Terry-App · cree su contraseña',
       `Hola ${u.nombre}:\n\n${que} Para crear su contraseña abra este enlace (vence en 72 horas y sirve una sola vez):\n${url}\n\nSi no esperaba este correo, ignórelo.`);
     // La solicitud de «Olvidé mi contraseña», si la había, quedó atendida con este enlace

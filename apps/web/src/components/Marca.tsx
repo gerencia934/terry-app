@@ -1,10 +1,10 @@
 import { cx } from '../lib/format';
 import terryIcono from '../assets/terry-icono.webp';
 
-/** Nombre del módulo dentro del ecosistema Terry-App (Mantenimiento usa el mismo bloque con su nombre). */
-export const MODULO = 'Gestión de Residuos';
+/** Nombre del módulo dentro del ERP Terry-App (estándar 4: Terry-App Residuos, Mtto, CRM, HSEQ; todos usan este mismo sello). */
+export const MODULO = 'Residuos';
 
-/** Marca del ecosistema: Terry, «Terry-App» y el módulo debajo, como en Terry-App Mantenimiento. */
+/** Marca del ecosistema: Terry, «Terry-App» y el módulo debajo, como en Terry-App Mtto. */
 export function MarcaTerryApp({ className, compacta }: { className?: string; compacta?: boolean }) {
   return (
     <div className={cx('flex items-center gap-3', className)}>

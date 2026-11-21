@@ -1,5 +1,5 @@
 {
-  "_ayuda": "Banners del inicio de sesión (el mismo formato de Terry-App Mantenimiento). Para publicar uno nuevo: suba la imagen a esta carpeta (WebP o JPG, máximo 200 KB, formato vertical 4:5 u horizontal 16:9) y agregue un bloque aquí. No hay que tocar el código. Campos: etiqueta, titulo, texto, imagen (opcional), fondo (color de la imagen en sus bordes), enlace (opcional), desde / hasta (opcional, AAAA-MM-DD: el banner solo se muestra en esas fechas).",
+  "_ayuda": "Banners del inicio de sesión (el mismo formato de Terry-App Mtto). Para publicar uno nuevo: suba la imagen a esta carpeta (WebP o JPG, máximo 200 KB, formato vertical 4:5 u horizontal 16:9) y agregue un bloque aquí. No hay que tocar el código. Campos: etiqueta, titulo, texto, imagen (opcional), fondo (color de la imagen en sus bordes), enlace (opcional), desde / hasta (opcional, AAAA-MM-DD: el banner solo se muestra en esas fechas).",
   "segundos": 8,
   "banners": [
     {
@@ -10,7 +10,7 @@
       "fondo": "#1F5E3B"
     },
     {
-      "etiqueta": "Gestión de Residuos",
+      "etiqueta": "Terry-App Residuos",
       "titulo": "Cada residuo, de la sede del cliente al certificado",
       "texto": "Solicitudes, rutas, manifiestos, recepción en planta y certificados en una sola cadena, lista para auditoría.",
       "imagen": "terry-equipo.webp",

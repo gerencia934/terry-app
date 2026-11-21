@@ -32,7 +32,7 @@ const cantidad = (n: number) => n.toLocaleString('es-CO', { maximumFractionDigit
 export async function pdfCotizacion(c: ContenidoCotizacion): Promise<Buffer> {
   const borrador = c.numero === 'BORRADOR';
   const doc = new PDFDocument({ size: A4, margins: { top: M.arriba, bottom: M.abajo, left: M.izq, right: M.der }, bufferPages: true,
-    info: { Title: `Cotización ${c.numero}`, Author: c.emisor.razonSocial, Creator: 'Terry-App · Gestión de Residuos', Subject: c.titulo } });
+    info: { Title: `Cotización ${c.numero}`, Author: c.emisor.razonSocial, Creator: 'Terry-App Residuos', Subject: c.titulo } });
   const partes: Buffer[] = [];
   doc.on('data', (b: Buffer) => partes.push(b));
   const listo = new Promise<Buffer>((ok) => doc.on('end', () => ok(Buffer.concat(partes))));

@@ -23,7 +23,7 @@ export function EnlaceAccesoHost() {
   const [copiado, setCopiado] = useState(false);
   useEffect(() => { abrir = (x) => { setCopiado(false); setD(x); }; return () => { abrir = null; }; }, []);
   if (!d) return null;
-  const mensaje = `Hola ${d.nombre.split(' ')[0]}: este es su acceso a Terry-App · Gestión de Residuos de Terra Viva. Abra el enlace y cree su contraseña (vence en 72 horas y sirve una sola vez): ${d.enlace}`;
+  const mensaje = `Hola ${d.nombre.split(' ')[0]}: este es su acceso a Terry-App Residuos de Terra Viva. Abra el enlace y cree su contraseña (vence en 72 horas y sirve una sola vez): ${d.enlace}`;
   const copiar = async () => { try { await navigator.clipboard.writeText(d.enlace); setCopiado(true); } catch { setCopiado(false); } };
   return (
     <Sheet open onClose={() => setD(null)} title="Entregue el acceso" footer={<Button variant="primary" onClick={() => setD(null)}>Listo</Button>}>

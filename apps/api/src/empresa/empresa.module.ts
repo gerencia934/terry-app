@@ -177,7 +177,7 @@ class EmpresaController {
     const u = await this.db.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { email: true } });
     if (!this.correo.configurado) return { enviado: false, para: u.email, mensaje: 'Aún no hay correo configurado en el servidor (SMTP_HOST, SMTP_USER y SMTP_PASS).' };
     try {
-      await this.correo.enviar(u.email, 'Terry-App · Correo de prueba', 'Si lee esto, el correo de Terry-App · Gestión de Residuos quedó funcionando.');
+      await this.correo.enviar(u.email, 'Terry-App · Correo de prueba', 'Si lee esto, el correo de Terry-App Residuos quedó funcionando.');
       return { enviado: true, para: u.email, mensaje: `Correo de prueba enviado a ${u.email}.` };
     } catch (e) {
       return { enviado: false, para: u.email, mensaje: `El servidor de correo no aceptó el envío: ${(e as Error).message.slice(0, 200)}` };

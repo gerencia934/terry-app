@@ -107,7 +107,7 @@ class NotificacionesController {
   @Delete('suscripciones') @HttpCode(204) async quitar(@ActorActual() a: Actor, @Body(new Zod(Quitar)) b: z.infer<typeof Quitar>) { await this.n.quitar(a, b.endpoint); }
   /** Aviso de prueba a los equipos de quien lo pide. */
   @Post('prueba') @HttpCode(200) async prueba(@ActorActual() a: Actor) {
-    const enviados = await this.n.aUsuarios([a.id], { titulo: 'Terry-App · Gestión de Residuos', cuerpo: 'Los avisos quedaron activos en este equipo.', ruta: 'inicio', etiqueta: 'prueba' });
+    const enviados = await this.n.aUsuarios([a.id], { titulo: 'Terry-App Residuos', cuerpo: 'Los avisos quedaron activos en este equipo.', ruta: 'inicio', etiqueta: 'prueba' });
     return { enviados };
   }
   /** Solo pruebas automáticas: los avisos que se habrían enviado. */

@@ -1,4 +1,4 @@
-// Tablero de inicio de Terry-App · Gestión de Residuos, inspirado en los tableros de Wialon: paneles con números grandes
+// Tablero de inicio de Terry-App Residuos, inspirado en los tableros de Wialon: paneles con números grandes
 // arriba, anillos limpios y la tendencia por mes. Terry da la bienvenida. Las cifras salen del servidor:
 // /informes/inicio (operación del día y del mes) y /informes/indicadores (lo conciliado en planta).
 import { useEffect, useMemo, useState, type ReactNode } from 'react';

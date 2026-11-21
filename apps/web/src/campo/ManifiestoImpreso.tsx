@@ -116,7 +116,7 @@ export function ManifiestoImpreso({ datos: d, formato }: { datos: DatosImpresion
       {d.firma.imagen ? <img src={d.firma.imagen} alt="Firma" style={{ height: tiquete ? '60px' : '80px', maxWidth: '100%', objectFit: 'contain' }} /> : <div style={{ height: '40px' }} />}
       <div style={{ borderTop: '1px solid #000', paddingTop: '2px' }}>{[d.firma.nombre, d.firma.documento ? `CC ${d.firma.documento}` : null].filter(Boolean).join(' · ') || '—'}</div>
       <div style={{ marginTop: '10px', fontSize: '9px', textAlign: 'center' }}>
-        {d.grabadoEn ? `Grabado el ${hora(d.grabadoEn)}. ` : ''}Generado en Terry-App · Gestión de Residuos. El manifiesto oficial (PDF) queda en el portal del cliente con el mismo número.
+        {d.grabadoEn ? `Grabado el ${hora(d.grabadoEn)}. ` : ''}Generado en Terry-App Residuos. El manifiesto oficial (PDF) queda en el portal del cliente con el mismo número.
       </div>
     </div>
   );

@@ -124,7 +124,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const Lateral = (
     <div className="flex h-full flex-col">
-      <button onClick={() => go('inicio')} className="mb-5 px-2 text-left" aria-label="Terry-App · Gestión de Residuos: ir al inicio">
+      <button onClick={() => go('inicio')} className="mb-5 px-2 text-left" aria-label="Terry-App Residuos: ir al inicio">
         <Logo className="h-10" />
         <span className="mt-1.5 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-subtle"><span className="h-0.5 w-4 rounded-full bg-brand-lime" aria-hidden />{MODULO}</span>
       </button>

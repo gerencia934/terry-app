@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 import { cx } from '../lib';
 
-// Carrusel del inicio de sesión, el mismo de Terry-App Mantenimiento: los banners se leen de public/carrusel/carrusel.json
+// Carrusel del inicio de sesión, el mismo de Terry-App Mtto: los banners se leen de public/carrusel/carrusel.json
 // (texto, imagen, color de fondo y fechas). Para cambiarlos no hay que tocar el código: se reemplaza la imagen y se edita
 // ese archivo. Si no se puede leer (sin señal), quedan los banners de siempre.
 export interface Banner { etiqueta?: string; titulo: string; texto?: string; imagen?: string; fondo?: string; enlace?: string; desde?: string; hasta?: string }

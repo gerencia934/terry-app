@@ -52,7 +52,7 @@ const enumerar = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(', '
 
 export async function pdfCertificadoComercial(c: ContenidoCertificadoComercial): Promise<Buffer> {
   const doc = new PDFDocument({ size: A4, margins: { top: M.arriba, bottom: M.abajo, left: M.izq, right: M.der }, bufferPages: true,
-    info: { Title: `Certificado comercial ${c.numero}`, Author: c.emisor.razonSocial, Creator: 'Terry-App · Gestión de Residuos', Subject: `Verificación: ${c.verificacion.url}` } });
+    info: { Title: `Certificado comercial ${c.numero}`, Author: c.emisor.razonSocial, Creator: 'Terry-App Residuos', Subject: `Verificación: ${c.verificacion.url}` } });
   const partes: Buffer[] = [];
   doc.on('data', (b: Buffer) => partes.push(b));
   const listo = new Promise<Buffer>((ok) => doc.on('end', () => ok(Buffer.concat(partes))));

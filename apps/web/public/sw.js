@@ -1,4 +1,4 @@
-// Service worker de Terry-App · Gestión de Residuos: guarda la aplicación en el teléfono para que abra sin señal y
+// Service worker de Terry-App Residuos: guarda la aplicación en el teléfono para que abra sin señal y
 // muestra los avisos push (solicitudes nuevas, manifiestos por firmar, flota y alertas del día) aunque la app esté cerrada.
 // El API no pasa por aquí (ni en otro origen ni en /api de la misma dirección): los datos de cada persona nunca se
 // guardan en esta copia; los datos sin señal los maneja la cola de la app.
@@ -37,7 +37,7 @@ self.addEventListener('push', (e) => {
   try { d = e.data ? e.data.json() : {}; } catch { d = { cuerpo: e.data ? e.data.text() : '' }; }
   const opciones = { body: d.cuerpo || '', icon: './iconos/terry-192.png', badge: './iconos/terry-192.png', lang: 'es-CO', data: { ruta: d.ruta || 'inicio' } };
   if (d.etiqueta) { opciones.tag = d.etiqueta; opciones.renotify = true; }
-  e.waitUntil(self.registration.showNotification(d.titulo || 'Terry-App · Gestión de Residuos', opciones));
+  e.waitUntil(self.registration.showNotification(d.titulo || 'Terry-App Residuos', opciones));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
