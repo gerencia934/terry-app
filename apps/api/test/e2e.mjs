@@ -732,8 +732,8 @@ prueba('campo: inspecciona su vehículo', r.status === 201 && r.json.aprobado ==
 r = await llamar('PATCH', `/campo/rutas/${rutaCampo.id}/estado`, { token: tc, cuerpo: { estadoRecorridoId: enCamino.id, kmInicial: 90100 } });
 prueba('…y sale a ruta', r.status === 200 && r.json.estadoRecorridoId === enCamino.id, JSON.stringify(r.json));
 r = await llamar('POST', `/campo/rutas/${rutaCampo.id}/manifiestos`, { token: tc });
-prueba('campo: abre los manifiestos de su ruta', r.status === 201 && r.json.length === 1 && Object.keys(r.json[0]).join() === 'id,numero', JSON.stringify(r.json));
-const mfCampo = r.json[0];
+prueba('campo: abre los manifiestos de su ruta', r.status === 201 && r.json.manifiestos?.length === 1 && Object.keys(r.json.manifiestos[0]).join() === 'id,numero' && r.json.aviso === null, JSON.stringify(r.json));
+const mfCampo = r.json.manifiestos?.[0];
 r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: tc });
 const mfPaq = r.json.manifiestos?.find((m) => m.id === mfCampo.id);
 prueba('…le llegan con lo necesario para imprimirlos sin señal (cliente, NIT, residuo, transportador), sin precio', !!mfPaq && !!mfPaq.cliente?.nit && !!mfPaq.items[0]?.declaracion?.nombre
@@ -748,7 +748,7 @@ prueba('…la oficina sí ve el precio del manifiesto', Number((await llamar('GE
 const rutaDeCampo = async (fecha, cantidad) => {
   const sol = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: fecha, items: [{ declaracionId: lodo.id, cantidadEstimada: cantidad }] } })).json;
   const ruta = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-N${Date.now() % 1000000}`, fechaProgramada: fecha, vehiculoId: veh2.id, conductorId: conductor.id, solicitudes: [sol.id] } })).json;
-  const mf = (await llamar('POST', `/campo/rutas/${ruta.id}/manifiestos`, { token: tc })).json[0];
+  const mf = (await llamar('POST', `/campo/rutas/${ruta.id}/manifiestos`, { token: tc })).json.manifiestos[0];
   const paq = (await llamar('GET', `/campo/paquete?fecha=${fecha}`, { token: tc })).json;
   return { sol, mf, item: paq.manifiestos?.find((m) => m.id === mf.id)?.items[0], parada: paq.rutas?.[0]?.paradas[0], causal: paq.catalogos?.causales?.[0] };
 };
@@ -776,6 +776,47 @@ prueba('campo: «mi vehículo» en solo lectura (vencimientos e inspecciones con
   && 'soatVence' in r.json.vehiculo && !/cliente|precio/i.test(JSON.stringify(r.json)), JSON.stringify(r.json).slice(0, 300));
 r = await llamar('GET', '/campo/paquete?fecha=2026-11-26', { token: T });
 prueba('campo: quien programa rutas (oficina) abre la app del conductor con las rutas del día', r.status === 200 && r.json.rutas.some((x) => x.id === rutaAjena.id), JSON.stringify(r.json).slice(0, 200));
+
+// Residuos peligrosos en la ruta: Los Pinos no los recibe (Res. 000632, art. 6); salen en su propio manifiesto, directo al gestor aliado
+const pinos = await db.proveedor.findFirst({ where: { esPropio: true } });
+const solMixta = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-12-04',
+  items: [{ declaracionId: lodo.id, cantidadEstimada: 120 }, { declaracionId: aceite.id, cantidadEstimada: 30 }] } })).json;
+const rutaMixta = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-P${Date.now() % 1000000}`, fechaProgramada: '2026-12-04', vehiculoId: veh2.id, conductorId: conductor.id, solicitudes: [solMixta.id] } })).json;
+r = await llamar('POST', '/manifiestos/desde-ruta', { token: T, cuerpo: { rutaId: rutaMixta.id } });
+const pendAceite = r.json.pendientes?.find((x) => x.declaracionId === aceite.id);
+prueba('ruta con un peligroso que reciben varios gestores aliados: la oficina elige cuál → 409 ELEGIR_GESTOR con las opciones, sin Los Pinos', r.status === 409 && r.json.codigo === 'ELEGIR_GESTOR'
+  && pendAceite?.opciones.length >= 2 && pendAceite.opciones.some((o) => o.id === cgs.id) && !pendAceite.opciones.some((o) => o.id === pinos.id) && /Elija el gestor aliado/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 400));
+prueba('…y no abre nada a medias', (await db.manifiesto.count({ where: { rutaId: rutaMixta.id } })) === 0);
+r = await llamar('POST', '/manifiestos/desde-ruta', { token: T, cuerpo: { rutaId: rutaMixta.id, gestores: { [aceite.id]: pinos.id } } });
+prueba('…ni acepta un destino que no lo recibe (Los Pinos) → 400', r.status === 400 && /no puede recibir/.test(r.json.mensaje), JSON.stringify(r.json).slice(0, 200));
+r = await llamar('POST', `/campo/rutas/${rutaMixta.id}/manifiestos`, { token: tc });
+const mfsMixta = await db.manifiesto.findMany({ where: { rutaId: rutaMixta.id }, include: { items: true, destino: true } });
+prueba('campo: el conductor no elige el gestor; abre lo de Los Pinos y le avisa que lo peligroso lo abre la oficina', r.status === 201 && r.json.manifiestos?.length === 1 && /Aceite usado de motor/.test(r.json.aviso ?? '')
+  && mfsMixta.length === 1 && mfsMixta[0].destino.esPropio && mfsMixta[0].items.length === 1 && mfsMixta[0].items[0].declaracionId === lodo.id,
+  JSON.stringify([r.status, r.json, mfsMixta.map((m) => [m.destino.razonSocial, m.items.length])]).slice(0, 300));
+r = await llamar('POST', '/manifiestos/desde-ruta', { token: T, cuerpo: { rutaId: rutaMixta.id, gestores: { [aceite.id]: cgs.id } } });
+const mfGestor = r.json?.[0];
+prueba('…la oficina elige el gestor (CGS) y el peligroso sale en su propio manifiesto, directo a él', r.status === 201 && r.json.length === 1 && mfGestor?.destinoId === cgs.id
+  && (await db.manifiestoItem.findMany({ where: { manifiestoId: mfGestor.id } })).every((i) => i.declaracionId === aceite.id), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', '/manifiestos?rutaId=' + rutaMixta.id, { token: T });
+prueba('…en la oficina, el listado de la ruta muestra el destino de cada manifiesto', r.status === 200 && r.json.filas?.some((m) => m.destino?.razonSocial === cgs.razonSocial && !m.destino.esPropio), JSON.stringify(r.json).slice(0, 300));
+r = await llamar('GET', '/campo/paquete?fecha=2026-12-04', { token: tc });
+const mfsParadaMixta = (r.json.manifiestos ?? []).filter((m) => m.rutaId === rutaMixta.id);
+const mfLodoMixta = mfsParadaMixta.find((m) => m.destino.razonSocial === pinos.razonSocial);
+prueba('…en el celular la parada tiene sus dos manifiestos, cada uno con su destino', mfsParadaMixta.length === 2 && !!mfLodoMixta && mfsParadaMixta.some((m) => m.destino.razonSocial === cgs.razonSocial),
+  JSON.stringify(mfsParadaMixta.map((m) => [m.numero, m.destino])).slice(0, 300));
+r = await llamar('POST', `/campo/manifiestos/${mfLodoMixta.id}/items/${mfLodoMixta.items[0].id}/no-recogido`, { token: tc, cuerpo: { nota: 'El cliente no tenía lodos hoy' } });
+const paradaMixta = await db.rutaParada.findFirst({ where: { rutaId: rutaMixta.id } });
+prueba('…«no se recogió» lo único del de Los Pinos lo anula, pero la parada sigue: falta el peligroso del gestor', r.status === 201 && r.json.anulado === true && r.json.paradaNoAtendida === false
+  && paradaMixta.estado !== 'NO_ATENDIDA', JSON.stringify([r.json, paradaMixta.estado]));
+// Si un solo gestor aliado vigente lo recibe, se elige solo
+const aliadosDf = await db.proveedor.findMany({ where: { disposicionesGestionadas: { some: { disposicion: { codigo: 'DF' } } } }, select: { id: true, excluyeTiposResiduo: true } });
+await Promise.all(aliadosDf.filter((x) => x.id !== cgs.id).map((x) => db.proveedor.update({ where: { id: x.id }, data: { excluyeTiposResiduo: [...x.excluyeTiposResiduo, 'IND'] } })));
+const solSolo = (await llamar('POST', '/solicitudes', { token: T, cuerpo: { aprobacion: 'APROBADA', clienteId: suc.clienteId, sucursalId: suc.id, fechaSolicitada: '2026-12-05', items: [{ declaracionId: aceite.id, cantidadEstimada: 12 }] } })).json;
+const rutaSolo = (await llamar('POST', '/rutas', { token: T, cuerpo: { codigo: `R-E2E-Q${Date.now() % 1000000}`, fechaProgramada: '2026-12-05', vehiculoId: veh.id, conductorId: yo.id, solicitudes: [solSolo.id] } })).json;
+r = await llamar('POST', '/manifiestos/desde-ruta', { token: T, cuerpo: { rutaId: rutaSolo.id } });
+await Promise.all(aliadosDf.map((x) => db.proveedor.update({ where: { id: x.id }, data: { excluyeTiposResiduo: x.excluyeTiposResiduo } })));
+prueba('…si un solo gestor aliado vigente lo recibe, se elige solo', r.status === 201 && r.json.length === 1 && r.json[0].destinoId === cgs.id, JSON.stringify(r.json).slice(0, 300));
 
 console.log('\n5d. Bitácora de tiempos y tareas logísticas');
 r = await llamar('GET', '/bitacora/tipos', { token: tc });

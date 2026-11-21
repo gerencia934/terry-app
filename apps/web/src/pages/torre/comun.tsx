@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { MapPin, Pencil, FileStack, Trash2, Save, X } from 'lucide-react';
 import { Badge, Button, ColorBadge, DefList, EstadoBadge, Field, Input, Select, Sheet, useToast } from '../../components/ui';
-import { alCambiarSesion, api, tienePermiso } from '../../lib/api';
+import { ErrorApi, alCambiarSesion, api, tienePermiso } from '../../lib/api';
 import { useRouter } from '../../lib/router';
 import { fmtCOP, fmtFecha } from '../../lib/format';
 import { cant, fechaHoraCo, horaCo, horaColumna, msg, useApi } from '../../lib/servidor';
@@ -67,7 +67,9 @@ export const nombreVehiculo = (v: Vehiculo) => `${v.placa} · ${v.tipo}${v.prove
 export const MF_OFICINA = 'terry-go-mf-oficina';
 export const CONC_OFICINA = 'terry-go-conc-oficina';
 
-interface MfFila { id: string; numero: string; estado: string; cliente: { razonSocial: string } }
+interface MfFila { id: string; numero: string; estado: string; cliente: { razonSocial: string }; destino?: { razonSocial: string; esPropio: boolean } }
+/** Residuo peligroso sin destino: la oficina elige el gestor aliado (409 ELEGIR_GESTOR al abrir los manifiestos). */
+interface PendienteGestor { declaracionId: string; residuo: string; paradaIds: string[]; opciones: { id: string; razonSocial: string }[] }
 interface PuntoGps { latitud: string; longitud: string; registradoEn: string; velocidadKmh: string | null }
 
 /** Formulario de recursos de una ruta (vehículo, tripulación, zona, fecha y hora, flete). */
@@ -132,11 +134,13 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
   const [quitar, setQuitar] = useState<string | null>(null);
   const [gps, setGps] = useState<PuntoGps | 'sin' | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const [elegir, setElegir] = useState<PendienteGestor[] | null>(null);
+  const [gestores, setGestores] = useState<Record<string, string>>({});
   const mfs = useApi<{ filas: MfFila[] }>(ruta ? `/manifiestos?rutaId=${ruta.id}&porPagina=100` : null);
   // GPS de Wialon (Logística y Gerencia): kilómetros, planta, llegada y salida de cada parada, eventos y recorrido
   const gpsR = useApi<RutaGpsDetalle>(ruta && tienePermiso('rutas.programar') ? `/rutas/${ruta.id}/gps` : null);
   const [recorrido, setRecorrido] = useState<[number, number][] | null>(null);
-  useEffect(() => { setEditar(false); setQuitar(null); setGps(null); setRecorrido(null); setF(ruta ? formDeRuta(ruta) : null); }, [ruta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setEditar(false); setQuitar(null); setGps(null); setRecorrido(null); setF(ruta ? formDeRuta(ruta) : null); setElegir(null); setGestores({}); }, [ruta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ruta) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
   const final = !!ruta.estadoRecorrido?.esFinal;
@@ -148,9 +152,17 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
   };
   const guardar = () => f && accion(async () => { await api(`/rutas/${ruta.id}`, { metodo: 'PATCH', cuerpo: cuerpoRuta(f, true) }); setEditar(false); }, `Ruta ${ruta.codigo} actualizada.`);
   const quitarLinea = (ri: string) => accion(() => api(`/rutas/${ruta.id}/items/${ri}`, { metodo: 'DELETE' }), 'Línea quitada: vuelve a «por programar».').then(() => setQuitar(null));
-  const abrirManifiestos = () => accion(async () => {
-    const r = await api<{ numero: string }[]>('/manifiestos/desde-ruta', { cuerpo: { rutaId: ruta.id } });
-    toast(`${r.length === 1 ? 'Manifiesto' : 'Manifiestos'} ${r.map((m) => m.numero).join(', ')} listo${r.length === 1 ? '' : 's'} para el conductor.`);
+  // Lo peligroso sale en su propio manifiesto hacia el gestor aliado; si hay más de uno posible, se elige aquí
+  const abrirManifiestos = (elegidos: Record<string, string> = {}) => accion(async () => {
+    try {
+      const r = await api<{ numero: string }[]>('/manifiestos/desde-ruta', { cuerpo: { rutaId: ruta.id, gestores: elegidos } });
+      setElegir(null); setGestores({});
+      toast(`${r.length === 1 ? 'Manifiesto' : 'Manifiestos'} ${r.map((m) => m.numero).join(', ')} listo${r.length === 1 ? '' : 's'} para el conductor.`);
+    } catch (e) {
+      const d = e instanceof ErrorApi ? (e.datos as { codigo?: string; pendientes?: PendienteGestor[] } | undefined) : undefined;
+      if (d?.codigo !== 'ELEGIR_GESTOR' || !d.pendientes?.length) throw e;
+      setElegir(d.pendientes);
+    }
   }, '');
   const verGps = async () => {
     try { const ps = await api<PuntoGps[]>(`/rutas/${ruta.id}/rastreo`); setGps(ps.length ? ps[ps.length - 1] : 'sin'); } catch (e) { toast(msg(e), 'warn'); }
@@ -168,10 +180,29 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
         : <>
             {programa && <Button onClick={() => setEditar(true)}><Pencil size={16} /> Asignar o editar</Button>}
             {tienePermiso('manifiestos.operar') && !final && ruta.paradas.some((p) => p.items.some((i) => i.solicitudItem.estado === 'PROGRAMADO')) &&
-              <Button disabled={ocupado} onClick={abrirManifiestos} title="Un manifiesto por parada con las líneas que aún no lo tienen"><FileStack size={16} /> Abrir manifiestos</Button>}
+              <Button disabled={ocupado} onClick={() => abrirManifiestos()} title="Un manifiesto por parada y destino con las líneas que aún no lo tienen (los peligrosos, directo al gestor aliado)"><FileStack size={16} /> Abrir manifiestos</Button>}
           </>}>
       {editar && f && cat ? <CamposRuta f={f} set={(fn) => setF((s) => (s ? fn(s) : s))} cat={cat} id="rd" /> : (
         <div className="flex flex-col gap-5">
+          {elegir && (
+            <div className="rounded-xl border border-warn/40 bg-warn/5 p-3">
+              <p className="text-[14px] font-semibold">Elija el gestor aliado de los residuos peligrosos</p>
+              <p className="mb-3 text-[12px] text-muted">Los Pinos no recibe residuos peligrosos (Res. DGL 000632 de 2023, art. 6): cada uno sale en su propio manifiesto, directo al gestor que lo recibe. Aquí están los que tienen la licencia vigente y reciben ese residuo.</p>
+              <div className="flex flex-col gap-2">
+                {elegir.map((p) => p.opciones.length ? (
+                  <Field key={p.declaracionId} label={p.residuo} id={`gestor-${p.declaracionId}`}>
+                    <Select id={`gestor-${p.declaracionId}`} value={gestores[p.declaracionId] ?? ''} onChange={(e) => setGestores((g) => ({ ...g, [p.declaracionId]: e.target.value }))}>
+                      <option value="">Elija el gestor…</option>{p.opciones.map((o) => <option key={o.id} value={o.id}>{o.razonSocial}</option>)}
+                    </Select>
+                  </Field>
+                ) : <p key={p.declaracionId} className="text-[13px] text-warn"><b>{p.residuo}:</b> ningún gestor aliado vigente lo recibe. Revise sus licencias en Permisos › Gestores aliados.</p>)}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="primary" disabled={ocupado || elegir.some((p) => !p.opciones.length || !gestores[p.declaracionId])} onClick={() => abrirManifiestos(gestores)}><FileStack size={16} /> Abrir con estos gestores</Button>
+                <Button onClick={() => { setElegir(null); setGestores({}); }}>Cancelar</Button>
+              </div>
+            </div>
+          )}
           <DefList items={[
             ['Fecha', `${fmtFecha(ruta.fechaProgramada)}${ruta.horaProgramada ? ` · ${horaColumna(ruta.horaProgramada)}` : ''}`],
             ['Etapa', <EtapaBadge e={ruta.estadoRecorrido} />],
@@ -223,7 +254,7 @@ export function RutaDetalle({ ruta, cat, onClose, onCambio }: { ruta: RutaApi | 
             <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Manifiestos</h3>
             {mfs.datos?.filas.length ? mfs.datos.filas.map((m) => (
               <button key={m.id} onClick={() => irManifiesto(m.id)} className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 text-left text-[13px] hover:bg-surface-2">
-                <span className="min-w-0 truncate"><span className="num font-medium">{m.numero}</span> · {m.cliente.razonSocial}</span><EstadoBadge estado={m.estado} />
+                <span className="min-w-0 truncate"><span className="num font-medium">{m.numero}</span> · {m.cliente.razonSocial}{m.destino && !m.destino.esPropio ? <span className="text-muted"> → {m.destino.razonSocial}</span> : null}</span><EstadoBadge estado={m.estado} />
               </button>
             )) : <p className="text-[13px] text-subtle">{mfs.cargando ? 'Cargando…' : 'Aún no hay manifiestos de esta ruta.'}</p>}
           </section>

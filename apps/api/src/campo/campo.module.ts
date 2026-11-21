@@ -153,10 +153,22 @@ export class CampoService {
   }
 
   /** Un manifiesto de cargue por cada parada con líneas programadas (como al salir de planta). */
+  /**
+   * Abre lo que se puede: un manifiesto por parada y destino (los peligrosos, directo a su gestor aliado). Si un peligroso
+   * tiene más de un gestor posible, el conductor no lo elige: queda para la oficina, que recibe el aviso, y el conductor
+   * sigue con lo demás.
+   */
   async abrirManifiestos(a: Actor, rutaId: string) {
     await this.ruta(a, rutaId);
-    const creados = await this.manifiestos.desdeRuta(a, { rutaId, paradaIds: [] });
-    return creados.map((m) => ({ id: m.id, numero: m.numero }));
+    const { creados, pendientes, codigo } = await this.manifiestos.abrirDesdeRuta(a, { rutaId, paradaIds: [], gestores: {} }, true);
+    const residuos = pendientes.map((p) => `«${p.residuo}»`).join(', ');
+    if (pendientes.length) void this.notificaciones.aPermisos(a.empresaId, ['rutas.programar'], { titulo: `Ruta ${codigo}: elegir gestor aliado`,
+      cuerpo: `${residuos}: abra los manifiestos desde el detalle de la ruta y elija el gestor aliado que los recibe. El conductor ya está en ruta.`,
+      ruta: 'seguimiento', etiqueta: `gestor-${rutaId}` }, a.id).catch(() => undefined);
+    return {
+      manifiestos: creados.map((m) => ({ id: m.id, numero: m.numero })),
+      aviso: pendientes.length ? `Faltan los manifiestos de ${residuos} (residuo peligroso): la oficina elige el gestor aliado que lo recibe y ya tiene el aviso. Cuando lo abra, actualice la ruta.` : null,
+    };
   }
 
   async preoperacional(a: Actor, b: z.infer<typeof Preop>) {
@@ -207,9 +219,11 @@ export class CampoService {
     const { causalId, texto } = await this.motivo(a, b);
     const nota = `No se recogió ${item.declaracion.nombre}: ${texto}.`;
     const quedan = mf.items.length - 1;
-    // Si no queda nada por recoger, el manifiesto se anula y la parada queda «no atendida» con el mismo motivo
+    // Si no queda nada por recoger en el manifiesto, se anula; y si tampoco le queda nada a la parada (otro manifiesto, como
+    // el de los peligrosos hacia el gestor aliado, o líneas sin abrir), la parada queda «no atendida» con el mismo motivo
     const parada = quedan === 0 && item.solicitudItemId
       ? await this.db.rutaItem.findFirst({ where: { solicitudItemId: item.solicitudItemId, liberado: false }, select: { paradaId: true } }) : null;
+    let paradaNoAtendida = false;
     await this.db.$transaction(async (tx) => {
       await tx.manifiestoItem.delete({ where: { id: itemId } });
       if (item.solicitudItemId) await tx.rutaItem.updateMany({ where: { solicitudItemId: item.solicitudItemId, liberado: false }, data: { liberado: true } });
@@ -217,12 +231,13 @@ export class CampoService {
       await tx.manifiesto.update({ where: { id }, data: quedan === 0
         ? { observaciones, estado: 'ANULADO', causalAnulacionId: causalId, motivoAnulacion: `No se recogió nada: ${texto}`.slice(0, 300), anuladoPorId: a.id }
         : { observaciones } });
-      if (parada) await tx.rutaParada.update({ where: { id: parada.paradaId }, data: { estado: 'NO_ATENDIDA', horaLlegada: new Date(), observaciones: `No se recogió nada: ${texto}`.slice(0, 500) } });
+      paradaNoAtendida = !!parada && !(await tx.rutaItem.count({ where: { paradaId: parada.paradaId, liberado: false } }));
+      if (parada && paradaNoAtendida) await tx.rutaParada.update({ where: { id: parada.paradaId }, data: { estado: 'NO_ATENDIDA', horaLlegada: new Date(), observaciones: `No se recogió nada: ${texto}`.slice(0, 500) } });
       await this.audit.registrar(a, 'manifiesto', id, 'NO_RECOGIDO', undefined, { itemId, residuo: item.declaracion.nombre, motivo: texto, anulado: quedan === 0 }, tx);
     });
     void this.notificaciones.aPermisos(a.empresaId, ['rutas.programar'], { titulo: `Novedad en ruta · ${mf.numero}`, cuerpo: quedan === 0 ? `${nota} No quedó nada por recoger: el manifiesto se anuló.` : nota,
       ruta: 'seguimiento', etiqueta: `novedad-${itemId}` }, a.id).catch(() => undefined);
-    return { quedan, anulado: quedan === 0 };
+    return { quedan, anulado: quedan === 0, paradaNoAtendida };
   }
 
   /** Parada no atendida (cerrado, no autorizaron el ingreso…): se anulan sus manifiestos pendientes con el motivo y se avisa. */

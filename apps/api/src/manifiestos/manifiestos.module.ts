@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EstadoManifiesto, Prisma, TipoConciliacion, TipoManifiesto } from '@prisma/client';
@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auditoria } from '../common/servicios';
 import { Archivos, firmaDesdeDataUrl } from '../common/archivos';
-import { ActorActual, Permiso, Zod, paginar, type Actor } from '../common/http';
+import { ActorActual, Permiso, Zod, fechaColombia, paginar, type Actor } from '../common/http';
 import { notaBascula, pdfManifiesto, pdfRecibo, type DatosManifiesto } from './pdf';
 
 type Tx = Prisma.TransactionClient;
@@ -35,7 +35,21 @@ const Crear = z.object({
   vehiculoId: id.optional(), conductorId: id.optional(), auxiliarId: id.optional(), transporte: Transporte.optional(),
   items: z.array(Linea).max(200).default([]),
 });
-const DesdeRuta = z.object({ rutaId: id, paradaIds: z.array(id).default([]), destinoId: id.optional() });
+// gestores: el gestor aliado que elige la oficina para cada residuo peligroso con más de un gestor posible (declaración → gestor)
+const DesdeRuta = z.object({ rutaId: id, paradaIds: z.array(id).default([]), destinoId: id.optional(), gestores: z.record(id, id).default({}) });
+
+/** Residuo peligroso de la ruta que aún no tiene destino: lo elige la oficina entre los gestores aliados posibles. */
+export interface PendienteGestor { declaracionId: string; residuo: string; paradaIds: string[]; opciones: { id: string; razonSocial: string }[] }
+
+/** Qué le falta a la oficina para abrir los manifiestos de los residuos peligrosos. */
+export const mensajePendientes = (ps: PendienteGestor[]) => {
+  const nombres = (xs: PendienteGestor[]) => xs.map((p) => `«${p.residuo}»`).join(', ');
+  const varios = ps.filter((p) => p.opciones.length > 1), ninguno = ps.filter((p) => !p.opciones.length);
+  return [
+    varios.length ? `Elija el gestor aliado que recibe ${nombres(varios)}: Los Pinos no recibe residuos peligrosos y hay más de un gestor posible.` : '',
+    ninguno.length ? `Ningún gestor aliado vigente recibe ${nombres(ninguno)}: revise sus licencias en Permisos › Gestores aliados.` : '',
+  ].filter(Boolean).join(' ');
+};
 export const EditarLinea = z.object({
   cantidad: z.number().positive().refine(dosDecimales, 'Máximo 2 decimales.').optional(), embalajes: z.number().int().nonnegative().nullish(), observaciones: z.string().trim().max(300).nullish(),
 });
@@ -156,19 +170,84 @@ export class ManifiestosService {
     });
   }
 
-  /** Un manifiesto de cargue por cada parada de la ruta con líneas programadas que aún no estén en un manifiesto. */
-  async desdeRuta(a: Actor, b: z.infer<typeof DesdeRuta>) {
-    const ruta = await this.db.ruta.findFirst({ where: { id: b.rutaId, empresaId: a.empresaId }, include: { paradas: { orderBy: { orden: 'asc' }, include: { sucursal: true,
-      items: { where: { liberado: false, solicitudItem: { estado: 'PROGRAMADO', manifiestoItems: { none: { manifiesto: { estado: { not: 'ANULADO' } } } } } }, include: { solicitudItem: true } } } } } });
-    if (!ruta) throw new NotFoundException({ mensaje: 'Ruta no encontrada.' });
-    const paradas = ruta.paradas.filter((p) => (!b.paradaIds.length || b.paradaIds.includes(p.id)) && p.items.length);
-    if (!paradas.length) throw new BadRequestException({ mensaje: 'La ruta no tiene líneas programadas pendientes de manifiesto.' });
-    const creados = [];
-    for (const p of paradas) creados.push(await this.crear(a, {
-      tipo: 'CARGUE', clienteId: p.sucursal.clienteId, destinoId: b.destinoId, fechaServicio: ruta.fechaProgramada, rutaId: ruta.id, tipoConciliacion: 'INTERNA',
-      items: p.items.map((ri) => ({ solicitudItemId: ri.solicitudItemId, cantidad: Number(ri.solicitudItem.cantidadReal ?? ri.solicitudItem.cantidadEstimada ?? 0), especificacionIds: [] })),
+  /**
+   * Gestores aliados que pueden recibir cada declaración peligrosa: los de su disposición principal (o de todas, si no
+   * marcó una), con los que se trabaja hoy, con la licencia registrada y vigente, y que reciben su tipo de residuo. Es la
+   * misma regla de la cobertura legal de la declaración (fn_aliado_vigente).
+   */
+  private async gestoresPosibles(empresaId: string, ids: string[]) {
+    const h = fechaColombia();
+    const decls = await this.db.declaracion.findMany({ where: { id: { in: ids }, empresaId }, select: { id: true, tipoResiduo: { select: { codigo: true } },
+      disposiciones: { select: { principal: true, disposicion: { select: { activo: true, propia: true, gestores: { select: { proveedor: { select: {
+        id: true, razonSocial: true, activo: true, esDestino: true, esPropio: true, licencia: true, licenciaIndefinida: true, licenciaVence: true, excluyeTiposResiduo: true } } } } } } } } } });
+    return new Map(decls.map((d) => {
+      const principales = d.disposiciones.filter((x) => x.principal);
+      const opciones = new Map<string, { id: string; razonSocial: string }>();
+      for (const { disposicion } of principales.length ? principales : d.disposiciones) {
+        if (!disposicion.activo || disposicion.propia) continue;
+        for (const { proveedor: p } of disposicion.gestores) {
+          const vigente = p.activo && p.esDestino && !p.esPropio && !!p.licencia?.trim() && (p.licenciaIndefinida || (!!p.licenciaVence && p.licenciaVence >= h));
+          if (vigente && !(d.tipoResiduo && p.excluyeTiposResiduo.includes(d.tipoResiduo.codigo))) opciones.set(p.id, { id: p.id, razonSocial: p.razonSocial });
+        }
+      }
+      return [d.id, [...opciones.values()].sort((x, y) => x.razonSocial.localeCompare(y.razonSocial, 'es'))] as const;
     }));
-    return creados;
+  }
+
+  /**
+   * Abre los manifiestos de cargue de la ruta: uno por parada y destino, con las líneas programadas que aún no estén en
+   * un manifiesto (una parada no atendida no se abre). Lo que no es peligroso va a la planta propia. Lo peligroso va en
+   * su propio manifiesto directo al gestor aliado (Res. DGL 000632 de 2023, art. 6: Los Pinos no lo recibe ni lo almacena):
+   * si un solo gestor vigente lo recibe se elige solo; si hay varios (o ninguno) queda pendiente y lo elige la oficina en
+   * `gestores`. Con `destinoId` todo va a ese destino (la base sigue validando).
+   * `parcial` (la app de campo): abre lo que se puede y devuelve lo pendiente. Si no, con algo pendiente no crea nada.
+   */
+  async abrirDesdeRuta(a: Actor, b: z.infer<typeof DesdeRuta>, parcial = false) {
+    const ruta = await this.db.ruta.findFirst({ where: { id: b.rutaId, empresaId: a.empresaId }, include: { paradas: { orderBy: { orden: 'asc' }, include: { sucursal: true,
+      items: { where: { liberado: false, solicitudItem: { estado: 'PROGRAMADO', manifiestoItems: { none: { manifiesto: { estado: { not: 'ANULADO' } } } } } },
+        include: { solicitudItem: { include: { declaracion: { select: { id: true, nombre: true, esPeligroso: true } } } } } } } } } });
+    if (!ruta) throw new NotFoundException({ mensaje: 'Ruta no encontrada.' });
+    const paradas = ruta.paradas.filter((p) => p.estado !== 'NO_ATENDIDA' && (!b.paradaIds.length || b.paradaIds.includes(p.id)) && p.items.length);
+    if (!paradas.length) throw new BadRequestException({ mensaje: 'La ruta no tiene líneas programadas pendientes de manifiesto.' });
+
+    const peligrosas = b.destinoId ? [] : [...new Set(paradas.flatMap((p) => p.items.filter((ri) => ri.solicitudItem.declaracion.esPeligroso).map((ri) => ri.solicitudItem.declaracion.id)))];
+    const posibles = peligrosas.length ? await this.gestoresPosibles(a.empresaId, peligrosas) : new Map<string, { id: string; razonSocial: string }[]>();
+    const grupos: { paradaId: string; orden: number; clienteId: string; destinoId?: string; items: z.infer<typeof Crear>['items'] }[] = [];
+    const pendientes = new Map<string, PendienteGestor>();
+    for (const p of paradas) for (const ri of p.items) {
+      const d = ri.solicitudItem.declaracion;
+      let destinoId = b.destinoId;
+      if (!destinoId && d.esPeligroso) {
+        const opciones = posibles.get(d.id) ?? [];
+        const elegido = b.gestores[d.id];
+        if (elegido && !opciones.some((o) => o.id === elegido))
+          throw new BadRequestException({ mensaje: `Ese gestor aliado no puede recibir «${d.nombre}» (licencia vigente y tipo de residuo): ${opciones.length ? `elija ${opciones.map((o) => o.razonSocial).join(' o ')}` : 'ninguno vigente lo recibe hoy'}.` });
+        destinoId = elegido ?? (opciones.length === 1 ? opciones[0].id : undefined);
+        if (!destinoId) {
+          const x = pendientes.get(d.id) ?? { declaracionId: d.id, residuo: d.nombre, paradaIds: [], opciones };
+          if (!x.paradaIds.includes(p.id)) x.paradaIds.push(p.id);
+          pendientes.set(d.id, x);
+          continue;
+        }
+      }
+      let g = grupos.find((x) => x.paradaId === p.id && x.destinoId === destinoId);
+      if (!g) grupos.push(g = { paradaId: p.id, orden: p.orden, clienteId: p.sucursal.clienteId, destinoId, items: [] });
+      g.items.push({ solicitudItemId: ri.solicitudItemId, cantidad: Number(ri.solicitudItem.cantidadReal ?? ri.solicitudItem.cantidadEstimada ?? 0), especificacionIds: [] });
+    }
+    const lista = [...pendientes.values()];
+    if (lista.length && !parcial) throw new ConflictException({ codigo: 'ELEGIR_GESTOR', mensaje: mensajePendientes(lista), pendientes: lista });
+    // En cada parada, primero el de la planta propia y luego el de cada gestor aliado
+    grupos.sort((x, y) => x.orden - y.orden || Number(!!x.destinoId) - Number(!!y.destinoId));
+    const creados = [];
+    for (const g of grupos) creados.push(await this.crear(a, {
+      tipo: 'CARGUE', clienteId: g.clienteId, destinoId: g.destinoId, fechaServicio: ruta.fechaProgramada, rutaId: ruta.id, tipoConciliacion: 'INTERNA', items: g.items,
+    }));
+    return { creados, pendientes: lista, codigo: ruta.codigo };
+  }
+
+  /** Desde la oficina: todo o nada. Si falta elegir el gestor aliado de un peligroso, 409 ELEGIR_GESTOR con las opciones. */
+  async desdeRuta(a: Actor, b: z.infer<typeof DesdeRuta>) {
+    return (await this.abrirDesdeRuta(a, b)).creados;
   }
 
   async listar(a: Actor, f: z.infer<typeof Filtros>) {
@@ -181,7 +260,7 @@ export class ManifiestosService {
     const [total, filas] = await this.db.$transaction([
       this.db.manifiesto.count({ where }),
       this.db.manifiesto.findMany({ where, take, skip, orderBy: [{ fechaServicio: 'desc' }, { numero: 'desc' }], include: {
-        cliente: { select: { razonSocial: true } }, ruta: { select: { codigo: true } }, vehiculo: { select: { placa: true } }, transporte: { select: { placa: true, empresaTransportadora: true } },
+        cliente: { select: { razonSocial: true } }, destino: { select: { razonSocial: true, esPropio: true } }, ruta: { select: { codigo: true } }, vehiculo: { select: { placa: true } }, transporte: { select: { placa: true, empresaTransportadora: true } },
         conciliacion: { select: { estado: true } }, causalAnulacion: { select: { nombre: true } },
         // Marca de facturación (Siigo): solo si está facturado; sin montos
         finanzas: { select: { facturado: true } },

@@ -119,7 +119,13 @@ export function usePaquete() {
 
 /** La parada de un manifiesto: la que tiene sus líneas de solicitud. */
 const paradaDe = (r: Ruta | null, m: Manifiesto) => r?.paradas.find((pa) => pa.items.some((it) => m.items.some((i) => i.solicitudItem?.id === it.solicitudItem.id))) ?? null;
-const mfDeParada = (p: Paquete, pa: Parada) => Object.values(p.manifiestos).find((m) => m.items.some((i) => pa.items.some((it) => it.solicitudItem.id === i.solicitudItem?.id)));
+/** Los manifiestos de la parada: pueden ser dos, el de la planta y el de los peligrosos, directo a su gestor aliado. */
+const mfsDeParada = (p: Paquete, pa: Parada) => Object.values(p.manifiestos).filter((m) => m.items.some((i) => pa.items.some((it) => it.solicitudItem.id === i.solicitudItem?.id)));
+/** Lo que la parada tiene por recoger y aún no está en un manifiesto (p. ej. un peligroso cuyo gestor aliado elige la oficina). */
+const sinManifiesto = (p: Paquete, pa: Parada) => pa.estado === 'NO_ATENDIDA' ? []
+  : pa.items.filter((it) => !Object.values(p.manifiestos).some((m) => m.estado !== 'ANULADO' && m.items.some((i) => i.solicitudItem?.id === it.solicitudItem.id)));
+/** Grabado (en el servidor o en el teléfono, por enviar). */
+const hechoMf = (p: Paquete, m: Manifiesto) => m.estado === 'REALIZADO' || !!p.enCola[m.id];
 
 /** Datos del manifiesto en papel: lo grabado en el teléfono (sin señal) o, si ya no está, lo que trae el servidor. */
 function datosImpresion(p: Paquete, m: Manifiesto, g: Grabado | undefined): DatosImpresion {
@@ -210,7 +216,13 @@ export function CampoRutaServidor() {
 
   const inspeccion = p.inspecciones.find((i) => i.vehiculoId === ruta.vehiculoId && i.aprobado);
   const siguientes = p.catalogos.etapas.filter((e) => e.orden > (etapa?.orden ?? 0) || (e.esFinal && !etapa?.esFinal));
-  const hechos = ruta.paradas.filter((pa) => { const m = mfDeParada(p, pa); return pa.estado === 'NO_ATENDIDA' || (m && (m.estado !== 'PENDIENTE' || p.enCola[m.id])); }).length;
+  const atendida = (pa: Parada) => { const mfs = mfsDeParada(p, pa);
+    return pa.estado === 'NO_ATENDIDA' || (mfs.length > 0 && mfs.filter((m) => m.estado !== 'ANULADO').every((m) => hechoMf(p, m)) && !sinManifiesto(p, pa).length); };
+  const hechos = ruta.paradas.filter(atendida).length;
+  const faltanRuta = ruta.paradas.flatMap((pa) => sinManifiesto(p, pa));
+  const yaAbiertos = ruta.paradas.some((pa) => mfsDeParada(p, pa).length > 0);
+  // Lo peligroso con varios gestores posibles lo abre la oficina: si solo falta eso, el conductor solo actualiza la ruta
+  const puedeAbrir = faltanRuta.length > 0 && (!yaAbiertos || faltanRuta.some((it) => !it.solicitudItem.declaracion.esPeligroso));
 
   const cambiarEtapa = async (e: Etapa, kmValor?: number) => {
     const sale = (etapa?.orden ?? 1) <= 1 && e.orden > 1 && !e.esFinal;
@@ -225,7 +237,11 @@ export function CampoRutaServidor() {
   };
   const abrirManifiestos = async () => {
     if (!navigator.onLine) { toast('Necesita señal para abrir los manifiestos de la ruta.', 'warn'); return; }
-    try { await api(`/campo/rutas/${ruta.id}/manifiestos`, { metodo: 'POST' }); await actualizar(true); toast('Manifiestos listos en el teléfono.'); }
+    try {
+      const r = await api<{ manifiestos: { id: string; numero: string }[]; aviso: string | null }>(`/campo/rutas/${ruta.id}/manifiestos`, { metodo: 'POST' });
+      await actualizar(true);
+      if (r.aviso) toast(r.aviso, 'warn'); else toast('Manifiestos listos en el teléfono.');
+    }
     catch (e) { toast(e instanceof ErrorApi ? e.message : 'No se pudieron crear los manifiestos.', 'warn'); }
   };
   const atender = (pa: Parada, m: Manifiesto) => { sessionStorage.setItem(SEL_MF, m.id); sessionStorage.setItem(SEL_PARADA, pa.id); go('campo-parada'); };
@@ -274,14 +290,19 @@ export function CampoRutaServidor() {
 
       <div className="mb-2 mt-6 flex items-center justify-between"><h2 className="text-[16px] font-semibold">Paradas</h2><span className="num text-[13px] text-muted">{hechos} de {ruta.paradas.length} atendidas</span></div>
       <div className="mb-4 h-2 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-brand transition-all" style={{ width: `${ruta.paradas.length ? (hechos / ruta.paradas.length) * 100 : 0}%` }} /></div>
-      {!Object.keys(p.manifiestos).length && ruta.paradas.some((pa) => pa.items.length) && (
-        <Button variant="primary" className="mb-3 h-12 w-full rounded-xl" onClick={abrirManifiestos}>Abrir los manifiestos de la ruta</Button>
+      {puedeAbrir && (
+        <Button variant="primary" className="mb-3 h-12 w-full rounded-xl" onClick={abrirManifiestos}>
+          {yaAbiertos ? 'Abrir los manifiestos que faltan' : 'Abrir los manifiestos de la ruta'}</Button>
       )}
       <ol className="flex flex-col gap-3">
         {ruta.paradas.map((pa) => {
-          const m = mfDeParada(p, pa);
-          const noAtendida = pa.estado === 'NO_ATENDIDA' || m?.estado === 'ANULADO';
-          const listo = !noAtendida && m && (m.estado === 'REALIZADO' || p.enCola[m.id]);
+          const mfs = mfsDeParada(p, pa);
+          const vivos = mfs.filter((m) => m.estado !== 'ANULADO');
+          const faltan = sinManifiesto(p, pa);
+          const noAtendida = pa.estado === 'NO_ATENDIDA' || (mfs.length > 0 && !vivos.length && !faltan.length);
+          const listo = !noAtendida && vivos.length > 0 && vivos.every((m) => hechoMf(p, m)) && !faltan.length;
+          const siguiente = vivos.find((m) => !hechoMf(p, m));
+          const varios = vivos.length > 1;
           const s = pa.sucursal;
           const destino = s.latitud && s.longitud ? `https://www.google.com/maps/dir/?api=1&destination=${s.latitud},${s.longitud}`
             : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.direccion ?? s.nombre} ${s.municipio?.nombre ?? ''}`)}`;
@@ -294,18 +315,29 @@ export function CampoRutaServidor() {
                   <p className="font-semibold leading-snug">{s.cliente.razonSocial}</p>
                   <p className="text-[13px] text-muted"><MapPin size={13} className="mr-1 inline" />{s.codigo ? `${s.codigo} · ` : ''}{s.nombre}{s.direccion ? ` · ${s.direccion}` : ''}{s.municipio ? `, ${s.municipio.nombre}` : ''}</p>
                   <p className="mt-1 text-[13px]">{pa.items.map((it) => it.solicitudItem.declaracion.nombre).join(', ') || 'Sin líneas'}</p>
-                  {m && <p className={cx('mt-1 text-[13px] font-medium', listo ? 'text-ok' : noAtendida ? 'text-warn' : 'text-muted')}>
-                    Manifiesto {m.numero}{noAtendida ? ' · parada no atendida' : m.estado === 'REALIZADO' ? ' · grabado' : p.enCola[m.id] ? ' · grabado en el teléfono, por enviar' : ''}</p>}
+                  {noAtendida && mfs.length > 0 && <p className="mt-1 text-[13px] font-medium text-warn">Manifiesto {mfs.map((m) => m.numero).join(', ')} · parada no atendida</p>}
+                  {!noAtendida && vivos.map((m) => (
+                    <div key={m.id} className="mt-1 flex items-center justify-between gap-2">
+                      <p className={cx('min-w-0 text-[13px] font-medium', hechoMf(p, m) ? 'text-ok' : 'text-muted')}>
+                        Manifiesto {m.numero}{varios ? ` → ${m.destino.razonSocial}` : ''}{m.estado === 'REALIZADO' ? ' · grabado' : p.enCola[m.id] ? ' · grabado en el teléfono, por enviar' : ''}</p>
+                      {varios && hechoMf(p, m) && <button onClick={() => imprimir(datosImpresion(p, m, p.grabados[m.id]), formatoGuardado())}
+                        className="flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[12px] font-medium ring-1 ring-line"><Printer size={14} /> Imprimir</button>}
+                    </div>
+                  ))}
+                  {faltan.length > 0 && <p className="mt-2 rounded-lg bg-warn/10 px-2.5 py-1.5 text-[12px] leading-snug text-warn">Sin manifiesto todavía: {faltan.map((it) => it.solicitudItem.declaracion.nombre).join(', ')}.{' '}
+                    {faltan.some((it) => it.solicitudItem.declaracion.esPeligroso) ? 'Es peligroso: va directo a un gestor aliado y la oficina elige cuál. Actualice la ruta en un momento.' : 'Toque «Abrir los manifiestos que faltan».'}</p>}
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-[1fr_1fr_1.4fr] gap-2">
                 <a href={destino} target="_blank" rel="noreferrer" className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-line text-[13px] font-medium"><Navigation size={16} /> Llegar</a>
                 {tel ? <a href={`tel:${tel.replace(/[^\d+]/g, '')}`} className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-line text-[13px] font-medium"><Phone size={16} /> Llamar</a>
                   : <span className="flex h-11 items-center justify-center rounded-xl border border-dashed border-line text-[12px] text-subtle">Sin teléfono</span>}
-                {listo && m ? (
-                  <Button className="h-11 rounded-xl" onClick={() => imprimir(datosImpresion(p, m, p.grabados[m.id]), formatoGuardado())}><Printer size={16} /> Imprimir</Button>
+                {listo && !varios ? (
+                  <Button className="h-11 rounded-xl" onClick={() => imprimir(datosImpresion(p, vivos[0], p.grabados[vivos[0].id]), formatoGuardado())}><Printer size={16} /> Imprimir</Button>
+                ) : listo ? (
+                  <span className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ok/10 text-[13px] font-semibold text-ok"><CheckCircle2 size={16} /> Atendida</span>
                 ) : (
-                  <Button variant="primary" className="h-11 rounded-xl" disabled={!m || noAtendida} onClick={() => m && atender(pa, m)}>{noAtendida ? 'No atendida' : 'Atender'}</Button>
+                  <Button variant="primary" className="h-11 rounded-xl" disabled={!siguiente || noAtendida} onClick={() => siguiente && atender(pa, siguiente)}>{noAtendida ? 'No atendida' : 'Atender'}</Button>
                 )}
               </div>
             </li>
@@ -470,11 +502,16 @@ export function CampoManifiestoServidor() {
       if (n.tipo === 'ITEM') {
         await encolar({ grupo, descripcion: `No se recogió ${n.residuo} · ${m.numero}`, metodo: 'POST', ruta: `/campo/manifiestos/${id}/items/${n.itemId}/no-recogido`, cuerpo });
         if (vivos.length === 1 && vivos[0].id === n.itemId) {
-          // Era lo único por recoger: el servidor anula el manifiesto y deja la parada como no atendida
+          // Era lo único de este manifiesto: el servidor lo anula. La parada queda «no atendida» solo si no le queda nada más
+          // por recoger: otro manifiesto (el de los peligrosos hacia el gestor aliado) o líneas que aún no tienen manifiesto
+          const siId = m.items.find((i) => i.id === n.itemId)?.solicitudItem?.id;
+          const queda = !!parada && (mfsDeParada(p, parada).some((o) => o.id !== id && o.estado !== 'ANULADO') || sinManifiesto(p, parada).length > 0);
           cambiar((x) => ({ ...x, manifiestos: { ...x.manifiestos, [id]: { ...x.manifiestos[id], estado: 'ANULADO' } },
-            rutas: x.rutas.map((r) => ({ ...r, paradas: r.paradas.map((pa) => pa.id === parada?.id ? { ...pa, estado: 'NO_ATENDIDA' } : pa) })) }));
+            rutas: x.rutas.map((r) => ({ ...r, paradas: r.paradas.map((pa) => pa.id !== parada?.id ? pa
+              : queda ? { ...pa, items: pa.items.filter((it) => it.solicitudItem.id !== siId) } : { ...pa, estado: 'NO_ATENDIDA' }) })) }));
           borrarBorrador(id);
-          toast('No quedó nada por recoger: la parada queda como no atendida y el coordinador recibe el aviso.');
+          toast(queda ? 'No quedó nada por recoger en este manifiesto: se anula y el coordinador recibe el aviso. Siga con lo demás de la parada.'
+            : 'No quedó nada por recoger: la parada queda como no atendida y el coordinador recibe el aviso.');
           go('campo');
         } else {
           set({ quitados: { ...b.quitados, [n.itemId]: `${n.residuo}: ${texto}` } });
@@ -483,7 +520,8 @@ export function CampoManifiestoServidor() {
       } else {
         if (!parada) { toast('No se encontró la parada en el teléfono: actualice la ruta.', 'warn'); return; }
         await encolar({ grupo, descripcion: `Parada no atendida · ${s?.nombre ?? ''}`, metodo: 'POST', ruta: `/campo/paradas/${parada.id}/no-atendida`, cuerpo });
-        cambiar((x) => ({ ...x, manifiestos: { ...x.manifiestos, [id]: { ...x.manifiestos[id], estado: 'ANULADO' } },
+        const anular = new Set([id, ...mfsDeParada(p, parada).filter((o) => o.estado === 'PENDIENTE' && !p.enCola[o.id]).map((o) => o.id)]);
+        cambiar((x) => ({ ...x, manifiestos: Object.fromEntries(Object.entries(x.manifiestos).map(([k, v]) => [k, anular.has(k) ? { ...v, estado: 'ANULADO' as const } : v])),
           rutas: x.rutas.map((r) => ({ ...r, paradas: r.paradas.map((pa) => pa.id === parada.id ? { ...pa, estado: 'NO_ATENDIDA' } : pa) })) }));
         borrarBorrador(id);
         toast('Parada marcada como no atendida. El coordinador recibe el aviso.');
